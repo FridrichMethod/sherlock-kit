@@ -33,7 +33,7 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 
 | Phase | Implemented | Verified | Published |
 |---|---|---|---|
-| 1 foundation | pending | pending | pending |
+| 1 foundation | e7cd5d9 merged | 15 offline/install tests and independent review; merged retest pending | pending |
 | 2 delivery | pending | pending (both actual clients required) | pending |
 | 3 rasraser CPU pilot | pending | pending | local commits only |
 | 4 shared orchestration | pending | pending | pending |
@@ -44,3 +44,11 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 Build and review foundation and dotfiles integration in isolated worktrees; publish
 accepted foundation, then continue pilot, extraction and guard acceptance.
 Record precise live CPU budget before dispatch. No GPU budget is authorized.
+
+## Foundation review
+
+Independent Astra review accepted foundation core. Fixed archive/sdist provenance
+when extraction occurs inside an unrelated Git repository; packaging must identify
+the source root rather than inherit the outer checkout revision.
+Candidate protocols have 15 submission and 11 real-rsync tests, but Phase 4 remains
+pending pilot adoption and further review. They are not in the foundation release.

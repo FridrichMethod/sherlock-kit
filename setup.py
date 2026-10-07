@@ -18,6 +18,9 @@ def release_identity():
     if archived_revision is not None and not re.fullmatch(r"[0-9a-f]{40}", archived_revision):
         raise RuntimeError("SHERLOCK_KIT_BUILD_REVISION must be an exact Git revision")
     try:
+        top = subprocess.check_output(["git", "rev-parse", "--show-toplevel"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL, timeout=10).strip()
+        if Path(top).resolve() != ROOT:
+            raise OSError("archive/sdist is nested inside an unrelated Git repository")
         revision = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL, timeout=10
         ).strip()
