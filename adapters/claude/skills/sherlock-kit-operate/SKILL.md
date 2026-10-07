@@ -1,0 +1,26 @@
+---
+name: sherlock-kit-operate
+description: Operate an explicitly authorized Sherlock workload through the installed sherlock-kit policy, diagnostics, and identity-bound orchestration commands.
+---
+
+Use the existing frozen `shk` installation. Read `shk policy`, then inspect
+`shk policy --identity` and local `shk doctor` against the advertised pin.
+Report a missing executable or identity mismatch before a new managed mutation.
+Only request `shk doctor --remote` when remote diagnosis is needed.
+
+For the user's authorized task, inspect the installed command help, then call
+`shk submit --help`, `shk reconcile --help`, or `shk fetch --help` and supply the
+consumer's explicit contract/state. Commands available in the installed release
+define their arguments; do not invent flags or replace them with raw SSH wrappers.
+If an orchestration command is unavailable, report that capability gate and continue
+independent diagnosis. This skill does not authorize a job, budget increase, access
+grant, cancellation, or a historical campaign restart.
+
+Preserve unresolved mutation evidence and reservations; reconcile the recorded
+attempt identity before another submission. A fetched artifact requires the
+consumer's scientific validator. Report revision, attempt, and validation outcome.
+Keep durable state outside worktrees and scratch. Do not implement a scheduler,
+transfer engine, retry loop, or ledger in this adapter.
+
+Global policy projections deliver instructions separately. This plugin has no
+hooks; the owner's opt-in dotfiles hook registration is the single hook owner.
