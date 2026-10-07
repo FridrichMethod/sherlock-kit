@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shlex
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -82,6 +83,27 @@ class FoundationTests(unittest.TestCase):
         result = kit.run_remote(self.config, ["mutating-program"], mutation=True)
         self.assertEqual(result.status, "unknown")
         self.assertTrue(result.dispatched)
+
+    def test_two_consumers_share_one_authentication_attempt(self):
+        os.environ["FAKE_SSH_MODE"] = "auth"
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(ROOT / "src")
+        script = (
+            "import json,sys; import sherlock_kit as k; "
+            "c=k.TransportConfig(ssh_binary=sys.argv[1],backoff_file=sys.argv[2]); "
+            "print(json.dumps(k.run_remote(c,['hostname']).__dict__))"
+        )
+        processes = [subprocess.Popen([sys.executable, "-c", script, str(self.fake), str(self.config.backoff_file)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+                     for _ in range(2)]
+        results = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, stderr)
+            results.append(json.loads(stdout))
+        self.assertEqual([result["status"] for result in results], ["auth_required", "auth_required"])
+        self.assertEqual(sum(result["dispatched"] for result in results), 1)
+        self.assertEqual(len(self.calls()), 1)
 
     def test_deadline_missing_executable_and_malformed_state(self):
         os.environ["FAKE_SSH_MODE"] = "timeout"

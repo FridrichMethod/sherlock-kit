@@ -19,7 +19,7 @@ def release_identity():
         raise RuntimeError("SHERLOCK_KIT_BUILD_REVISION must be an exact Git revision")
     try:
         revision = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, timeout=10
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL, timeout=10
         ).strip()
         dirty = subprocess.check_output(
             ["git", "status", "--porcelain", "--untracked-files=no"],
