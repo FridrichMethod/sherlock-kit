@@ -33,7 +33,7 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 
 | Phase | Implemented | Verified | Published |
 |---|---|---|---|
-| 1 foundation | e7cd5d9 merged | 15 offline/install tests and independent review; merged retest pending | pending |
+| 1 foundation | e7cd5d9 merged; provenance fix 446549f | 15 offline/install tests and independent review; merged checks PASS | publishing |
 | 2 delivery | pending | pending (both actual clients required) | pending |
 | 3 rasraser CPU pilot | pending | pending | local commits only |
 | 4 shared orchestration | pending | pending | pending |
@@ -52,3 +52,8 @@ when extraction occurs inside an unrelated Git repository; packaging must identi
 the source root rather than inherit the outer checkout revision.
 Candidate protocols have 15 submission and 11 real-rsync tests, but Phase 4 remains
 pending pilot adoption and further review. They are not in the foundation release.
+
+Foundation combined validation: 14 foundation tests + 1 verified archive/wheel/isolated
+venv installation PASS on main 446549f. No test required network or GPU.
+Dotfiles glue a5536d6 is isolated; 10 integration and 63 config-sync tests PASS.
+Its pre-commit gate awaits the published toolkit pin; all other hooks passed.
