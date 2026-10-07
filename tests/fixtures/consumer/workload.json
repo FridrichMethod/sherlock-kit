@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "project": "synthetic-consumer",
+  "source": "immutable synthetic fixture",
+  "runtime": "Python 3.11+ standard library",
+  "resources": {"kind": "cpu", "cpus": 1, "gpus": 0, "walltime_seconds": 900},
+  "storage": {"durable_root_env": "GROUP_HOME", "working_root_env": "SCRATCH"},
+  "inputs": ["synthetic integers"],
+  "outputs": ["identity-bound sum receipt"],
+  "budget": {"mode": "capped", "cpu_seconds": 900, "concurrency": 1},
+  "validator": "exact integer arithmetic with bound producer identity",
+  "borrowed_access": {"enabled": false},
+  "live_authorization": false
+}

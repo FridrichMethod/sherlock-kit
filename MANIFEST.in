@@ -1,0 +1,3 @@
+include SHERLOCK.md
+include src/sherlock_kit_data/SHERLOCK.md
+include src/sherlock_kit_data/build_identity.json
