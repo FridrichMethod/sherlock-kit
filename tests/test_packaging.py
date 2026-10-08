@@ -56,7 +56,7 @@ class FrozenInstallTests(unittest.TestCase):
             packaged = subprocess.check_output([str(python), "-c", "import importlib.resources as r; import sherlock_orchestration, sherlock_artifacts, sherlock_commands, sherlock_guard; print((r.files('sherlock_kit_data') / 'adapters/claude/.claude-plugin/plugin.json').read_text()); print((r.files('sherlock_kit_data') / 'adapters/codex/skills/sherlock-kit-operate/SKILL.md').is_file())"], cwd=temp, env=env, text=True)
             self.assertIn('"name": "sherlock-kit"', packaged)
             self.assertIn('True', packaged)
-            guard = subprocess.run([str(installed / "bin/shk"), "guard", "--client", "claude"], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "watch -n 1 ssh sherlock-plain squeue"}}), cwd=temp, env=env, capture_output=True, text=True, check=True, timeout=10)
+            guard = subprocess.run([str(installed / "bin/shk"), "guard", "--client", "claude"], input=json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "watch -n 1 ssh sherlock-plain squeue"}}), cwd=temp, env=env, capture_output=True, text=True, check=True, timeout=10)
             self.assertEqual(json.loads(guard.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
             pin = temp / "pin.json"
             pin.write_text(json.dumps(expected))
