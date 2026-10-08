@@ -1,5 +1,7 @@
 # sherlock-kit
 
+[![CI](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml)
+
 Shared Sherlock operational policy, bounded OpenSSH transport, read-only
 diagnostics, typed CPU submission/reconciliation and verified artifact transfer.
 Python 3.11+, POSIX for orchestration, OpenSSH, and rsync for transfers.
