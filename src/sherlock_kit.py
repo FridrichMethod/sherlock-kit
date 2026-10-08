@@ -325,6 +325,14 @@ def doctor(config=None, *, remote=False, advertised_identity=None,
 
 
 def main(argv=None):
+    import sys
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in {"submit", "status", "reconcile", "fetch"}:
+        from sherlock_commands import main as operations
+        return operations(arguments)
+    if arguments and arguments[0] == "guard":
+        from sherlock_guard import main as guard
+        return guard(arguments[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="operation", required=True)
     policy = sub.add_parser("policy", help="Print canonical policy or installed provenance")

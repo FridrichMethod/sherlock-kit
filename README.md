@@ -1,7 +1,8 @@
 # sherlock-kit
 
-A shared Sherlock operational policy, a small OpenSSH helper, and read-only
-diagnostics. Requires Python 3.11+ and system OpenSSH. Read [SHERLOCK.md](SHERLOCK.md)
+A shared Sherlock operational policy, bounded OpenSSH transport, diagnostics,
+typed CPU submission/reconciliation and manifest-bound artifact transfer.
+Requires Python 3.11+, system OpenSSH and rsync for transfers. Read [SHERLOCK.md](SHERLOCK.md)
 before operating Sherlock; it distinguishes site requirements from toolkit choices.
 
 Install an exact reviewed 40-character Git revision, without `--editable`, into an
@@ -66,5 +67,9 @@ Development: `PYTHONPATH=src python3 -m sherlock_kit policy --identity` clearly
 reports `install_mode=development`. Run `python3 -m unittest discover -s tests -v`.
 See [consumer fixture](tests/fixtures/consumer/README.md) for a synthetic first-day
 contract. No live job, GPU use, or historical campaign operation is part of these
-tests. This foundation has no submit/fetch commands; orchestration requires its
-separate accepted consumer protocol.
+tests. The real `submit`, `status`/`reconcile` and `fetch` commands require an
+explicit consumer contract; see [orchestration](docs/orchestration.md). Their live
+rasraser acceptance remains pending; implementation tests are not a live pilot.
+Optional agent adapters and the narrow guard are described in
+[guard](docs/guard.md). Neither raw SSH nor arbitrary shell commands are certified
+by the toolkit.

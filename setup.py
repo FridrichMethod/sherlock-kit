@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import shutil
 import re
 
 from setuptools import setup
@@ -50,6 +51,8 @@ def release_identity():
 def write_resources(destination):
     destination.mkdir(parents=True, exist_ok=True)
     identity = release_identity()
+    if (ROOT / "adapters").is_dir():
+        shutil.copytree(ROOT / "adapters", destination / "adapters", dirs_exist_ok=True)
     (destination / "SHERLOCK.md").write_bytes((ROOT / "SHERLOCK.md").read_bytes())
     (destination / "build_identity.json").write_text(json.dumps(identity, sort_keys=True) + "\n")
 

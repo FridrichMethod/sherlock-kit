@@ -27,6 +27,9 @@ class FrozenInstallTests(unittest.TestCase):
             archive = temp / "source.zip"
             subprocess.run(["git", "archive", "--format=zip", f"--output={archive}", revision], cwd=ROOT, check=True)
             source = temp / "source"
+            # Archive metadata must not accidentally inherit an unrelated outer HEAD.
+            subprocess.run(["git", "init", "--quiet", str(temp)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(temp), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "--quiet", "-m", "unrelated outer checkout"], check=True, capture_output=True)
             with zipfile.ZipFile(archive) as bundle:
                 bundle.extractall(source)
             env = os.environ.copy()
@@ -50,6 +53,11 @@ class FrozenInstallTests(unittest.TestCase):
             self.assertEqual(result["identity"], expected)
             self.assertEqual(result["policy"].encode(), policy)
             self.assertIn(expected["policy_sha256"], result["projection"])
+            packaged = subprocess.check_output([str(python), "-c", "import importlib.resources as r; import sherlock_orchestration, sherlock_artifacts, sherlock_commands, sherlock_guard; print((r.files('sherlock_kit_data') / 'adapters/claude/.claude-plugin/plugin.json').read_text()); print((r.files('sherlock_kit_data') / 'adapters/codex/skills/sherlock-kit-operate/SKILL.md').is_file())"], cwd=temp, env=env, text=True)
+            self.assertIn('"name": "sherlock-kit"', packaged)
+            self.assertIn('True', packaged)
+            guard = subprocess.run([str(installed / "bin/shk"), "guard", "--client", "claude"], input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "watch -n 1 ssh sherlock-plain squeue"}}), cwd=temp, env=env, capture_output=True, text=True, check=True, timeout=10)
+            self.assertEqual(json.loads(guard.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
             pin = temp / "pin.json"
             pin.write_text(json.dumps(expected))
             instructions = temp / "instructions.md"
