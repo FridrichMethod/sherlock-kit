@@ -86,6 +86,7 @@ class AttemptSpec:
     validator_digest: str | None = None
     validator_function: str | None = None
     toolkit_revision: str | None = None
+    remote_run_directory: str | None = None
 
     def checked(self):
         for name in ("project", "campaign", "task", "cluster", "principal", "resource_scope"):
@@ -104,6 +105,10 @@ class AttemptSpec:
                 raise SafetyError("invalid workload validator identity")
         if self.toolkit_revision is not None and not re.fullmatch(r"[0-9a-f]{40}", self.toolkit_revision):
             raise SafetyError("toolkit revision must be immutable")
+        if self.remote_run_directory is not None:
+            path = Path(self.remote_run_directory)
+            if not path.is_absolute() or '..' in path.parts or any(c in self.remote_run_directory for c in '\x00\n\r%'):
+                raise SafetyError("resolved isolated remote run directory required")
         return resources_checked(self.resources)
 
 
@@ -411,6 +416,9 @@ def submission_argv(attempt, spec):
                "--partition=" + r["partition"], "--cpus-per-task=" + str(r["cpus"]),
                "--no-requeue", "--ntasks=" + str(r["tasks"]), "--mem=" + str(r["memory_mb"]) + "M",
                "--time=" + str(r["walltime_seconds"] // 60)]
+    run_directory = spec.get("remote_run_directory")
+    if run_directory:
+        options += ["--chdir=" + run_directory, "--output=" + run_directory + "/slurm-%j.out", "--error=" + run_directory + "/slurm-%j.err"]
     if r["gpus"]:
         options += ["-G", str(r["gpus"])]
     for field in ("constraint", "signal"):
@@ -419,8 +427,10 @@ def submission_argv(attempt, spec):
     # The tiny remote runner is our independently authored stdlib protocol.
     # All input parameters are argv; bytes passed to sbatch are the hashed snapshot.
     runner = """import hashlib,json,os,pathlib,re,subprocess,sys
-attempt,path,expected,options=sys.argv[1:]
+attempt,path,expected,options,run_directory=sys.argv[1:]
 try:
+ if run_directory and (pathlib.Path(run_directory).resolve(strict=True)!=pathlib.Path(run_directory) or not pathlib.Path(run_directory).is_dir()):
+  raise OSError('isolated run directory invalid')
  payload=pathlib.Path(path).read_bytes()
  if hashlib.sha256(payload).hexdigest()!=expected or re.search(rb'^\\s*#SBATCH',payload,re.M):
   print('SHK_NOT_SENT:'+attempt+':digest_mismatch');sys.exit(0)
@@ -435,7 +445,7 @@ sys.stderr.buffer.write(result.stderr)
 if result.returncode==0: sys.stdout.buffer.write(result.stdout)
 else: print('SHK_UNKNOWN:'+attempt+':'+str(result.returncode))
 """
-    return ["python3", "-c", runner, attempt, spec["remote_script"], spec["script_digest"], canonical(options)]
+    return ["python3", "-c", runner, attempt, spec["remote_script"], spec["script_digest"], canonical(options), run_directory or ""]
 
 
 def scheduler_cost(rows):

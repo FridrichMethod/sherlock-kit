@@ -216,7 +216,7 @@ class SubmissionTests(unittest.TestCase):
     def test_site_resources_and_constraint_signal_grammar(self):
         r = resources_checked({**spec().resources, 'constraint': 'CPU_GEN1|CPU_GEN2', 'signal': 'B:USR1@60'})
         argv = submission_argv('1' * 32, {**dataclasses.asdict(spec()), 'resources': r})
-        self.assertIn('--constraint=CPU_GEN1|CPU_GEN2', argv[-1])
+        self.assertIn('--constraint=CPU_GEN1|CPU_GEN2', argv[-2])
         for wrong in ({'account': 'group'}, {'exclude': 'node'}, {'cpus': True}, {'constraint': 'cpu; false'}, {'signal': 'B:USR1@60\n'}):
             with self.subTest(wrong=wrong), self.assertRaises(SafetyError):
                 resources_checked({**spec().resources, **wrong})

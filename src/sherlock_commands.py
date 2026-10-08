@@ -268,6 +268,8 @@ def main(argv=None):
             if not args.apply:
                 print(json.dumps({'operation': 'preview', 'spec_digest': digest(spec.__dict__), 'resources': spec.checked()}, indent=2))
                 return 0
+            if not spec.remote_run_directory:
+                raise SafetyError('production submission requires an explicit isolated remote_run_directory')
             identity = installed_for_admission(spec)
             spec = replace(spec, toolkit_revision=identity['code_revision'])
             # Discover authenticated principal without holding the admission lock.

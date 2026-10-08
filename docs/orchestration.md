@@ -48,6 +48,10 @@ validator is trusted workload code, not a sandbox. It receives a bundle director
 and must return exactly `True`; its verified source snapshot executes without
 loading or writing a `.pyc`. Imported dependencies belong to the consumer's frozen
 runtime contract.
+Production submission also requires `remote_run_directory`: an existing canonical
+directory in the consumer's authorized new namespace. Slurm working directory and
+job-ID-named stdout/stderr are explicitly placed there, separately from immutable
+source. The remote runner validates it before calling sbatch.
 
 ```console
 shk submit --config private.json --spec attempt.json

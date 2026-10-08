@@ -63,8 +63,15 @@ class CommandBoundaryTests(unittest.TestCase):
         sbatch.write_text('#!/bin/sh\ncat > "$SHK_PAYLOAD"\nprintf 1 >> "$SHK_COUNT"\nif test -n "${SBATCH_GRES-}"; then exit 13; fi\nprintf "%s\\n" "$SHK_ACK"\nexit "$SHK_RC"\n')
         sbatch.chmod(0o700)
         frozen = asdict(spec(remote_script=str(script), script_digest=hashlib.sha256(script.read_bytes()).hexdigest()))
+        run_directory = self.root / 'new run'
+        run_directory.mkdir()
+        frozen['remote_run_directory'] = str(run_directory)
         env = {**os.environ, 'PATH': str(self.root) + os.pathsep + os.environ['PATH'], 'SHK_COUNT': str(counter), 'SHK_PAYLOAD': str(self.root / 'received'), 'SHK_ACK': '123', 'SHK_RC': '0', 'SBATCH_GRES': 'gpu:99'}
         command = submission_argv(self.attempt['id'], frozen)
+        options = json.loads(command[-2])
+        self.assertIn('--chdir=' + str(run_directory), options)
+        self.assertIn('--output=' + str(run_directory) + '/slurm-%j.out', options)
+        self.assertIn('--error=' + str(run_directory) + '/slurm-%j.err', options)
         result = subprocess.run(command, env=env, capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), '123')
