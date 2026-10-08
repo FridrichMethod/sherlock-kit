@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import hashlib
 from importlib import resources
+from importlib.util import find_spec
 import json
 import math
 import os
@@ -272,6 +273,21 @@ def doctor(config=None, *, remote=False, advertised_identity=None,
               "advertised_identity": "unverified", "instructions": {},
               "control": {"status": "unverified"},
               "data": {"status": "unverified", "remote_capability": "unverified"}}
+    report["agent_integration"] = {
+        "guard_runtime": "available" if find_spec("sherlock_guard") else "unavailable",
+        "claude_registration": "unverified", "codex_registration": "unverified",
+        "codex_current_hash_trust": "unverified", "blocking_smoke": "unverified",
+        "enforcement": "unverified",
+    }
+    # Disk presence does not establish client registration, current trust or execution.
+    if identity["install_mode"] == "frozen":
+        bundle = resources.files("sherlock_kit_data") / "adapters"
+    else:
+        bundle = Path(__file__).resolve().parents[1] / "adapters"
+    report["agent_integration"]["adapter_bundle"] = "available" if all(
+        (bundle / path).is_file() for path in (
+            "claude/.claude-plugin/plugin.json", "claude/skills/sherlock-kit-operate/SKILL.md",
+            "codex/skills/sherlock-kit-operate/SKILL.md")) else "unavailable"
     advertised_identity = advertised_identity or os.environ.get("SHERLOCK_KIT_PIN")
     if advertised_identity:
         try:

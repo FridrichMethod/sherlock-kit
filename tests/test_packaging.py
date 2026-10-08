@@ -68,6 +68,9 @@ class FrozenInstallTests(unittest.TestCase):
             report = json.loads(doctor.stdout)
             self.assertEqual(report["advertised_identity"], "complete")
             self.assertEqual(report["instructions"], {"claude": "complete", "codex": "complete"})
+            self.assertEqual(report["agent_integration"]["guard_runtime"], "available")
+            self.assertEqual(report["agent_integration"]["adapter_bundle"], "available")
+            self.assertEqual(report["agent_integration"]["enforcement"], "unverified")
 
 
 if __name__ == "__main__":

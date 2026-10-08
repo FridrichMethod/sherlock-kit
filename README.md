@@ -39,6 +39,10 @@ Doctor checks advertised provenance with `--advertised-identity FILE` (or
 `code_revision`, and `policy_sha256`; additional installer metadata is permitted.
 Unverified instruction loading is reported honestly: matching text is not proof
 that either agent actually loaded it.
+Doctor also reports guard runtime and adapter bundle availability. Registration,
+current Codex hash trust and blocking remain `unverified`: local disk presence
+cannot prove an active client's state. Use the actual client inspection and smoke
+tests documented in the opt-in integration before claiming enforcement.
 
 ```python
 from sherlock_kit import TransportConfig, run_remote
