@@ -42,13 +42,14 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 ## Next actions
 
 First Job 46946104 resolved FAILED, with 256 allocated CPU-seconds and reservation
-released. Prepare a reviewed manual child within the recorded two-attempt ceiling:
-increase bounded stress case/log ceilings without lowering the 600-second gate, and
-carry the first job's completed frozen-valid audit metadata rather than reread science
-source. Keep the first immutable release and all failure evidence. Finish Codex failure-mode
-observations and merge/push dotfiles final delivery only after concurrent canonical
-write ownership is resolved. Independent dotfiles final branch has commit 1703f0e;
-canonical has unrelated user commit e092f49 and fcitx5 modifications, all preserved.
+released. Reviewed manual child Job **46948346** is submitted, attempt
+**9a801032ba354c27985b00801d5d5e4c**, within the recorded two-attempt ceiling.
+Wait for terminal identity and fetch; retain both immutable releases and failure
+evidence. All Codex failure-mode observations are complete. Merge/push dotfiles
+final delivery only after concurrent canonical write ownership is resolved.
+Independent final branch has commit 1703f0e. Another Claude process is confirmed
+in canonical dotfiles, with ongoing unrelated README/fcitx5 modifications; preserve
+them and user commit e092f49. No two agents may write that checkout concurrently.
 Do not duplicate the pending/running job, rerun science, restart a historical controller,
 reset a ledger, or infer a borrowed grant. Keep the old frozen runtime for this attempt.
 
@@ -168,6 +169,28 @@ The composite validator correctly refused it. The separate audit completed once;
 no final bundle was promoted. A manual child will use a fresh immutable release/run
 namespace, preserve parent lineage and reuse only the four completed audit metadata
 files after exact frozen-validator and SHA256 checks. It will not rerun the audit.
+
+The manual child was actually submitted once at 2026-10-08 01:01 UTC after Astra
+review of the final package, 24-file DTN upload/control SHA verification and sealing,
+and real shared CLI preview. Child **9a801032ba354c27985b00801d5d5e4c** links parent
+**579e7b497b4f494dbf40d02512b414cd**, Job **46948346**. It retains the 3f02864 frozen
+wheel/runtime and audit plan. Public fixture ff223902 supplies the increased finite
+40,000-case/64-MiB ceilings; rasraser validator 488a401 preserves the 600-second
+minimum, generation_deadline, exact inventory/identity/chain/count checks. Combined
+merged toolkit validation passed 68/68, no skips (14.718s).
+
+The first audit's exact four metadata files passed the frozen inner validator on
+Sherlock: complete 265 files / 1,706,395,112 bytes, report SHA256
+`f1e4cfa66a23b7ff951383c33af710f87e927137a83bf1e4ea85bbb1d03685d7`.
+Child code reads only those metadata, checks their frozen size/SHA before and after
+copy, and explicitly records audit_reused=true, audit_source_reread=false and parent
+identity. It has no audit run call or scientific source root. A prepared manifest is
+durable before producer promotion; actual total bundle must pass the 64-MiB ceiling.
+No third attempt is automatic or covered by this recorded two-attempt ceiling.
+
+Child script SHA256 `659b1a040d29c96f3b4445807fda2dbe78e042fdae1ad2314d01c0b99ecdd596`,
+validator `b56918eb4e505a420eedf919f1b48f0168746f6efc534ac6afd7d7a32465f5d3`, fixture
+`88c1953c1c83adc0cb443e4fb2c799da521ea5815d65d909e172c1212121b25e`.
 
 Frozen identities: toolkit `3f02864eec4e76a933b84adac4570dc3b80b9a30`, adapter SHA256
 `9bd8e459fb1759bfafc60fb2b4f2a3179480b278c343c4417ad642a19db3edd1`, input
