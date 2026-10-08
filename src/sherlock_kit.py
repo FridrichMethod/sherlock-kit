@@ -349,7 +349,10 @@ def main(argv=None):
     if arguments and arguments[0] == "guard":
         from sherlock_guard import main as guard
         return guard(arguments[1:])
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Consumer commands: submit, status, reconcile, fetch. "
+               "Opt-in client adapter: guard. Run shk COMMAND --help for its contract.")
     sub = parser.add_subparsers(dest="operation", required=True)
     policy = sub.add_parser("policy", help="Print canonical policy or installed provenance")
     mode = policy.add_mutually_exclusive_group()
