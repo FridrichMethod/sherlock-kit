@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +8,13 @@ version = "0.1.0"
 description = "Shared Sherlock policy, bounded transport and typed CPU operations"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[project.urls]
+Repository = "https://github.com/FridrichMethod/sherlock-kit"
+Documentation = "https://github.com/FridrichMethod/sherlock-kit/blob/main/README.md"
+Issues = "https://github.com/FridrichMethod/sherlock-kit/issues"
 
 [project.scripts]
 shk = "sherlock_kit:main"

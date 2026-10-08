@@ -6,7 +6,7 @@ its source/runtime/input identities, immutable script, resources, output manifes
 and scientific validator. The rasraser adapter is a separate local research commit;
 no research source or data is distributed here. The live CPU provenance pilot passed
 shared submission, reconciliation, DTN fetch and offline recovery; exact resources,
-identities and limitations are recorded in [implementation status](implementation-status.md).
+identities and limitations are recorded in [acceptance evidence](validation/acceptance.md).
 
 The authoritative controller and artifact promotion currently require POSIX
 (`fcntl`, Unix ownership and no-follow filesystem checks). Windows instruction,
@@ -19,6 +19,11 @@ private 0700 durable directory shared by all consumers on one authoritative
 workstation, outside worktrees and scratch. SQLite transactions coordinate admission
 and dispatch; no database lock is held across SSH. A different workstation/schema
 is refused. This is not a distributed coordinator.
+
+Managed CLI transport uses `state_root/auth-backoff.json` when no explicit
+`transport.backoff_file` or `SHERLOCK_KIT_STATE_ROOT` override is supplied. Keep
+private configuration, state and research results outside this checkout. See
+[state lifecycle](maintenance.md) before moving or retiring a controller.
 
 ```json
 {

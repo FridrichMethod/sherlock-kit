@@ -1,7 +1,7 @@
 # sherlock-kit development
 
-Read docs/plans/0001-sherlock-kit-foundation.md and docs/implementation-status.md.
-The lead owns main, coordination documents, integration and publication. Each writer
+Read README.md, CONTRIBUTING.md and the relevant docs/ guide.
+The lead owns main, integration and publication. Each writer
 uses a separate branch and worktree; reviewers are read-only. Preserve user changes.
 Use Python 3.11+ and standard-library mechanisms where sufficient. Run
 `python3 -m unittest discover -s tests -v` and isolated installation checks.
