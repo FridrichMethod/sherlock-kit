@@ -1,6 +1,7 @@
 # Optional guard and thin adapters
 
-The guard is provisional until an adopter and both actual clients pass acceptance.
+Both actual clients passed scoped registration, trust, deny, benign-command and
+namespaced skill checks; production registration remains an explicit opt-in.
 `shk guard --client claude|codex` reads a bounded JSON event from stdin and returns
 exit 0. A proven denial emits `hookSpecificOutput` with `hookEventName=PreToolUse`,
 `permissionDecision=deny`, and a useful reason. Other commands produce no decision.
@@ -71,9 +72,18 @@ and managed. Discovery alone does not establish active enforcement.
 Codex normalizes unified exec hooks to `Bash` and `tool_input.command`; the adapter
 also accepts direct fixture input `exec_command`/`cmd`. Later `write_stdin` does
 not invoke PreToolUse again. Never emit `ask`: current Codex rejects it and proceeds.
-Missing, skipped, malformed, failed, or timed-out hooks must remain inactive in
-the acceptance report; a nonzero exit is not a portable fail-closed strategy.
+Do not infer a protective policy decision from missing, skipped, malformed,
+failed, or timed-out handlers; a nonzero exit is not a portable fail-closed strategy.
 Malformed/oversized guard input exits 0 with diagnostic stderr and no decision.
+
+Actual Claude missing-command, malformed-output and timeout probes continued
+execution. Actual Codex untrusted and modified definitions were skipped; malformed
+output and timeout also continued execution. A trusted Python handler whose file
+was missing exited 2 and **blocked** the Codex tool. This is an observed error
+behavior, not successful guard classification. See the structured
+[Codex receipts](validation/codex-hook-failure-modes.md). Definition hash trust
+does not attest the referenced executable's contents. Preserve the frozen package
+identity and verify the handler separately.
 
 Before activation, prove installed revision and projection consistency, effective
 registration and current trust, a negative blocking smoke test using a fake SSH

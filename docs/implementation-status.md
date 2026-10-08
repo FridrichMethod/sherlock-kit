@@ -37,7 +37,7 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 | 2 delivery | dotfiles a5536d6 / 298f14a, canonical aab401c | actual Codex and Claude context probes; merged checks PASS; accepted | toolkit public; dotfiles push follows integration |
 | 3 rasraser CPU pilot | local b0d22bc / ecd6be2 / 97b00e2 / 8e39a79 | real sealed audit, SIGTERM/resume and local shared CLI; first live job FAILED duration gate | local commits only |
 | 4 shared orchestration | 1d7f880 / 6890a19 / fa85201 / 3f02864 | 68/68 merged tests, frozen wheel/install and Astra boundary review PASS; live fetch gate pending | public main 3f02864 |
-| 5 opt-in guard/adapters | toolkit 7078fea / e4cd633; dotfiles 000798f merged 32e6379 | both actual clients trusted deny/benign and namespaced skill calls PASS; additional Codex failure-mode checks underway | public toolkit; scoped client hooks only, production activation opt-in |
+| 5 opt-in guard/adapters | toolkit 7078fea / e4cd633 / 4dde513; dotfiles 000798f merged 32e6379 | both actual clients trusted deny/benign, namespaced skills and actual failure-mode observations PASS | public toolkit; final dotfiles publication pending, production activation opt-in |
 
 ## Next actions
 
@@ -193,6 +193,13 @@ was loaded, and no trust database was edited or trust bypass flag used.
   from hook denial. Actual skills/list found the enabled installed user skill;
   GPT-6.1 Sol high loaded its file and invoked canonical shk policy/doctor at 3f02864.
   Existing large-catalog traversal/context-budget warnings were preserved and recorded.
+  Five subsequent real failure probes passed their observation checks: untrusted and
+  modified definitions were skipped; malformed output and timeout permitted tools;
+  a trusted missing Python handler returned exit 2 and blocked its tool. No blanket
+  failure-mode claim is made. Safe structured receipts are in
+  `docs/validation/codex-hook-failure-modes.{md,json}`; raw private rollouts are not
+  published. Automatic review rejected searching a raw rollout, then accepted exact
+  synthetic-thread structured tool diagnostics; no unresolved approval blocker remains.
 - Adapters were first installed/tested in temporary targets, then enabled only by
   the lead from canonical dotfiles; live symlinks point to canonical sources. The
   shared config merger preserves host hooks and is idempotent: **67 config-sync and
