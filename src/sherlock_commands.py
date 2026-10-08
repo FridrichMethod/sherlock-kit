@@ -258,7 +258,10 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         config = private_config(args.config)
-        transport = TransportConfig(**config['transport'])
+        transport_options = {**config['transport']}
+        if transport_options.get('backoff_file') is None and 'SHERLOCK_KIT_STATE_ROOT' not in os.environ:
+            transport_options['backoff_file'] = str(Path(config['state_root']) / 'auth-backoff.json')
+        transport = TransportConfig(**transport_options)
         coordinator = Coordinator(Path(config['state_root']))
         if args.operation == 'submit':
             spec = AttemptSpec(**json.loads(Path(args.spec).read_text()))

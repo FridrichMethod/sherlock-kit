@@ -214,6 +214,71 @@ class CommandBoundaryTests(unittest.TestCase):
             main(arguments)
         self.assertFalse((self.root / '.fetch.shk-lock').exists())
 
+    def test_managed_cli_backoff_priority_and_no_home_writes(self):
+        source_root = Path(__file__).resolve().parents[1]
+        fake = self.root / 'fake-ssh'
+        fake.write_bytes((source_root / 'tests/fixtures/consumer/fake_ssh.py').read_bytes())
+        fake.chmod(0o700)
+        record = self.root / 'ssh-calls.jsonl'
+        for name in ('managed', 'null', 'environment', 'explicit'):
+            with self.subTest(priority=name):
+                case = self.root / name
+                case.mkdir(mode=0o700)
+                home = case / 'home'
+                home.mkdir(mode=0o700)
+                coordinator = Coordinator(case / 'state')
+                attempt = coordinator.admit(spec(task=name), LIMITS)
+                transport = {'ssh_binary': str(fake)}
+                env = {**os.environ, 'HOME': str(home), 'XDG_STATE_HOME': str(case / 'xdg'),
+                       'FAKE_SSH_MODE': 'auth', 'FAKE_SSH_RECORD': str(record)}
+                env.pop('SHERLOCK_KIT_STATE_ROOT', None)
+                expected = coordinator.root / 'auth-backoff.json'
+                if name == 'null':
+                    transport['backoff_file'] = None
+                elif name == 'environment':
+                    env['SHERLOCK_KIT_STATE_ROOT'] = str(case / 'override')
+                    expected = case / 'override/auth-backoff.json'
+                elif name == 'explicit':
+                    selected = case / 'explicit'
+                    selected.mkdir(mode=0o700)
+                    expected = selected / 'selected.json'
+                    transport['backoff_file'] = str(expected)
+                    # A lower-priority invalid override must not defeat an explicit file.
+                    env['SHERLOCK_KIT_STATE_ROOT'] = 'invalid-relative-root'
+                config = case / 'config.json'
+                config.write_text(json.dumps(dict(schema_version=1, state_root=str(coordinator.root), principal='fixture', cluster='sherlock', limits=LIMITS, transport=transport)))
+                config.chmod(0o600)
+                result = subprocess.run([sys.executable, str(source_root / 'src/sherlock_kit.py'), 'status', '--config', str(config), '--attempt', attempt['id']],
+                                        env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['transport'], 'auth_required')
+                self.assertTrue(expected.is_file())
+                self.assertEqual(expected.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(list(home.iterdir()), [])
+                self.assertFalse((case / 'xdg').exists())
+                if name in {'environment', 'explicit'}:
+                    self.assertFalse((coordinator.root / 'auth-backoff.json').exists())
+        self.assertEqual(len(record.read_text().splitlines()), 4)
+
+    def test_invalid_env_override_rejects_cli_before_coordinator_creation(self):
+        source_root = Path(__file__).resolve().parents[1]
+        home = self.root / 'empty-home'
+        home.mkdir(mode=0o700)
+        state = self.root / 'uncreated-state'
+        config = self.root / 'private.json'
+        config.write_text(json.dumps(dict(schema_version=1, state_root=str(state), principal='fixture', cluster='sherlock', limits=LIMITS, transport={})))
+        config.chmod(0o600)
+        for override in ('', 'relative-root'):
+            with self.subTest(override=override):
+                env = {**os.environ, 'HOME': str(home), 'XDG_STATE_HOME': str(self.root / 'uncreated-xdg'), 'SHERLOCK_KIT_STATE_ROOT': override}
+                result = subprocess.run([sys.executable, str(source_root / 'src/sherlock_kit.py'), 'status', '--local', '--config', str(config), '--attempt', self.attempt['id']],
+                                        env=env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn('SHERLOCK_KIT_STATE_ROOT', result.stderr)
+                self.assertFalse(state.exists())
+                self.assertFalse((self.root / 'uncreated-xdg').exists())
+                self.assertEqual(list(home.iterdir()), [])
+
 
 if __name__ == '__main__':
     unittest.main()

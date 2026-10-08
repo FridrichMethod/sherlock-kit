@@ -162,6 +162,109 @@ class FoundationTests(unittest.TestCase):
         self.assertEqual(len(self.calls()), calls)
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
 
+    def state_environment(self):
+        home = self.root / "temporary-home"
+        home.mkdir(mode=0o700, exist_ok=True)
+        env = {**os.environ, "HOME": str(home), "XDG_STATE_HOME": str(self.root / "xdg-state")}
+        env.pop("SHERLOCK_KIT_STATE_ROOT", None)
+        return env
+
+    def test_state_root_env_shares_auth_cooldown_without_home_or_xdg_writes(self):
+        env = self.state_environment()
+        state = self.root / "shared-state"
+        env.update(SHERLOCK_KIT_STATE_ROOT=str(state), FAKE_SSH_MODE="auth")
+        with patch.dict(os.environ, env, clear=True):
+            config = kit.TransportConfig(ssh_binary=str(self.fake))
+            self.assertEqual(kit.run_remote(config, ["hostname"]).status, "auth_required")
+            other = kit.TransportConfig(control_host="other-login", ssh_binary=str(self.fake))
+            held = kit.run_remote(other, ["hostname"], mutation=True)
+            self.assertFalse(held.dispatched)
+            self.assertEqual(held.status, "auth_required")
+            path = state / "auth-backoff.json"
+            before = {p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in state.iterdir()}
+            self.assertEqual(kit.doctor(config, remote=True)["control"]["status"], "auth_required")
+            self.assertEqual({p.name: (p.read_bytes(), p.stat().st_mtime_ns) for p in state.iterdir()}, before)
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual(stat.S_IMODE(state.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(list(Path(env["HOME"]).iterdir()), [])
+        self.assertFalse(Path(env["XDG_STATE_HOME"]).exists())
+
+    def test_explicit_backoff_has_priority_even_over_invalid_env_root(self):
+        env = self.state_environment()
+        env.update(SHERLOCK_KIT_STATE_ROOT="relative-root", FAKE_SSH_MODE="auth")
+        with patch.dict(os.environ, env, clear=True):
+            config = kit.TransportConfig(ssh_binary=str(self.fake), backoff_file=self.config.backoff_file)
+            self.assertEqual(kit.run_remote(config, ["hostname"]).status, "auth_required")
+        self.assertTrue(Path(self.config.backoff_file).is_file())
+        self.assertEqual(list(Path(env["HOME"]).iterdir()), [])
+        self.assertFalse(Path(env["XDG_STATE_HOME"]).exists())
+
+    def test_unset_state_root_preserves_xdg_and_home_defaults(self):
+        env = self.state_environment()
+        env["FAKE_SSH_MODE"] = "auth"
+        with patch.dict(os.environ, env, clear=True):
+            config = kit.TransportConfig(ssh_binary=str(self.fake))
+            self.assertEqual(kit.run_remote(config, ["hostname"]).status, "auth_required")
+        self.assertTrue((Path(env["XDG_STATE_HOME"]) / "sherlock-kit/auth-backoff.json").is_file())
+        self.assertEqual(list(Path(env["HOME"]).iterdir()), [])
+        env.pop("XDG_STATE_HOME")
+        with patch.dict(os.environ, env, clear=True):
+            config = kit.TransportConfig(ssh_binary=str(self.fake))
+            self.assertEqual(kit.run_remote(config, ["hostname"]).status, "auth_required")
+        self.assertTrue((Path(env["HOME"]) / ".local/state/sherlock-kit/auth-backoff.json").is_file())
+
+    def test_invalid_env_root_never_falls_back_or_dispatches(self):
+        env = self.state_environment()
+        state = self.root / "never-created"
+        env["SHERLOCK_KIT_STATE_ROOT"] = str(state)
+        with patch.dict(os.environ, env, clear=True):
+            config = kit.TransportConfig(ssh_binary=str(self.fake))
+            for value in ("", "relative", "~/state", str(state) + "\n"):
+                with self.subTest(value=value), patch.dict(os.environ, {"SHERLOCK_KIT_STATE_ROOT": value}):
+                    with self.assertRaises(ValueError):
+                        kit.TransportConfig(ssh_binary=str(self.fake))
+                    result = kit.run_remote(config, ["mutating-program"], mutation=True)
+                    self.assertEqual(result.status, "not_sent")
+                    self.assertFalse(result.dispatched)
+                    for remote in (False, True):
+                        self.assertEqual(kit.doctor(config, remote=remote)["control"]["status"], "configuration_mismatch")
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(state.exists())
+        self.assertFalse(Path(env["XDG_STATE_HOME"]).exists())
+        self.assertEqual(list(Path(env["HOME"]).iterdir()), [])
+
+    def test_state_root_refuses_links_and_public_parent_before_mkdir(self):
+        env = self.state_environment()
+        target = self.root / "untouched"
+        target.mkdir(mode=0o700)
+        linked = self.root / "linked"
+        linked.symlink_to(target, target_is_directory=True)
+        public = self.root / "public"
+        public.mkdir(mode=0o755)
+        for value in (linked, linked / "new-root", public):
+            with self.subTest(root=value), patch.dict(os.environ, {**env, "SHERLOCK_KIT_STATE_ROOT": str(value)}, clear=True):
+                with self.assertRaises(ValueError):
+                    kit.TransportConfig(ssh_binary=str(self.fake))
+        with self.assertRaises(ValueError):
+            kit.TransportConfig(ssh_binary=str(self.fake), backoff_file=linked / "nested/backoff.json")
+        self.assertEqual(list(target.iterdir()), [])
+        self.assertEqual(list(public.iterdir()), [])
+        self.assertEqual(self.calls(), [])
+
+    def test_doctor_with_env_root_does_not_create_auth_state(self):
+        env = self.state_environment()
+        state = self.root / "diagnostic-state"
+        env["SHERLOCK_KIT_STATE_ROOT"] = str(state)
+        with patch.dict(os.environ, env, clear=True):
+            config = kit.TransportConfig(ssh_binary=str(self.fake))
+            self.assertEqual(kit.doctor(config)["mode"], "local")
+            self.assertEqual(self.calls(), [])
+            self.assertEqual(kit.doctor(config, remote=True)["control"]["status"], "complete")
+        self.assertFalse(state.exists())
+        self.assertFalse(Path(env["XDG_STATE_HOME"]).exists())
+        self.assertEqual(list(Path(env["HOME"]).iterdir()), [])
+
     def test_policy_digest_and_projection_drift(self):
         policy = kit.policy_text()
         identity = kit.policy_identity()
