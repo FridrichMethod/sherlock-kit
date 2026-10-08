@@ -35,14 +35,17 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 |---|---|---|---|
 | 1 foundation | e7cd5d9 merged; provenance fix 446549f | 15 offline/install tests and independent review; accepted | public main f91b68b |
 | 2 delivery | dotfiles a5536d6 / 298f14a, canonical aab401c | actual Codex and Claude context probes; merged checks PASS; accepted | toolkit public; dotfiles push follows integration |
-| 3 rasraser CPU pilot | local b0d22bc / ecd6be2 / 97b00e2 / 8e39a79 | real sealed audit, SIGTERM/resume and local shared CLI; live Job 46946104 RUNNING | local commits only |
+| 3 rasraser CPU pilot | local b0d22bc / ecd6be2 / 97b00e2 / 8e39a79 | real sealed audit, SIGTERM/resume and local shared CLI; first live job FAILED duration gate | local commits only |
 | 4 shared orchestration | 1d7f880 / 6890a19 / fa85201 / 3f02864 | 68/68 merged tests, frozen wheel/install and Astra boundary review PASS; live fetch gate pending | public main 3f02864 |
 | 5 opt-in guard/adapters | toolkit 7078fea / e4cd633; dotfiles 000798f merged 32e6379 | both actual clients trusted deny/benign and namespaced skill calls PASS; additional Codex failure-mode checks underway | public toolkit; scoped client hooks only, production activation opt-in |
 
 ## Next actions
 
-Finish actual Job 46946104, reconcile terminal identity/accounting through the shared
-CLI, and fetch its six-file validated bundle through the DTN. Finish Codex failure-mode
+First Job 46946104 resolved FAILED, with 256 allocated CPU-seconds and reservation
+released. Prepare a reviewed manual child within the recorded two-attempt ceiling:
+increase bounded stress case/log ceilings without lowering the 600-second gate, and
+carry the first job's completed frozen-valid audit metadata rather than reread science
+source. Keep the first immutable release and all failure evidence. Finish Codex failure-mode
 observations and merge/push dotfiles final delivery only after concurrent canonical
 write ownership is resolved. Independent dotfiles final branch has commit 1703f0e;
 canonical has unrelated user commit e092f49 and fcitx5 modifications, all preserved.
@@ -156,7 +159,15 @@ Exactly one real `shk submit --config PRIVATE/controller.json --spec PRIVATE/att
 created 2026-10-08 00:36 UTC. Shared scheduler query first observed PENDING, then
 RUNNING around 00:42 UTC with identity-bound DBIndex 9797163603423974400. Reservation
 remains one and cost remains unfinalized. Queries are separated by at least 60 seconds.
-No terminal, final cost, remote bundle or live fetch acceptance is claimed yet.
+At 00:51 UTC, shared reconciliation resolved FAILED and complete final accounting:
+256 CPU-seconds, zero GPU-seconds, reservation zero. Private bounded failure reads
+showed the sole acceptance failure: stress finished 10,000 cases in 238.895663s,
+stop_reason=case_limit, with 1,687 real process deaths and 29 semantic buckets.
+All generated invariants passed, but this is **not** a 600-second accepted soak.
+The composite validator correctly refused it. The separate audit completed once;
+no final bundle was promoted. A manual child will use a fresh immutable release/run
+namespace, preserve parent lineage and reuse only the four completed audit metadata
+files after exact frozen-validator and SHA256 checks. It will not rerun the audit.
 
 Frozen identities: toolkit `3f02864eec4e76a933b84adac4570dc3b80b9a30`, adapter SHA256
 `9bd8e459fb1759bfafc60fb2b4f2a3179480b278c343c4417ad642a19db3edd1`, input
@@ -191,8 +202,9 @@ was loaded, and no trust database was edited or trust bypass flag used.
 
 ## Remaining acceptance gates
 
-Phase 3/4 require the running remote CPU pilot's terminal reconciliation and verified
-artifact fetch; submission and running identity have actual evidence. Finish Codex
+Phase 3/4 require a duration-qualified child pilot and verified artifact fetch;
+first real submission, terminal identity and final accounting have actual evidence
+but first acceptance failed safely. Finish Codex
 failure-mode observations and resolve dotfiles canonical writer ownership before
 final integration/publication. Native PowerShell is unavailable, so Windows execution
 is untested; cross-platform fixtures are not native Windows acceptance. Preserve
