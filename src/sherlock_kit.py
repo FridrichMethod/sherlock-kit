@@ -124,7 +124,8 @@ def _backoff_path(config):
         path = Path(config.backoff_file).expanduser()
     elif "SHERLOCK_KIT_STATE_ROOT" in os.environ:
         value = os.environ["SHERLOCK_KIT_STATE_ROOT"]
-        if not value or any(c in value for c in "\0\n\r") or not Path(value).is_absolute():
+        if (not value or any(ord(c) < 32 or ord(c) == 127 for c in value)
+                or not Path(value).is_absolute() or ".." in Path(value).parts):
             raise ValueError("SHERLOCK_KIT_STATE_ROOT must be a nonempty absolute path")
         path = Path(value) / "auth-backoff.json"
     else:
@@ -134,6 +135,8 @@ def _backoff_path(config):
 
 
 def _checked_backoff_path(path):
+    if any(ord(c) < 32 or ord(c) == 127 for c in str(path)) or ".." in path.parts:
+        raise ValueError("Authentication state path must not contain control characters or parent traversal")
     path = path.absolute()
     # Refuse links before mkdir/read, including a linked ancestor above the
     # immediate parent. Do not resolve them and silently select another root.
@@ -144,8 +147,11 @@ def _checked_backoff_path(path):
         info = path.parent.lstat()
     except FileNotFoundError:
         return path
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) & 0o077):
+    # Read-only local diagnostics also run on Windows, where getuid and POSIX
+    # mode/ownership guarantees are unavailable. Mutating locks remain POSIX.
+    getuid = getattr(os, "getuid", None)
+    if (not stat.S_ISDIR(info.st_mode) or (getuid is not None
+            and (info.st_uid != getuid() or stat.S_IMODE(info.st_mode) & 0o077))):
         raise ValueError("Authentication state parent must be an owned private directory")
     return path
 
@@ -156,7 +162,10 @@ def _read_backoff(path):
         if path.is_symlink():
             raise ValueError("Backoff file must not be a symlink")
         info = path.stat()
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+        getuid = getattr(os, "getuid", None)
+        if getuid is None:
+            raise ValueError("Reading authentication state requires POSIX ownership metadata")
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != getuid()
                 or stat.S_IMODE(info.st_mode) & 0o077):
             raise ValueError("Backoff state must be an owned private regular file")
         payload = json.loads(path.read_text())
