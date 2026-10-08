@@ -33,19 +33,4 @@ jobs:
           .venv-build/bin/python -m pip install 'setuptools>=77' wheel
           echo "SHERLOCK_KIT_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
       - name: Run full offline suite and require packaging checks
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          import sys
-          import unittest
-
-          build_python = os.environ.get("SHERLOCK_KIT_BUILD_PYTHON")
-          if not build_python or not Path(build_python).is_file():
-              raise SystemExit("Missing isolated packaging interpreter")
-          suite = unittest.defaultTestLoader.discover("tests")
-          result = unittest.TextTestRunner(verbosity=2).run(suite)
-          if result.skipped:
-              print("CI forbids skipped checks:", result.skipped, file=sys.stderr)
-          raise SystemExit(0 if result.wasSuccessful() and not result.skipped else 1)
-          PY
+        run: python tests/run_suite.py
