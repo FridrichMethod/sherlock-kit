@@ -22,7 +22,7 @@ For failures, also preserve the bounded `active-case` counterexample directory.
 One `normal`, one CPU, 2 GiB, 30 minute job can combine one 600 second soak with
 the consumer's single sealed provenance audit. The fixture keeps at most three
 short workers active, all numerical thread limits set to one, fewer than 200 KiB
-of source payload per case, and a 16 MiB audit log. Cases are sequential and their
+of source payload per case, and a 64 MiB audit log. Cases are sequential and their
 successful private databases/staging trees are removed before the next case.
 There is no sleep or test-suite repetition. The source payload, resource vector,
 task/input identity, accounting arrays, cache timing and race/fault configuration
@@ -58,7 +58,7 @@ duration, not the configured duration. Failure exits early, even if this leaves
 the job shorter than ten minutes. The fixed semantic buckets usually saturate in
 the short measurement; continued unique parameter draws provide race/failure
 robustness evidence rather than claiming new semantic coverage. A report exposes
-both novel and revisited bucket counts. `--max-cases` (at most 10,000) is a second
+both novel and revisited bucket counts. `--max-cases` (at most 40,000) is a second
 bound; reaching it ends the soak and must be considered when checking duration.
 
 Use `--duration-seconds 30` for the initial measurement and the unittest's 16 case

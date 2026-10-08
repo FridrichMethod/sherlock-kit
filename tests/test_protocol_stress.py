@@ -60,7 +60,7 @@ class ProtocolStressTests(unittest.TestCase):
     def test_input_bounds_reject_before_creating_output(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "unused"
-            for kwargs in ({"duration_seconds": 601}, {"duration_seconds": 0}, {"max_cases": 10001}):
+            for kwargs in ({"duration_seconds": 601}, {"duration_seconds": 0}, {"max_cases": 40001}):
                 with self.subTest(kwargs=kwargs), self.assertRaises(AssertionError):
                     stress.run(root, **kwargs)
             self.assertFalse(root.exists())

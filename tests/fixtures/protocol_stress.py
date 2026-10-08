@@ -32,8 +32,8 @@ FAULTS = ("intent_committed", "transferred", "verified", "promoted", "receipt_co
 FAMILIES = ("admission", "dispatch_death", "ack_race", "query", "fetch_death", "fetch_race", "fetch_reject", "accounting")
 THREAD_VARS = ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS")
 CRASH = 73
-MAX_CASES = 10000
-MAX_LOG_BYTES = 16 * 1024 * 1024
+MAX_CASES = 40000
+MAX_LOG_BYTES = 64 * 1024 * 1024
 CONTEXT = mp.get_context("fork")  # Sherlock/Linux; at most three workers per case.
 
 
