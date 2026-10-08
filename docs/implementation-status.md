@@ -35,19 +35,19 @@ Instructions use uniquely marked `SHERLOCK-KIT` blocks with policy digest/schema
 |---|---|---|---|
 | 1 foundation | e7cd5d9 merged; provenance fix 446549f | 15 offline/install tests and independent review; accepted | public main f91b68b |
 | 2 delivery | dotfiles a5536d6 / 298f14a, canonical aab401c | actual Codex and Claude context probes; merged checks PASS; accepted | toolkit public; dotfiles push follows integration |
-| 3 rasraser CPU pilot | local b0d22bc; next shared adapter pending | real local sealed audit + real synthetic SIGTERM/resume; live path pending | local commits only |
-| 4 shared orchestration | 1d7f880 / 6890a19 | 64/64 tests including frozen wheel/install; Astra boundary review PASS; live pilot gate pending | tested implementation candidate |
-| 5 opt-in guard/adapters | 7078fea merged; dotfiles 000798f candidate | pure guard tests PASS; actual Codex registration untrusted; trust/block/client skills pending | guard candidate; activation inactive |
+| 3 rasraser CPU pilot | local b0d22bc / ecd6be2 / 97b00e2 / 8e39a79 | real sealed audit, SIGTERM/resume and local shared CLI; live Job 46946104 RUNNING | local commits only |
+| 4 shared orchestration | 1d7f880 / 6890a19 / fa85201 / 3f02864 | 68/68 merged tests, frozen wheel/install and Astra boundary review PASS; live fetch gate pending | public main 3f02864 |
+| 5 opt-in guard/adapters | toolkit 7078fea / e4cd633; dotfiles 000798f merged 32e6379 | both actual clients trusted deny/benign and namespaced skill calls PASS; additional Codex failure-mode checks underway | public toolkit; scoped client hooks only, production activation opt-in |
 
 ## Next actions
 
-Publish the independently tested candidate, upgrade the dotfiles pin from canonical
-main, verify installed adapters in temporary targets, then exercise actual clients.
-Prepare one normal CPU job (1 CPU, 2 GiB, zero GPUs, 30-minute walltime) containing
-600 seconds of varied seeded protocol verification plus one sealed provenance audit.
-The user explicitly endorsed ten-minute verification and Astra confirmed that varied
-fault/interleaving coverage is useful work. No sleep, repeated scientific experiment,
-historical controller, ledger reset or borrowed partition. No job has been submitted.
+Finish actual Job 46946104, reconcile terminal identity/accounting through the shared
+CLI, and fetch its six-file validated bundle through the DTN. Finish Codex failure-mode
+observations and merge/push dotfiles final delivery only after concurrent canonical
+write ownership is resolved. Independent dotfiles final branch has commit 1703f0e;
+canonical has unrelated user commit e092f49 and fcitx5 modifications, all preserved.
+Do not duplicate the pending/running job, rerun science, restart a historical controller,
+reset a ledger, or infer a borrowed grant. Keep the old frozen runtime for this attempt.
 
 ## Foundation review
 
@@ -111,13 +111,90 @@ Independent synthetic worker SIGTERM published a checkpoint and no final report;
 resume verified the prefix and finished. Existing environment `make check` passed:
 ruff 659 files, mypy 229 sources, pytest 2974 passed / 4 existing skips (279.20s).
 These are actual local evidence, not a live submit/reconcile/fetch claim.
+After the standalone frozen-validator and real local CLI adapter ecd6be2, the existing
+`make check` passed ruff 661 files, mypy 230 sources and **2982 passed / 4 existing skips**
+(280.53s). Subsequent parent-directory fsync and composite-validator commits passed
+27 focused tests, ruff, mypy and required pre-commit checks. Canonical research science,
+evaluation criteria, historical results/controllers/ledgers and user changes are untouched.
+
+Actual SIGTERM/resume evidence is `/tmp/shk-real-signal-v2-thoummre/receipt.json`:
+first PID 546130 has boot/start-ticks/argv/source identity, SIGTERM exit 1 preserved
+one verified prefix, and the same frozen plan resumed successfully over two synthetic
+files / 269,484,032 bytes. Astra checked this receipt independently. Real frozen CLI
+local lifecycle evidence is `/tmp/shk-rasraser-local-protocol-v2/local-protocol-receipt.json`;
+its acknowledgement/accounting are synthetic and its real rsync/promotion recovery
+does not substitute for the live scheduler gate.
+
+Merged public 3f02864 passed **68/68 toolkit tests, no skips** (14.796s), including
+the independent archive/wheel/venv installation and four bounded stress tests.
+The eight-family stress fixture uses real forks, SQLite transactions, fsync, rsync,
+process deaths and promotion races. Seeds/case identities/hash-chain/invariants are
+recorded. The local 30-second measurement completed 204 cases, 36 real process deaths
+and 29 semantic buckets in 30.11036s. Revisited buckets test varied interleavings;
+they are not counted as new semantic coverage. No sleep or scheduler polling occurs.
+
+## Live pilot checkpoint
+
+Budget was saved before dispatch: **one normal job, 1 CPU, 2048 MiB, zero GPUs,
+1800-second walltime, concurrency one**. A manual ceiling of two attempts/3600
+allocated CPU-seconds does not authorize retrying an unknown outcome. Work is one
+600-second varied protocol verification followed by one read-only sealed 265-file
+provenance audit (1,706,395,112 bytes), with scientific_acceptance=false.
+
+Private namespace `sherlock-kit-audit-20261007-shared-v1` uses a new owned GROUP_HOME
+release/run directory and new workstation result/controller namespace. Resolve roots
+on the intended host; ownership/canonical paths and DTN/control namespace were verified.
+Only private runtime state contains concrete storage paths. Official `devel python/3.14.2`
+module was checked via `ml spider`, explicitly initialized and its executable hashed.
+Twenty-four release files were uploaded via DTN and checked via the control host;
+release files are sealed. File-heavy verification executes in L_SCRATCH_JOB and
+required results are exported before the allocation ends. Slurm working directory and
+job-ID stdout/stderr are explicitly isolated from HOME and immutable source.
+
+Exactly one real `shk submit --config PRIVATE/controller.json --spec PRIVATE/attempt-spec.json
+--apply` succeeded. Attempt **579e7b497b4f494dbf40d02512b414cd**, job **46946104**,
+created 2026-10-08 00:36 UTC. Shared scheduler query first observed PENDING, then
+RUNNING around 00:42 UTC with identity-bound DBIndex 9797163603423974400. Reservation
+remains one and cost remains unfinalized. Queries are separated by at least 60 seconds.
+No terminal, final cost, remote bundle or live fetch acceptance is claimed yet.
+
+Frozen identities: toolkit `3f02864eec4e76a933b84adac4570dc3b80b9a30`, adapter SHA256
+`9bd8e459fb1759bfafc60fb2b4f2a3179480b278c343c4417ad642a19db3edd1`, input
+`f888021dcf3a5962044f397518a0bffc47c5fab556374f393efa113d20b88319`, runtime
+`5177ecfebc8716435c90998168fce3ab04cd7ccaad0808fad0cf91b1320702b9`, validator
+`5f3c27d15a8b6a07fbcbe2b2ee0b7f56b747f9c83f1f6502f9d80c441bcce399`, and script
+`88c7a2041566f6ca79863bb97a4f92096407b9b5a8c8d77a012685e0892871bf`.
+
+## Actual guard and skill delivery
+
+User explicitly authorized both clients' real synthetic model/context requests and
+normal Codex `/hooks` UI hash trust. No credentials were copied, no research context
+was loaded, and no trust database was edited or trust bypass flag used.
+
+- Claude 2.1.293 actual scoped PreToolUse blocked a harmless forbidden-helper-name
+  canary; a continuing session executed a benign canary then denied that canary.
+  Actual missing-command, malformed-output and timed-out handlers all allowed the
+  synthetic tool to execute: these failures are not enforcement. Its explicit
+  `sherlock-kit:sherlock-kit-operate` plugin skill invoked the same frozen toolkit.
+- Codex 0.161.0 normal review UI showed Active=0/review required, then Trusted/Active=1
+  after normal UI approval. The real forbidden-name tool was denied, and a benign
+  tool executed through normal approval. Sandbox bwrap failures were distinguished
+  from hook denial. Actual skills/list found the enabled installed user skill;
+  GPT-6.1 Sol high loaded its file and invoked canonical shk policy/doctor at 3f02864.
+  Existing large-catalog traversal/context-budget warnings were preserved and recorded.
+- Adapters were first installed/tested in temporary targets, then enabled only by
+  the lead from canonical dotfiles; live symlinks point to canonical sources. The
+  shared config merger preserves host hooks and is idempotent: **67 config-sync and
+  12 integration tests PASS**, and required full pre-commit checks PASS. Optional
+  global hook registration remains inactive; actual client tests used scoped settings.
+  Doctor reports availability but leaves registration/trust/blocking unverified.
 
 ## Remaining acceptance gates
 
-Phase 3/4 require the new immutable remote CPU pilot's real shared submission,
-scheduler identity reconciliation and verified artifact fetch. Phase 5 requires
-actual client trust/blocking, false-positive and skill-discovery checks. Codex's
-current hook is explicitly untrusted; no internal trust database or bypass flag is
-used. Native PowerShell is unavailable, so Windows execution is untested. Preserve
+Phase 3/4 require the running remote CPU pilot's terminal reconciliation and verified
+artifact fetch; submission and running identity have actual evidence. Finish Codex
+failure-mode observations and resolve dotfiles canonical writer ownership before
+final integration/publication. Native PowerShell is unavailable, so Windows execution
+is untested; cross-platform fixtures are not native Windows acceptance. Preserve
 rasraser canonical user changes and all historical runs/worktrees. Push only toolkit
 and the owner's existing dotfiles remote; pilot research changes remain local.

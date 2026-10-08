@@ -6,6 +6,11 @@ its source/runtime/input identities, immutable script, resources, output manifes
 and scientific validator. The rasraser adapter is a separate local research commit;
 no research source or data is distributed here. Live pilot acceptance is pending.
 
+The authoritative controller and artifact promotion currently require POSIX
+(`fcntl`, Unix ownership and no-follow filesystem checks). Windows instruction,
+guard and installer adapters do not imply Windows controller support. Native
+PowerShell execution has not been verified on the implementation workstation.
+
 Configuration is a private owned JSON file (0600). `state_root` is an absolute,
 private 0700 durable directory shared by all consumers on one authoritative
 workstation, outside worktrees and scratch. SQLite transactions coordinate admission
