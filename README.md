@@ -73,7 +73,9 @@ See [consumer fixture](tests/fixtures/consumer/README.md) for a synthetic first-
 contract. No live job, GPU use, or historical campaign operation is part of these
 tests. The real `submit`, `status`/`reconcile` and `fetch` commands require an
 explicit consumer contract; see [orchestration](docs/orchestration.md). Their live
-rasraser acceptance remains pending; implementation tests are not a live pilot.
+rasraser CPU provenance pilot passed real Slurm submission, reconciliation, DTN
+fetch and offline recovery; see [acceptance evidence](docs/implementation-status.md).
+Its engineering acceptance does not establish scientific results.
 Optional agent adapters and the narrow guard are described in
 [guard](docs/guard.md). Neither raw SSH nor arbitrary shell commands are certified
 by the toolkit.

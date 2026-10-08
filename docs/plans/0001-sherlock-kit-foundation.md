@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | REVISED DRAFT, 2026-10-07. This document specifies work; the toolkit has not been implemented. |
+| **Status** | IMPLEMENTED, 2026-10-08 UTC. Phases 1–5 accepted; see [implementation evidence](../implementation-status.md). Original baseline and design rationale below are retained. |
 | **Decision** | Start with shared Sherlock instructions, a small OpenSSH helper library, a read-only doctor, and tested installation. Extract orchestration only after a real consumer proves the contracts. |
 | **Completion target** | Complete Phases 1–5 under the phase gates. Phases 1–2 are the first publishable milestone, not a stopping point. |
 | **Initial scope** | `~/data/repos/sherlock-kit` and scoped integration in `~/dotfiles`. Research repositories remain reference sources until a particular pilot is explicitly authorized. |

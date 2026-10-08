@@ -4,12 +4,15 @@ This implementation supports a single immutable CPU allocation without arrays or
 requeue. It does not certify general DDP or checkpoint recovery. A workload supplies
 its source/runtime/input identities, immutable script, resources, output manifest
 and scientific validator. The rasraser adapter is a separate local research commit;
-no research source or data is distributed here. Live pilot acceptance is pending.
+no research source or data is distributed here. The live CPU provenance pilot passed
+shared submission, reconciliation, DTN fetch and offline recovery; exact resources,
+identities and limitations are recorded in [implementation status](implementation-status.md).
 
 The authoritative controller and artifact promotion currently require POSIX
 (`fcntl`, Unix ownership and no-follow filesystem checks). Windows instruction,
 guard and installer adapters do not imply Windows controller support. Native
-PowerShell execution has not been verified on the implementation workstation.
+PowerShell execution is covered by dotfiles' native Windows CI, while it remains
+unavailable on the implementation workstation. That does not validate a Windows controller.
 
 Configuration is a private owned JSON file (0600). `state_root` is an absolute,
 private 0700 durable directory shared by all consumers on one authoritative
