@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "date_utc": "2026-10-07",
+  "client_version": "codex-cli 0.161.0",
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "high",
+  "scope": "disposable local synthetic fixtures; no SSH, Slurm, research data or global configuration changes",
+  "approval": "normal --approve-for-me; no sandbox, approval, or hook-trust bypass",
+  "trust_ui_thread": "01a118f9-ced5-7e33-847d-805c7fd89918",
+  "trust_ui_action": "Review hooks, expand PreToolUse, t; installed=1 active=0 became active=1",
+  "trust_before": [
+    {
+      "hooks": [
+        {
+          "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+          "matcher": "^Bash$",
+          "eventName": "preToolUse",
+          "timeoutSec": 5,
+          "trustStatus": "untrusted",
+          "enabled": true,
+          "currentHash": "sha256:b6a644ac3922a60bb4b035dfb22b0e45728e62d54cf3206dc80c3f555cbadebf",
+          "key": "/<session-flags>/config.toml:pre_tool_use:2:0",
+          "source": "sessionFlags",
+          "statusMessage": null
+        }
+      ],
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "trust_after": [
+    {
+      "hooks": [
+        {
+          "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+          "matcher": "^Bash$",
+          "eventName": "preToolUse",
+          "timeoutSec": 5,
+          "trustStatus": "trusted",
+          "enabled": true,
+          "currentHash": "sha256:b6a644ac3922a60bb4b035dfb22b0e45728e62d54cf3206dc80c3f555cbadebf",
+          "key": "/<session-flags>/config.toml:pre_tool_use:2:0",
+          "source": "sessionFlags",
+          "statusMessage": null
+        }
+      ],
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "fixture_sha256": {
+    "hook.py": "74bf025d16341a9292e5e449b26fa9b9358fdecc2519f6fd054ef7b1c29d2ab3",
+    "canary.py": "961343d917b926a78215f2adaec4eba6421e6a8acddc6530bd8a69e92ad0d3fc",
+    "AGENTS.md": "71aa3c98edf5a3a6bb4ca899e8ad33523f11032aebd867c452b3a2d2f2f821e3"
+  },
+  "cases": [
+    {
+      "case": "untrusted",
+      "thread_id": "01a118f8-a355-71f1-90d5-91ac942a74f8",
+      "hooks_list": {
+        "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+        "matcher": "^Bash$",
+        "eventName": "preToolUse",
+        "timeoutSec": 5,
+        "trustStatus": "untrusted",
+        "enabled": true,
+        "currentHash": "sha256:b6a644ac3922a60bb4b035dfb22b0e45728e62d54cf3206dc80c3f555cbadebf",
+        "key": "/<session-flags>/config.toml:pre_tool_use:1:0",
+        "source": "sessionFlags",
+        "statusMessage": null
+      },
+      "canary_executed": true,
+      "canary_sha256": "2f629b0da61c06c9dc713c7dc257e60c3961b313fc7131ccf80464264cd84e7f",
+      "command_results": [
+        {
+          "id": "item_6",
+          "type": "command_execution",
+          "command": "/usr/bin/zsh -lc 'python3 /tmp/sherlock-kit-codex-failures/probe/canary.py untrusted .'",
+          "aggregated_output": "CANARY_EXECUTED_untrusted\n",
+          "exit_code": 0,
+          "status": "completed"
+        }
+      ],
+      "client_returncode": 0,
+      "handler_invocation_count": 0,
+      "hook_diagnostics": [],
+      "event_receipt_sha256": "9f483aa1b441e4b9ab57eb4c3823c5a10a4f8c6b613c00758213c9188079bcf8",
+      "stderr_receipt_sha256": "6add4b6874368c5cddc41dc15f7596fb6fc9520e999ac287e82d69860ee1dd63"
+    },
+    {
+      "case": "changed-hash",
+      "thread_id": "01a118fa-fe89-7871-8582-aede71575a04",
+      "hooks_list": {
+        "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+        "matcher": "^Bash$",
+        "eventName": "preToolUse",
+        "timeoutSec": 6,
+        "trustStatus": "modified",
+        "enabled": true,
+        "currentHash": "sha256:bfec899a9200a47b144c574839a213a12367eb080edee480ef48d06c9a3147d1",
+        "key": "/<session-flags>/config.toml:pre_tool_use:2:0",
+        "source": "sessionFlags",
+        "statusMessage": null
+      },
+      "canary_executed": true,
+      "canary_sha256": "5973979d379e3558d7bcae6b79df1fc46ec93d3fcbc361fc314af4d06fd315b7",
+      "command_results": [
+        {
+          "id": "item_6",
+          "type": "command_execution",
+          "command": "/usr/bin/zsh -lc 'python3 /tmp/sherlock-kit-codex-failures/probe/canary.py changed-hash .'",
+          "aggregated_output": "CANARY_EXECUTED_changed-hash\n",
+          "exit_code": 0,
+          "status": "completed"
+        }
+      ],
+      "client_returncode": 0,
+      "handler_invocation_count": 0,
+      "hook_diagnostics": [],
+      "event_receipt_sha256": "58d1a374d4e5e07276bd7e093ad3d1e6d51390acec96b4a66037b70412c36849",
+      "stderr_receipt_sha256": "f2c037a44d27db3b117098f52ce3326158161d38623777218e44435400a35674"
+    },
+    {
+      "case": "malformed",
+      "thread_id": "01a118fb-8469-7d41-b732-4c0a90bb8412",
+      "hooks_list": {
+        "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+        "matcher": "^Bash$",
+        "eventName": "preToolUse",
+        "timeoutSec": 5,
+        "trustStatus": "trusted",
+        "enabled": true,
+        "currentHash": "sha256:b6a644ac3922a60bb4b035dfb22b0e45728e62d54cf3206dc80c3f555cbadebf",
+        "key": "/<session-flags>/config.toml:pre_tool_use:2:0",
+        "source": "sessionFlags",
+        "statusMessage": null
+      },
+      "canary_executed": true,
+      "canary_sha256": "f46a8c167f40a44cdf91413ed28d438163c118140714252f0ad2a508790cd99d",
+      "command_results": [
+        {
+          "id": "item_6",
+          "type": "command_execution",
+          "command": "/usr/bin/zsh -lc 'python3 /tmp/sherlock-kit-codex-failures/probe/canary.py malformed'",
+          "aggregated_output": "CANARY_EXECUTED_malformed\n",
+          "exit_code": 0,
+          "status": "completed"
+        }
+      ],
+      "client_returncode": 0,
+      "handler_invocation_count": 2,
+      "hook_diagnostics": [],
+      "event_receipt_sha256": "e591fd6193fb742efe5a00acc34ca7d5b149ea7e568e9627590f782297408e67",
+      "stderr_receipt_sha256": "4602253a5f083d3556f201e14822d703edf3fc71a950521f07d01f976a8998e5"
+    },
+    {
+      "case": "missing",
+      "thread_id": "01a118fc-81e6-7dd0-8bfd-000a4eaf6660",
+      "hooks_list": {
+        "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+        "matcher": "^Bash$",
+        "eventName": "preToolUse",
+        "timeoutSec": 5,
+        "trustStatus": "trusted",
+        "enabled": true,
+        "currentHash": "sha256:b6a644ac3922a60bb4b035dfb22b0e45728e62d54cf3206dc80c3f555cbadebf",
+        "key": "/<session-flags>/config.toml:pre_tool_use:2:0",
+        "source": "sessionFlags",
+        "statusMessage": null
+      },
+      "canary_executed": false,
+      "canary_sha256": null,
+      "command_results": [],
+      "client_returncode": 0,
+      "handler_invocation_count": 0,
+      "hook_diagnostics": [
+        {
+          "call_id": "call_9bC8YWp4DhvpK2aYFnwquKyd",
+          "tool_hook_diagnostic": [
+            {
+              "type": "input_text",
+              "text": "Script failed\nWall time 0.0 seconds\nOutput:\n"
+            },
+            {
+              "type": "input_text",
+              "text": "Script error:\nCommand blocked by PreToolUse hook: python3: can't open file '/tmp/sherlock-kit-codex-failures/probe/hook.py': [Errno 2] No such file or directory. Command: python3 /tmp/sherlock-kit-codex-failures/probe/canary.py missing"
+            }
+          ]
+        }
+      ],
+      "event_receipt_sha256": "13bf343b82add238fd053eeaec65709fb05794db0bdde4250bdb9b9a2536dcfc",
+      "stderr_receipt_sha256": "27f2a62eee0fa9226bb235ae428949bbdd063970bd0a844b788edbd343be484d"
+    },
+    {
+      "case": "timeout",
+      "thread_id": "01a118fd-a227-79c0-9dac-d71a3162b260",
+      "hooks_list": {
+        "command": "python3 /tmp/sherlock-kit-codex-failures/probe/hook.py",
+        "matcher": "^Bash$",
+        "eventName": "preToolUse",
+        "timeoutSec": 5,
+        "trustStatus": "trusted",
+        "enabled": true,
+        "currentHash": "sha256:b6a644ac3922a60bb4b035dfb22b0e45728e62d54cf3206dc80c3f555cbadebf",
+        "key": "/<session-flags>/config.toml:pre_tool_use:2:0",
+        "source": "sessionFlags",
+        "statusMessage": null
+      },
+      "canary_executed": true,
+      "canary_sha256": "ab367b11c5de9f636a4183f34e516b12a4c41748eaff9ca60f598baa169c796e",
+      "command_results": [
+        {
+          "id": "item_7",
+          "type": "command_execution",
+          "command": "/usr/bin/zsh -lc 'python3 /tmp/sherlock-kit-codex-failures/probe/canary.py timeout'",
+          "aggregated_output": "CANARY_EXECUTED_timeout\n",
+          "exit_code": 0,
+          "status": "completed"
+        }
+      ],
+      "client_returncode": 0,
+      "handler_invocation_count": 2,
+      "hook_diagnostics": [],
+      "event_receipt_sha256": "cf0773a3d978aed4ed2f90930842eecf1ec14c264cf4a266dcd0113e204f8f1f",
+      "stderr_receipt_sha256": "1bc80570ed56272038ef16910e59cf4d569a1b025bac90d3e7a7a04b30d7bc6d"
+    }
+  ],
+  "limits": [
+    "Observed installed-client behavior, not a portable enforcement guarantee.",
+    "Missing means a Python handler file was absent; missing registration and exit-127 executable failures were not tested.",
+    "Malformed and timeout tool results did not retain separate hook failure messages; evidence is trusted current definition, handler invocation, known output/delay and successful canary.",
+    "Normal sandbox failure/escalation can invoke PreToolUse twice; the canary wrote once.",
+    "The trust hash binds the command definition, not the handler file contents; fixed-command mode variation was intentional.",
+    "Raw client events and stderr remain private; their hashes are recorded. Original rollouts/context are not published.",
+    "A direct raw-rollout rg was rejected by automatic review; safe structured tool-result extraction succeeded, leaving no approval blocker."
+  ]
+}
