@@ -81,6 +81,28 @@ It is not validator drift. Raw inputs, private lineage, concrete storage
 configuration and full receipts are retained in the private data archive,
 with relocation inventory and recovery notes; they are not public package files.
 
+## Release-maintenance verification
+
+The cleanup release adds explicit transport/launcher state locators and routes
+managed authentication state to the shared controller. **78/78 tests, no skips**,
+passed on merged main 7abd733 (20.005 seconds). Packaging now exercises real
+sdist creation, frozen-identity reconstruction under an unrelated Git checkout,
+wheel payload equality and isolated installation with MIT metadata/file checks.
+Synthetic HOME/state inventory remains unchanged by runtime diagnostics.
+
+The initial hosted Python 3.11 job passed. Python 3.14 exposed a CI-only entrypoint
+error: running its wrapper from stdin prevented forkserver from importing main.
+The corrected runner uses a tracked file and `__main__` guard, preserves the
+platform's default process start method, requires packaging and fails any skips.
+Current release checks are visible through the
+[CI workflow](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml).
+
+Private completed evidence was inventoried and relocated to the user's data area.
+Independent review checked all original 30 files, 98 supplemental files and the
+original standalone validator. The live copied ledger is byte-identical and
+retains two terminal attempts, zero reservations and 878 CPU-seconds. Archive
+configs remain historical; relocation is not automatic managed recovery.
+
 ## Actual clients and limitations
 
 Codex **0.161.0** actual prompt inspection established global delivery,
