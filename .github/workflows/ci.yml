@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install local transfer dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends rsync
+      - name: Create isolated packaging interpreter
+        run: |
+          python -m venv .venv-build
+          .venv-build/bin/python -m pip install 'setuptools>=77' wheel
+          echo "SHERLOCK_KIT_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
+      - name: Run full offline suite and require packaging checks
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import sys
+          import unittest
+
+          build_python = os.environ.get("SHERLOCK_KIT_BUILD_PYTHON")
+          if not build_python or not Path(build_python).is_file():
+              raise SystemExit("Missing isolated packaging interpreter")
+          suite = unittest.defaultTestLoader.discover("tests")
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          if result.skipped:
+              print("CI forbids skipped checks:", result.skipped, file=sys.stderr)
+          raise SystemExit(0 if result.wasSuccessful() and not result.skipped else 1)
+          PY

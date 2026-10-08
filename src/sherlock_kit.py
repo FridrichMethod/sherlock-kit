@@ -54,6 +54,8 @@ class TransportConfig:
             raise ValueError("connect_timeout_seconds must be an integer")
         if not isinstance(self.ssh_binary, str) or not self.ssh_binary or "\0" in self.ssh_binary:
             raise ValueError("ssh_binary must name an executable")
+        # Validate without creating state, including an explicitly set empty root.
+        _backoff_path(self)
 
 
 @dataclass(frozen=True)
@@ -117,18 +119,53 @@ def _auth_failure(stderr):
 
 
 def _backoff_path(config):
+    """Explicit file, environment root, then XDG default; never create state."""
     if config.backoff_file is not None:
-        return Path(config.backoff_file).expanduser()
-    root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
-    return root / "sherlock-kit/auth-backoff.json"
+        path = Path(config.backoff_file).expanduser()
+    elif "SHERLOCK_KIT_STATE_ROOT" in os.environ:
+        value = os.environ["SHERLOCK_KIT_STATE_ROOT"]
+        if (not value or any(ord(c) < 32 or ord(c) == 127 for c in value)
+                or not Path(value).is_absolute() or ".." in Path(value).parts):
+            raise ValueError("SHERLOCK_KIT_STATE_ROOT must be a nonempty absolute path")
+        path = Path(value) / "auth-backoff.json"
+    else:
+        root = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+        path = root / "sherlock-kit/auth-backoff.json"
+    return _checked_backoff_path(path)
+
+
+def _checked_backoff_path(path):
+    if any(ord(c) < 32 or ord(c) == 127 for c in str(path)) or ".." in path.parts:
+        raise ValueError("Authentication state path must not contain control characters or parent traversal")
+    path = path.absolute()
+    # Refuse links before mkdir/read, including a linked ancestor above the
+    # immediate parent. Do not resolve them and silently select another root.
+    for part in (path, *path.parents):
+        if part.is_symlink():
+            raise ValueError("Authentication state path and ancestors must not be symlinks")
+    try:
+        info = path.parent.lstat()
+    except FileNotFoundError:
+        return path
+    # Read-only local diagnostics also run on Windows, where getuid and POSIX
+    # mode/ownership guarantees are unavailable. Mutating locks remain POSIX.
+    getuid = getattr(os, "getuid", None)
+    if (not stat.S_ISDIR(info.st_mode) or (getuid is not None
+            and (info.st_uid != getuid() or stat.S_IMODE(info.st_mode) & 0o077))):
+        raise ValueError("Authentication state parent must be an owned private directory")
+    return path
 
 
 def _read_backoff(path):
+    path = _checked_backoff_path(path)
     try:
         if path.is_symlink():
             raise ValueError("Backoff file must not be a symlink")
         info = path.stat()
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+        getuid = getattr(os, "getuid", None)
+        if getuid is None:
+            raise ValueError("Reading authentication state requires POSIX ownership metadata")
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != getuid()
                 or stat.S_IMODE(info.st_mode) & 0o077):
             raise ValueError("Backoff state must be an owned private regular file")
         payload = json.loads(path.read_text())
@@ -145,11 +182,9 @@ def _read_backoff(path):
 def _backoff_lock(path):
     # One private state/lock per controller, shared across repositories and aliases.
     import fcntl
+    path = _checked_backoff_path(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    info = path.parent.lstat()
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) & 0o077):
-        raise ValueError("Authentication state parent must be an owned private directory")
+    _checked_backoff_path(path)
     lock = path.with_suffix(path.suffix + ".lock")
     fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
@@ -177,8 +212,8 @@ Callers must authorize mutations and durably record their own intent/reservation
 Doctor uses a separate fixed mux-only path and never writes this state.
 """
     command = ssh_argv(config, argv)
-    path = _backoff_path(config)
     try:
+        path = _backoff_path(config)
         with _backoff_lock(path):
             if _read_backoff(path) > time.time():
                 return RemoteResult("auth_required", stderr="Shared authentication cooldown active; authenticate manually")
@@ -302,10 +337,15 @@ def doctor(config=None, *, remote=False, advertised_identity=None,
     for tool, path in (("claude", claude_instructions or os.environ.get("SHERLOCK_KIT_CLAUDE_INSTRUCTIONS")),
                        ("codex", codex_instructions or os.environ.get("SHERLOCK_KIT_CODEX_INSTRUCTIONS"))):
         report["instructions"][tool] = _projection_matches(path) if path else "unverified"
+    try:
+        backoff_path = _backoff_path(config)
+    except (OSError, ValueError):
+        report["control"]["status"] = "configuration_mismatch"
+        return report
     if not remote or report["ssh"] == "unavailable":
         return report
     try:
-        if _read_backoff(_backoff_path(config)) > time.time():
+        if _read_backoff(backoff_path) > time.time():
             report["control"]["status"] = "auth_required"
             report["data"]["status"] = "auth_required"
             return report
