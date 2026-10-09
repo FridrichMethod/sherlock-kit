@@ -45,7 +45,8 @@ def release_identity():
         raise RuntimeError("Source revision must be an exact Git revision")
     return {"schema_version": 1, "code_revision": revision,
             "policy_sha256": hashlib.sha256((ROOT / "SHERLOCK.md").read_bytes()).hexdigest(),
-            "install_mode": "frozen"}
+            "install_mode": "frozen",
+            "partitions_sha256": hashlib.sha256((ROOT / "src/sherlock_kit_data/partitions.json").read_bytes()).hexdigest()}
 
 
 def write_resources(destination):

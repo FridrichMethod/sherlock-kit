@@ -9,12 +9,20 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 import sherlock_kit as kit
+import sherlock_partitions as partitions
+from sherlock_artifacts import TransferError, build_manifest
+from sherlock_orchestration import SafetyError
+
+PRODUCER = dict(attempt="1" * 32, cluster="sherlock", principal="fixture", code_digest="a" * 64,
+                input_digest="a" * 64, runtime_digest="a" * 64, policy_digest="a" * 64)
 
 
 class FoundationTests(unittest.TestCase):
@@ -326,6 +334,170 @@ class FoundationTests(unittest.TestCase):
         with patch("sys.stdout", new_callable=io.StringIO) as output:
             self.assertEqual(kit.main(["policy", "--identity"]), 0)
             self.assertEqual(json.loads(output.getvalue())["schema_version"], 1)
+
+    def test_cli_routes_occupancy_to_typed_operations(self):
+        arguments = ["occupancy", "--config", "private.json", "--partition", "normal"]
+        with patch("sherlock_commands.main", return_value=7) as operations:
+            self.assertEqual(kit.main(arguments), 7)
+        operations.assert_called_once_with(arguments)
+
+    def test_remote_program_permission_denied_never_arms_cooldown(self):
+        """A remote program's permission failure is relayed text, not a transport authentication failure."""
+        expected = {("remote-denied", False): ("failed", 1), ("remote-denied", True): ("unknown", 1),
+                    ("relayed-denied", False): ("complete", 0), ("relayed-denied", True): ("complete", 0)}
+        for (mode, mutation), (status, returncode) in expected.items():
+            with self.subTest(mode=mode, mutation=mutation):
+                os.environ["FAKE_SSH_MODE"] = mode
+                result = kit.run_remote(self.config, ["python3", "-c", "synthetic"], mutation=mutation)
+                self.assertEqual((result.status, result.returncode), (status, returncode))
+                self.assertTrue(result.dispatched)
+                self.assertTrue(kit.auth_failure(result.stderr))
+                if mode == "relayed-denied":
+                    self.assertTrue(result.stdout.startswith("SHK_UNKNOWN:"))
+                self.assertFalse(Path(self.config.backoff_file).exists())
+                self.assertFalse(kit.cooldown_active(self.config))
+        os.environ["FAKE_SSH_MODE"] = "echo"
+        self.assertEqual(kit.run_remote(self.config, ["hostname"]).status, "complete")
+        self.assertEqual(len(self.calls()), 5)
+
+    def test_transport_auth_failure_arms_cooldown_only_at_exit_255(self):
+        os.environ["FAKE_SSH_MODE"] = "auth"
+        result = kit.run_remote(self.config, ["hostname"])
+        self.assertEqual((result.status, result.returncode), ("auth_required", 255))
+        self.assertTrue(kit.cooldown_active(self.config))
+
+    def test_auth_failure_record_and_cooldown_public_api(self):
+        for text in ("Permission denied (publickey,keyboard-interactive).", "Too many authentication failures",
+                     "rsync: connection unexpectedly closed\nKerberos credentials cache not found"):
+            self.assertTrue(kit.auth_failure(text), text)
+        for text in ("Connection to host closed", "protocol version mismatch -- is your shell clean?", ""):
+            self.assertFalse(kit.auth_failure(text), text)
+        self.assertFalse(kit.cooldown_active(self.config))
+        self.assertTrue(kit.record_auth_failure(self.config))
+        path = Path(self.config.backoff_file)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        payload = json.loads(path.read_text())
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertGreater(payload["retry_after"], time.time())
+        self.assertTrue(kit.cooldown_active(self.config))
+        held = kit.run_remote(self.config, ["hostname"], mutation=True)
+        self.assertEqual((held.status, held.dispatched), ("auth_required", False))
+        self.assertEqual(self.calls(), [])
+        # Fail closed: malformed or unsafe state counts as an active cooldown and cannot be armed.
+        path.write_text("[]")
+        path.chmod(0o600)
+        self.assertTrue(kit.cooldown_active(self.config))
+        unsafe = self.root / "unsafe"
+        unsafe.mkdir(mode=0o700)
+        config = kit.TransportConfig(ssh_binary=str(self.fake), backoff_file=unsafe / "backoff.json")
+        unsafe.chmod(0o755)
+        self.assertTrue(kit.cooldown_active(config))
+        self.assertFalse(kit.record_auth_failure(config))
+        self.assertEqual(list(unsafe.iterdir()), [])
+
+    def bundle(self):
+        source = self.root / "bundle"
+        source.mkdir()
+        (source / "result.json").write_text('{"value":42}\n')
+        stage = self.root / "stage"
+        stage.mkdir(mode=0o700)
+        return build_manifest(source, PRODUCER), stage
+
+    def test_data_transfer_auth_failure_arms_shared_cooldown_before_second_dispatch(self):
+        manifest, stage = self.bundle()
+        os.environ["FAKE_SSH_MODE"] = "auth"
+        with self.assertRaises(TransferError) as caught:
+            kit.data_transfer(self.config, "/synthetic/output", stage, manifest)
+        error = caught.exception
+        self.assertIsInstance(error, SafetyError)
+        self.assertEqual(error.returncode, 255)
+        self.assertIn("permission denied", error.stderr_tail.lower())
+        self.assertNotIn("\n", error.stderr_tail)
+        self.assertNotIn(".shk-files-", str(error))
+        self.assertTrue(kit.cooldown_active(self.config))
+        self.assertEqual(stat.S_IMODE(Path(self.config.backoff_file).stat().st_mode), 0o600)
+        calls = self.calls()
+        self.assertEqual(len(calls), 1)
+        # The data host, not the control host, is addressed with the bounded prefix;
+        # --protect-args keeps the remote path out of the remote shell's argv.
+        self.assertEqual(calls[0][calls[0].index("sherlock-dtn") + 1:][:3], ["rsync", "--server", "--sender"])
+        self.assertNotIn("sherlock-plain", calls[0])
+        for flag in ("-T", "-oBatchMode=yes", "-oConnectTimeout=15", "-oStrictHostKeyChecking=yes"):
+            self.assertIn(flag, calls[0])
+        with self.assertRaisesRegex(SafetyError, "cooldown"):
+            kit.data_transfer(self.config, "/synthetic/output", stage, manifest)
+        held = kit.run_remote(self.config, ["hostname"])
+        self.assertEqual((held.status, held.dispatched), ("auth_required", False))
+        self.assertEqual(len(self.calls()), 1)
+        self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith(".shk-files-")], [])
+
+    def test_data_transfer_non_auth_failures_do_not_arm_cooldown(self):
+        manifest, stage = self.bundle()
+        for mode, returncode in (("disconnect", 255), ("echo", 2)):
+            with self.subTest(mode=mode):
+                os.environ["FAKE_SSH_MODE"] = mode
+                with self.assertRaises(TransferError) as caught:
+                    kit.data_transfer(self.config, "/synthetic/output", stage, manifest)
+                self.assertEqual(caught.exception.returncode, returncode)
+                self.assertFalse(kit.auth_failure(caught.exception.stderr_tail))
+                self.assertFalse(Path(self.config.backoff_file).exists())
+                self.assertFalse(kit.cooldown_active(self.config))
+        self.assertEqual(len(self.calls()), 2)
+        for source in ("relative/output", "/output\nnext", "", 42):
+            with self.subTest(source=source), self.assertRaises(SafetyError):
+                kit.data_transfer(self.config, source, stage, manifest)
+        with self.assertRaises(SafetyError):
+            kit.data_transfer("sherlock-dtn", "/synthetic/output", stage, manifest)
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_policy_identity_carries_partitions_hash_and_metadata_line_unchanged(self):
+        identity = kit.policy_identity()
+        expected = hashlib.sha256((ROOT / "src/sherlock_kit_data/partitions.json").read_bytes()).hexdigest()
+        self.assertEqual(identity["partitions_sha256"], expected)
+        self.assertEqual(identity["partitions_sha256"], partitions.partitions_sha256())
+        self.assertEqual(set(identity), {"schema_version", "code_revision", "policy_sha256", "install_mode", "partitions_sha256"})
+        lines = kit.policy_projection().splitlines()
+        self.assertEqual(lines[0], kit.BEGIN)
+        self.assertEqual(lines[1], f"<!-- source: SHERLOCK.md; schema_version: 1; policy_sha256: {identity['policy_sha256']} -->")
+        with patch("sys.stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(kit.main(["policy", "--identity"]), 0)
+        self.assertEqual(json.loads(output.getvalue())["partitions_sha256"], expected)
+
+    def frozen_install(self, overrides=None, drop=()):
+        """Simulate a frozen install: packaged data without a source checkout."""
+        data = self.root / "frozen-data"
+        data.mkdir(exist_ok=True)
+        (data / "SHERLOCK.md").write_bytes((ROOT / "SHERLOCK.md").read_bytes())
+        identity = {"schema_version": 1, "code_revision": "f" * 40, "install_mode": "frozen",
+                    "policy_sha256": hashlib.sha256((ROOT / "SHERLOCK.md").read_bytes()).hexdigest(),
+                    "partitions_sha256": partitions.partitions_sha256(), **(overrides or {})}
+        for key in drop:
+            identity.pop(key)
+        (data / "build_identity.json").write_text(json.dumps(identity))
+        return identity, patch.multiple(kit, _source_root=lambda: None, resources=SimpleNamespace(files=lambda package: data))
+
+    def test_frozen_identity_validates_partitions_hash(self):
+        identity, frozen = self.frozen_install()
+        with frozen:
+            self.assertEqual(kit.policy_identity(), identity)
+        for case, options in (("mismatch", {"overrides": {"partitions_sha256": "0" * 64}}), ("missing", {"drop": ("partitions_sha256",)})):
+            with self.subTest(case=case):
+                _, frozen = self.frozen_install(**options)
+                with frozen, self.assertRaisesRegex(ValueError, "partition"):
+                    kit.policy_identity()
+
+    def test_pin_partitions_hash_compared_only_when_advertised(self):
+        identity, frozen = self.frozen_install()
+        legacy = {key: value for key, value in identity.items() if key != "partitions_sha256"}
+        cases = {"complete": (identity, "complete"), "legacy": (legacy, "complete"),
+                 "mismatch": ({**identity, "partitions_sha256": "0" * 64}, "configuration_mismatch"),
+                 "malformed": ({**identity, "partitions_sha256": 7}, "configuration_mismatch")}
+        pin = self.root / "pin.json"
+        with frozen:
+            for name, (payload, expected) in cases.items():
+                with self.subTest(pin=name):
+                    pin.write_text(json.dumps(payload))
+                    self.assertEqual(kit.doctor(self.config, advertised_identity=pin)["advertised_identity"], expected)
 
 
 if __name__ == "__main__":

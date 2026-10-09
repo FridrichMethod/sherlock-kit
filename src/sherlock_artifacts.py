@@ -16,6 +16,29 @@ from sherlock_orchestration import DIGEST, SafetyError, canonical, digest
 
 
 IDENTITY_FIELDS = ("attempt", "cluster", "principal", "code_digest", "input_digest", "runtime_digest", "policy_digest")
+STDERR_TAIL_LIMIT = 500
+
+
+class TransferError(SafetyError):
+    """rsync did not complete; the private stage keeps partial bytes for a later resume.
+
+    returncode is rsync's exit status, or None when the whole-transfer deadline
+    passed. stderr_tail is bounded, single-line, free of control characters and of
+    the toolkit's own temporary file-list path, so it is safe to print.
+    """
+
+    def __init__(self, message, *, returncode=None, stderr_tail=""):
+        super().__init__(message)
+        self.returncode = returncode
+        self.stderr_tail = stderr_tail
+
+
+def _stderr_tail(raw, *, redact=(), limit=STDERR_TAIL_LIMIT):
+    text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else (raw or "")
+    for secret in redact:
+        text = text.replace(secret, "<files-from>")
+    text = "".join(ch for ch in text if ch.isspace() or (ord(ch) >= 32 and ord(ch) != 127))
+    return " ".join(text.split())[-limit:]
 
 
 def fsync_dir(path):
@@ -175,7 +198,16 @@ def rsync_transfer(source, stage, manifest, *, ssh_command=None, timeout=300):
         if ssh_command is not None:
             argv += ["-e", ssh_command]
         argv += ["--", source.rstrip("/") + "/", str(stage) + "/"]
-        subprocess.run(argv, check=True, timeout=timeout, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            subprocess.run(argv, check=True, timeout=timeout, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        except subprocess.CalledProcessError as exc:
+            tail = _stderr_tail(exc.stderr, redact=(name,))
+            raise TransferError(f"rsync transfer failed with exit status {exc.returncode}" + (f": {tail}" if tail else ""),
+                                returncode=exc.returncode, stderr_tail=tail) from None
+        except subprocess.TimeoutExpired as exc:
+            tail = _stderr_tail(exc.stderr, redact=(name,))
+            raise TransferError(f"rsync transfer exceeded its {timeout} s deadline" + (f": {tail}" if tail else ""),
+                                returncode=None, stderr_tail=tail) from None
     finally:
         os.unlink(name)
 
