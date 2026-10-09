@@ -196,8 +196,8 @@ terminal-conflict check inspects only the highest restart.
 `shk occupancy --partition NAME` is a read-only courtesy aid for one packaged
 partition. It runs `squeue -h -p NAME -O UserName:64,State:24,tres-alloc:128,TimeUsed:24,TimeLimit:24`
 with `LC_ALL=C`, parses the fixed-width columns, counts `RUNNING`/`COMPLETING`
-jobs and their GPUs (`gres/gpu=N`, or typed `gres/gpu:TYPE=N` only when no generic
-count is reported; the two are never added) and `PENDING` jobs per user, and prints
+jobs and their GPUs (the larger of the generic `gres/gpu=N` and typed
+`gres/gpu:TYPE=N` counts, never their sum) and `PENDING` jobs per user, and prints
 `partition`, `profile`, `users`, `totals` and `transport`. The query shares the
 60-second cache under a per-partition key. A transport failure exits 1 with empty
 users and the transport status. Occupancy gates nothing; the operator applies the

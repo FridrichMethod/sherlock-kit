@@ -15,7 +15,7 @@ import sherlock_kit as kit
 import sherlock_partitions as partitions
 from sherlock_commands import OPTIONAL_CONFIG, REQUIRED_CONFIG
 
-RELEASE = "0.2.0"
+VERSION = re.compile(r"\d+\.\d+\.\d+")
 CHANGELOG_HEADING = re.compile(r"^## (\S+)", re.MULTILINE)
 SKILLS = ("adapters/claude/skills/sherlock-kit-operate/SKILL.md", "adapters/codex/skills/sherlock-kit-operate/SKILL.md")
 
@@ -26,8 +26,8 @@ class ReleaseMetadataTests(unittest.TestCase):
         plugin = json.loads((ROOT / "adapters/claude/.claude-plugin/plugin.json").read_text())["version"]
         heading = CHANGELOG_HEADING.search((ROOT / "CHANGELOG.md").read_text())
         self.assertIsNotNone(heading, "CHANGELOG.md needs a '## VERSION' heading")
-        self.assertEqual({"pyproject": project, "plugin": plugin, "changelog": heading.group(1)},
-                         {"pyproject": RELEASE, "plugin": RELEASE, "changelog": RELEASE})
+        self.assertEqual({project, plugin, heading.group(1)}, {project}, "pyproject, plugin manifest and changelog versions differ")
+        self.assertRegex(project, VERSION)
 
     def test_projection_lists_every_packaged_profile_verbatim(self):
         projection = kit.policy_projection()

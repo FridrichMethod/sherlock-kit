@@ -43,6 +43,9 @@ engineering evidence, not acceptance evidence.
   `policy_sha256`, so the dotfiles pin and both delivered projections must be
   regenerated before new managed admissions. The package, Claude plugin and
   changelog versions are tied by `tests/test_release_metadata.py`.
+- Offline in-process tests (`tests/test_cli_flows.py`) drive `status`, `--all`,
+  `--acknowledge-preemption`, `submit --apply` gate ordering, remote fetch wiring
+  and `occupancy` through the CLI against a faked transport.
 
 ## 0.1.0
 
