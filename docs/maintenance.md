@@ -23,9 +23,12 @@ Do not place databases, credentials, private grants or research inputs in Git.
 ## Updates and recovery
 
 Publish a reviewed toolkit commit before generating a dotfiles pin that points
-to it. Verify the frozen installation, policy/projection and both client adapters
-in temporary targets. Only the integrator activates real configuration from a
-canonical checkout. Preserve local keys and preflight structured settings before
+to it. Any edit to `SHERLOCK.md` changes `policy_sha256` and the projection, so
+the pin and both delivered projections must be regenerated; until then doctor
+reports a mismatch and new managed admissions are blocked by design. Verify the
+frozen installation, policy/projection and both client adapters in temporary
+targets. Only the integrator activates real configuration from a canonical
+checkout. Preserve local keys and preflight structured settings before
 applying them. Retain old installed environments while recorded attempts require
 their runtime; existing virtual environments must not be relocated.
 
@@ -44,8 +47,12 @@ establishes scientific acceptance.
 ## Retiring local pilot artifacts
 
 Before moving state, stop its writers and verify process ownership and all attempt
-states. Unknown/submitting/reserved attempts prevent retirement. Complete
-accounting and zero reservations are necessary, not sufficient to discard history.
+states. Unknown/submitting/reserved attempts prevent retirement; `submitting` and
+`unknown` are equivalent for retirement, both being durable claims whose scheduler
+outcome only identity-bound evidence can settle. A `not_sent` attempt frozen by
+0.1.0 cannot be dispatched by this toolkit and holds its reservation until it is
+explicitly resolved. Complete accounting and zero reservations are necessary, not
+sufficient to discard history.
 Archive completed attempts and exact manifests/validators/receipts with an inventory
 of original paths, sizes, hashes and permissions. Use private owned directories;
 verify the inventory after moving. Keep cumulative ledger history for future
@@ -74,6 +81,9 @@ scientific results, old controllers or unrelated user files during toolkit clean
 ## Release checklist
 
 1. Review the diff and changelog; document supported capabilities and limitations.
+   Bump `pyproject.toml`, `adapters/claude/.claude-plugin/plugin.json` and the
+   newest `CHANGELOG.md` heading together; `tests/test_release_metadata.py`
+   enforces that the three agree.
 2. Run the complete [contributor checks](../CONTRIBUTING.md), including packaging,
    on clean committed main and require full toolkit CI.
 3. Build the wheel and source distribution from that exact committed revision in
