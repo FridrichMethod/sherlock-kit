@@ -5,6 +5,7 @@ It is not a distributed coordinator and Slurm tokens are not idempotency keys.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import closing, contextmanager
 from dataclasses import asdict, dataclass
 import hashlib
@@ -17,10 +18,21 @@ import shlex
 import socket
 import sqlite3
 import time
+from types import MappingProxyType
 import uuid
 
+from sherlock_partitions import PartitionError, partition_profile, partitions_sha256
+
 SCHEMA = 1
-TERMINAL = {"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY"}
+SUBMIT_TIME_TOLERANCE_SECONDS = 300
+BASE_TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "BOOT_FAIL", "DEADLINE"})
+TERMINAL = BASE_TERMINAL  # import compatibility; reconcile() uses terminal_states()
+PREEMPTION_STATES = frozenset({"PREEMPTED", "REQUEUED"})
+ACK_KINDS = frozenset({"transport_ack", "operator_ack"})
+PROFILE_FLAGS = ("preemptible", "requeue", "borrowed", "gpus_allowed")
+# Attempts frozen before partition profiles existed were all consumer CPU work.
+LEGACY_PROFILE = MappingProxyType({"preemptible": False, "requeue": False, "borrowed": False, "gpus_allowed": False, "courtesy": ""})
+IDENTITY_KEYS = ("cluster", "principal", "code_digest", "input_digest", "runtime_digest", "policy_digest")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 IDENT = re.compile(r"[A-Za-z0-9_.-]{1,128}")
 JOB = re.compile(r"[1-9][0-9]*(?:_[0-9]+)?")
@@ -38,7 +50,34 @@ def digest(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
 
-def resources_checked(resources):
+def packaged_profile(partition):
+    """The packaged profile of a partition; anything outside the table is refused."""
+    try:
+        return partition_profile(partition)
+    except PartitionError as exc:
+        raise SafetyError(str(exc)) from None
+
+
+def checked_profile(profile):
+    if not isinstance(profile, Mapping) or any(type(profile.get(flag)) is not bool for flag in PROFILE_FLAGS):
+        raise SafetyError("partition profile must carry boolean preemptible/requeue/borrowed/gpus_allowed flags")
+    return profile
+
+
+def frozen_profile(spec):
+    """Profile frozen at admission; legacy attempts behave as normal/no-requeue."""
+    profile = spec.get("partition_profile")
+    return LEGACY_PROFILE if profile is None else checked_profile(profile)
+
+
+def terminal_states(resources, profile):
+    """States that release an attempt: PREEMPTED only ends a preemptible job that is not requeued."""
+    if profile["preemptible"] and not resources.get("requeue", False):
+        return BASE_TERMINAL | {"PREEMPTED"}
+    return BASE_TERMINAL
+
+
+def resources_checked(resources, profile=None):
     allowed = {"partition", "cpus", "memory_mb", "walltime_seconds", "gpus", "tasks", "constraint", "signal", "requeue"}
     if set(resources) - allowed:
         raise SafetyError("unknown/site-unsupported resource fields (account and exclude are forbidden)")
@@ -52,8 +91,9 @@ def resources_checked(resources):
             raise SafetyError(f"invalid {name}")
     if not IDENT.fullmatch(r.get("partition", "")):
         raise SafetyError("explicit discovered partition required")
-    if r["gpus"] and r["partition"] == "normal":
-        raise SafetyError("GPU resources require an eligible GPU partition")
+    profile = packaged_profile(r["partition"]) if profile is None else checked_profile(profile)
+    if r["gpus"] and not profile["gpus_allowed"]:
+        raise SafetyError(f"GPU resources require an eligible GPU partition; the {r['partition']!r} profile forbids GPUs")
     r["walltime_seconds"] = ((r["walltime_seconds"] + 59) // 60) * 60
     if "constraint" in r and not re.fullmatch(r"[A-Za-z0-9_.-]+(?:[&|][A-Za-z0-9_.-]+)*", r["constraint"]):
         raise SafetyError("invalid feature constraint grammar")
@@ -61,9 +101,145 @@ def resources_checked(resources):
         raise SafetyError("invalid signal grammar")
     if "requeue" in r and type(r["requeue"]) is not bool:
         raise SafetyError("requeue must be boolean")
-    if r.get("requeue"):
-        raise SafetyError("automatic requeue requires a validated cumulative workload protocol; unsupported here")
+    r.setdefault("requeue", profile["requeue"])
+    if r["requeue"] and not profile["requeue"]:
+        raise SafetyError(f"automatic requeue is not permitted on partition {r['partition']!r}; its profile forbids requeue")
     return r
+
+
+def checked_grant(grant, spec, partition, limits, now):
+    """Borrowed scope must be backed by an actual external grant, not visibility or old script comments."""
+    if not grant or grant.get("grantee") != spec.principal or not grant.get("evidence_reference"):
+        raise SafetyError("borrowed admission disabled without identity-bound grant")
+    if not grant.get("valid_from", math.inf) <= now < grant.get("valid_until", -math.inf):
+        raise SafetyError("grant inactive/expired")
+    if partition not in grant.get("partitions", []) or grant.get("scope") != spec.resource_scope:
+        raise SafetyError("grant does not authorize this partition/scope")
+    # Limits cannot be loosened by a per-project profile.
+    if limits != grant.get("limits"):
+        raise SafetyError("all borrowed consumers must use grant's exact limits")
+
+
+def budget_charge(row, field):
+    """Final cost once certified; otherwise the larger of the frozen estimate and the stored lower bound."""
+    if row["cost_known"] and not row["reserved"]:
+        return row[field]
+    resources = json.loads(row["spec"])["resources"]
+    unit = resources["cpus"] * resources["tasks"] if field == "cpu_seconds" else resources["gpus"]
+    return max(unit * resources["walltime_seconds"], row[field])
+
+
+def restart_of(item):
+    restart = item.get("restart", 0)
+    if isinstance(restart, bool) or type(restart) is not int or restart < 0:
+        raise SafetyError("invalid restart count in scheduler evidence")
+    return restart
+
+
+def valid_cost(pair):
+    return all(not isinstance(x, bool) and isinstance(x, (int, float)) and math.isfinite(x) and x >= 0 for x in pair)
+
+
+def matching_evidence(current, evidence):
+    """Evidence bound to this attempt's frozen identity, job and submission window."""
+    spec, attempt = current["spec"], current["id"]
+    matches = []
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise SafetyError("malformed evidence")
+        if item.get("attempt") != attempt:
+            continue
+        if any(item.get(key) != spec[key] for key in IDENTITY_KEYS):
+            raise SafetyError("identity conflict retained; cannot adopt evidence")
+        if item.get("submitted_at", 0) < current["created"] - SUBMIT_TIME_TOLERANCE_SECONDS:
+            raise SafetyError("stale/job-id reuse evidence")
+        if not JOB.fullmatch(str(item.get("job_id", ""))):
+            raise SafetyError("invalid scheduler identity")
+        if current["job_id"] and item["job_id"] != current["job_id"]:
+            raise SafetyError("scheduler job identity conflict")
+        matches.append(item)
+    return matches
+
+
+def group_states(items, terminal):
+    states = {item.get("state") for item in items}
+    if states <= terminal and len(states) != 1:
+        raise SafetyError("terminal evidence conflicts")
+    if states & terminal and not states <= terminal:
+        raise SafetyError("scheduler/receipt state conflict; preserve unresolved")
+    return states
+
+
+def group_cost(items, terminal):
+    """Agreed (cpu, gpu, complete) of one restart's measured rows, or None."""
+    measured = [item for item in items if item.get("cost_known") is True
+                and (item.get("accounting_complete") is True or item.get("state") not in terminal)]
+    costs = {(item.get("cpu_seconds"), item.get("gpu_seconds")) for item in measured}
+    if len(costs) > 1:
+        raise SafetyError("accounting evidence conflicts")
+    if not costs:
+        return None
+    cost = costs.pop()
+    if not valid_cost(cost):
+        raise SafetyError("invalid accounting cost")
+    return (*cost, any(item.get("accounting_complete") is True for item in measured))
+
+
+def history_complete(groups, top):
+    """Restarts 0..top are all present and the authoritative rows claim no missing restart."""
+    if set(groups) != set(range(top + 1)):
+        return False
+    return all(item.get("restart_history_complete", top == 0) is True for item in groups[top])
+
+
+@dataclass(frozen=True)
+class Observation:
+    """One scheduler response about one job, read per restart; the highest restart is authoritative."""
+    top: int
+    states: tuple
+    terminal: bool
+    preempted: bool
+    measured: bool
+    known: bool
+    cpu_seconds: float
+    gpu_seconds: float
+
+
+def observe(matches, terminal):
+    groups = {}
+    for item in matches:
+        groups.setdefault(restart_of(item), []).append(item)
+    top = max(groups)
+    states = {restart: group_states(items, terminal) for restart, items in groups.items()}
+    costs = {restart: cost for restart, cost in ((restart, group_cost(items, terminal)) for restart, items in groups.items()) if cost is not None}
+    is_terminal = states[top] <= terminal and history_complete(groups, top)
+    return Observation(top=top, states=tuple(sorted(states[top], key=str)), terminal=is_terminal,
+                       preempted=top > 0 or any(item.get("state") in PREEMPTION_STATES for item in matches),
+                       measured=bool(costs), known=is_terminal and all(restart in costs and costs[restart][2] for restart in range(top + 1)),
+                       cpu_seconds=sum(cost[0] for cost in costs.values()), gpu_seconds=sum(cost[1] for cost in costs.values()))
+
+
+def cost_floor(latest, history):
+    """Stored and certified costs never decrease."""
+    complete = [(e.get("cpu_seconds", 0), e.get("gpu_seconds", 0)) for e in history if e.get("cost_known") and e.get("accounting_complete")]
+    return (max([latest["cpu_seconds"], *(c[0] for c in complete)]), max([latest["gpu_seconds"], *(c[1] for c in complete)]))
+
+
+def recorded_cost(history):
+    """Lower-bound (cpu, gpu, known) over the recorded restarts of one job, or None."""
+    per_restart, top = {}, -1
+    for item in history:
+        restart = restart_of(item)
+        top = max(top, restart)
+        cost = (item.get("cpu_seconds"), item.get("gpu_seconds"))
+        if item.get("cost_known") is not True or not valid_cost(cost):
+            continue
+        cpu, gpu, complete = per_restart.get(restart, (0, 0, False))
+        per_restart[restart] = (max(cpu, cost[0]), max(gpu, cost[1]), complete or item.get("accounting_complete") is True)
+    if not per_restart:
+        return None
+    known = all(restart in per_restart and per_restart[restart][2] for restart in range(top + 1))
+    return (sum(c[0] for c in per_restart.values()), sum(c[1] for c in per_restart.values()), known)
 
 
 @dataclass(frozen=True)
@@ -185,33 +361,37 @@ class Coordinator:
         finally:
             db.close()
 
-    def get(self, attempt):
-        with closing(self.connect()) as db:
-            row = db.execute("SELECT * FROM attempts WHERE id=?", (attempt,)).fetchone()
-        if row is None:
-            raise SafetyError("unknown attempt")
+    @staticmethod
+    def _record(row):
         result = dict(row)
         result["spec"] = json.loads(result["spec"])
         result["limits"] = json.loads(result["limits"])
         return result
 
+    def get(self, attempt):
+        with closing(self.connect()) as db:
+            row = db.execute("SELECT * FROM attempts WHERE id=?", (attempt,)).fetchone()
+        if row is None:
+            raise SafetyError("unknown attempt")
+        return self._record(row)
+
+    def unresolved(self):
+        """Reserved attempts whose scheduler outcome is still open, oldest first."""
+        with closing(self.connect()) as db:
+            rows = db.execute("SELECT * FROM attempts WHERE reserved=1 AND state IN ('submitted','unknown') ORDER BY created, rowid").fetchall()
+        return [self._record(row) for row in rows]
+
     def admit(self, spec: AttemptSpec, limits: dict, *, grant=None, advertised_policy=None, now=None):
         r = spec.checked()
+        profile = packaged_profile(r["partition"])
         now = time.time() if now is None else now
         if advertised_policy is not None and advertised_policy != spec.policy_digest:
             raise SafetyError("installed/advertised policy mismatch; new admission blocked")
-        # Normal partitions use consumer-scoped limits. Borrowed scope must be backed
-        # by an actual external grant, not visibility or old script comments.
-        if r["partition"] == "btrippe" or grant is not None:
-            if not grant or grant.get("grantee") != spec.principal or not grant.get("evidence_reference"):
-                raise SafetyError("borrowed admission disabled without identity-bound grant")
-            if not grant.get("valid_from", math.inf) <= now < grant.get("valid_until", -math.inf):
-                raise SafetyError("grant inactive/expired")
-            if r["partition"] not in grant.get("partitions", []) or grant.get("scope") != spec.resource_scope:
-                raise SafetyError("grant does not authorize this partition/scope")
-            # Limits cannot be loosened by a per-project profile.
-            if limits != grant.get("limits"):
-                raise SafetyError("all borrowed consumers must use grant's exact limits")
+        # Consumer partitions use consumer-scoped limits and ignore any configured grant;
+        # the packaged profile, never a partition name, decides what is borrowed.
+        borrowed = profile["borrowed"]
+        if borrowed:
+            checked_grant(grant, spec, r["partition"], limits, now)
         allowed = {"cpus", "gpus", "tasks", "cpu_seconds", "gpu_seconds"}
         if set(limits) - allowed or not {"cpus", "gpus", "tasks"} <= set(limits):
             raise SafetyError("explicit concurrency limits required")
@@ -224,7 +404,9 @@ class Coordinator:
         frozen = asdict(spec)
         frozen["resources"] = r
         frozen["schema_version"] = SCHEMA
-        frozen["grant"] = grant
+        frozen["grant"] = grant if borrowed else None
+        frozen["partition_profile"] = dict(profile)
+        frozen["partitions_sha256"] = partitions_sha256()
         with self.transaction() as db:
             if db.execute("SELECT 1 FROM quarantines WHERE scope=?", (scope,)).fetchone():
                 raise SafetyError("scope quarantined by conflicting scheduler identity; explicit recovery required")
@@ -246,8 +428,9 @@ class Coordinator:
             for field in ("cpus", "gpus", "tasks"):
                 if sum(item[field] * (item["tasks"] if field == "cpus" else 1) for item in active) + r[field] * (r["tasks"] if field == "cpus" else 1) > limits[field]:
                     raise SafetyError(f"shared {field} concurrency exhausted")
+            charged = [row for row in rows if row["reserved"] or row["state"] == "terminal"]
             for field, amount in (("cpu_seconds", r["cpus"] * r["tasks"]), ("gpu_seconds", r["gpus"])):
-                consumed = sum(row[field] if row["cost_known"] and not row["reserved"] else json.loads(row["spec"])["resources"]["cpus" if field == "cpu_seconds" else "gpus"] * json.loads(row["spec"])["resources"]["walltime_seconds"] * (json.loads(row["spec"])["resources"]["tasks"] if field == "cpu_seconds" else 1) for row in rows if row["reserved"] or row["state"] == "terminal")
+                consumed = sum(budget_charge(row, field) for row in charged)
                 if field in limits and consumed + amount * r["walltime_seconds"] > limits[field]:
                     raise SafetyError(f"shared {field} budget exhausted")
             db.execute("INSERT INTO attempts(id,logical,scope,spec,limits,created,state,reserved) VALUES (?,?,?,?,?,?,?,1)",
@@ -256,6 +439,10 @@ class Coordinator:
 
     def dispatch(self, attempt, runner):
         """Claim once, commit before process launch, release lock before transport."""
+        spec = self.get(attempt)["spec"]
+        # A frozen spec this toolkit cannot dispatch is refused before any claim, so
+        # the attempt stays exactly as admitted instead of becoming unknown.
+        command = submission_argv(attempt, spec)
         with self.transaction() as db:
             row = db.execute("SELECT * FROM attempts WHERE id=?", (attempt,)).fetchone()
             if row is None or row["state"] != "not_sent" or not row["reserved"]:
@@ -263,9 +450,8 @@ class Coordinator:
             if db.execute("SELECT 1 FROM quarantines WHERE scope=?", (row["scope"],)).fetchone():
                 raise SafetyError("scope quarantined; no further dispatch")
             db.execute("UPDATE attempts SET state='submitting' WHERE id=?", (attempt,))
-        spec = json.loads(row["spec"])
         try:
-            result = runner(submission_argv(attempt, spec))
+            result = runner(command)
             output = result.stdout.strip()
             job_id = None
             if not result.dispatched:
@@ -309,67 +495,76 @@ class Coordinator:
 
     def reconcile(self, attempt, records, *, receipts=()):
         current = self.get(attempt)
-        spec = current["spec"]
-        matches = []
-        evidence = list(records) + list(receipts)
-        for item in evidence:
-            if not isinstance(item, dict):
-                raise SafetyError("malformed evidence")
-            if item.get("attempt") != attempt:
-                continue
-            required = ("cluster", "principal", "code_digest", "input_digest", "runtime_digest", "policy_digest")
-            if any(item.get(key) != spec[key] for key in required):
-                raise SafetyError("identity conflict retained; cannot adopt evidence")
-            if item.get("submitted_at", 0) < current["created"] - 5:
-                raise SafetyError("stale/job-id reuse evidence")
-            if not JOB.fullmatch(str(item.get("job_id", ""))):
-                raise SafetyError("invalid scheduler identity")
-            if current["job_id"] and item["job_id"] != current["job_id"]:
-                raise SafetyError("scheduler job identity conflict")
-            matches.append(item)
+        profile = frozen_profile(current["spec"])
+        terminal = terminal_states(current["spec"]["resources"], profile)
+        matches = matching_evidence(current, [*records, *receipts])
         if not matches:
             return {"attempt": current, "resolution": "inconclusive", "reason": "absence/lag/retention never proves non-submission"}
         if len({item["job_id"] for item in matches}) != 1:
             raise SafetyError("multiple scheduler identities for one attempt")
-        states = {item.get("state") for item in matches}
-        terminal = states <= TERMINAL
-        if terminal and len(states) != 1:
-            raise SafetyError("terminal evidence conflicts")
-        if states & TERMINAL and not terminal:
-            raise SafetyError("scheduler/receipt state conflict; preserve unresolved")
-        measured = [item for item in matches if item.get("cost_known") is True and (not terminal or item.get("accounting_complete") is True)]
-        costs = {(item.get("cpu_seconds"), item.get("gpu_seconds")) for item in measured}
-        if len(costs) > 1:
-            raise SafetyError("accounting evidence conflicts")
-        for cpu, gpu in costs:
-            if any(isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x) or x < 0 for x in (cpu, gpu)):
-                raise SafetyError("invalid accounting cost")
+        job_id = matches[0]["job_id"]
+        observed = observe(matches, terminal)
         with self.transaction() as db:
             latest = db.execute("SELECT * FROM attempts WHERE id=?", (attempt,)).fetchone()
-            if latest["job_id"] and latest["job_id"] != matches[0]["job_id"]:
+            if latest["job_id"] and latest["job_id"] != job_id:
                 raise SafetyError("concurrent scheduler job identity conflict")
-            historical = [json.loads(row[0]) for row in db.execute("SELECT body FROM evidence WHERE attempt=?", (attempt,))]
-            historic_terminal = [item for item in historical if item.get("state") in TERMINAL]
-            if historic_terminal:
-                if not terminal:
+            history = self._scheduler_history(db, attempt)
+            if latest["state"] == "terminal":
+                if not observed.terminal:
                     return {"attempt": self.get(attempt), "resolution": "stale_observation_ignored", "scientific_validation": "unverified"}
-                if {item["state"] for item in historic_terminal} != states:
+                previous = {e.get("state") for e in history if e.get("state") in terminal and restart_of(e) == observed.top}
+                if previous and previous != set(observed.states):
                     raise SafetyError("terminal evidence conflicts")
-            if measured:
-                cpu, gpu = next(iter(costs))
-                historical_costs = [(e.get("cpu_seconds", 0), e.get("gpu_seconds", 0)) for e in historical if e.get("cost_known") and e.get("accounting_complete")]
-                cpu_floor = max([latest["cpu_seconds"], *(c[0] for c in historical_costs)])
-                gpu_floor = max([latest["gpu_seconds"], *(c[1] for c in historical_costs)])
-                if cpu < cpu_floor or gpu < gpu_floor:
+                anomaly = False
+            else:
+                # Preemption or a restart where the profile forbids both is an anomaly to
+                # investigate: the evidence is kept, the reservation is not released.
+                anomaly = observed.preempted and not profile["preemptible"]
+            if observed.measured:
+                cpu_floor, gpu_floor = cost_floor(latest, history)
+                if observed.cpu_seconds < cpu_floor or observed.gpu_seconds < gpu_floor:
                     raise SafetyError("accounting costs may not decrease")
             for item in matches:
                 db.execute("INSERT OR IGNORE INTO evidence VALUES (?,?,?)", (attempt, digest(item), canonical(item)))
-            db.execute("UPDATE attempts SET state=?,job_id=?,reserved=? WHERE id=?", ("terminal" if terminal else "submitted", matches[0]["job_id"], 0 if terminal else 1, attempt))
-            if terminal and not measured and not any(e.get("cost_known") and e.get("accounting_complete") for e in historic_terminal):
+            released = observed.terminal and not anomaly
+            db.execute("UPDATE attempts SET state=?,job_id=?,reserved=? WHERE id=?", ("terminal" if released else "submitted", job_id, 0 if released else 1, attempt))
+            if observed.measured:
+                known = observed.known and not anomaly
+                db.execute("UPDATE attempts SET cpu_seconds=?,gpu_seconds=?,cost_known=? WHERE id=?", (observed.cpu_seconds, observed.gpu_seconds, int(known), attempt))
+            elif released and not any(e.get("cost_known") and e.get("accounting_complete") for e in history):
                 db.execute("UPDATE attempts SET cost_known=0 WHERE id=?", (attempt,))
-            if measured:
-                db.execute("UPDATE attempts SET cpu_seconds=?,gpu_seconds=?,cost_known=1 WHERE id=?", (cpu, gpu, attempt))
-        return {"attempt": self.get(attempt), "resolution": "terminal" if terminal else "identified", "scientific_validation": "unverified"}
+        resolution = "unexpected_preemption" if anomaly else "terminal" if released else "identified"
+        return {"attempt": self.get(attempt), "resolution": resolution, "scientific_validation": "unverified"}
+
+    def acknowledge_preemption(self, attempt, *, now=None):
+        """Release an investigated preemption on a non-preemptible partition; all evidence is kept."""
+        current = self.get(attempt)
+        if frozen_profile(current["spec"])["preemptible"]:
+            raise SafetyError("acknowledgement applies only to non-preemptible partitions; preemptible attempts resolve from accounting")
+        now = time.time() if now is None else now
+        with self.transaction() as db:
+            latest = db.execute("SELECT * FROM attempts WHERE id=?", (attempt,)).fetchone()
+            if latest["state"] == "terminal" or not latest["reserved"]:
+                raise SafetyError("attempt already resolved; nothing to acknowledge")
+            history = self._scheduler_history(db, attempt)
+            preempted = [e for e in history if e.get("state") in PREEMPTION_STATES or restart_of(e) > 0]
+            if not preempted:
+                raise SafetyError("no recorded preemption evidence for this attempt; reconcile first")
+            ack = {"kind": "operator_ack", "attempt": attempt, "job_id": latest["job_id"], "acknowledged_at": now,
+                   "resolution": "acknowledged_preemption", "states": sorted({str(e.get("state")) for e in preempted})}
+            db.execute("INSERT OR IGNORE INTO evidence VALUES (?,?,?)", (attempt, digest(ack), canonical(ack)))
+            db.execute("UPDATE attempts SET state='terminal',reserved=0 WHERE id=?", (attempt,))
+            recorded = recorded_cost(history)
+            if recorded is not None:
+                cpu, gpu, known = recorded
+                db.execute("UPDATE attempts SET cpu_seconds=?,gpu_seconds=?,cost_known=? WHERE id=?",
+                           (max(cpu, latest["cpu_seconds"]), max(gpu, latest["gpu_seconds"]), int(known), attempt))
+        return self.get(attempt)
+
+    @staticmethod
+    def _scheduler_history(db, attempt):
+        rows = [json.loads(row[0]) for row in db.execute("SELECT body FROM evidence WHERE attempt=?", (attempt,))]
+        return [item for item in rows if item.get("kind") not in ACK_KINDS]
 
     def pin_manifest(self, attempt, manifest):
         self.get(attempt)
@@ -409,12 +604,17 @@ def submission_argv(attempt, spec):
     """Snapshot script bytes before dispatch, suppress unowned SBATCH_* overrides.
 
     A nonzero sbatch result remains unknown: it can follow an accepted dispatch.
-    Only a proven pre-sbatch validation failure is reported as not_sent.
+    Only a proven pre-sbatch validation failure is reported as not_sent. Only the
+    profile frozen at admission is consulted; the packaged table is not re-read.
     """
-    r = resources_checked(spec["resources"])
+    profile = spec.get("partition_profile")
+    if profile is None or "requeue" not in spec.get("resources", {}):
+        raise SafetyError("frozen spec lacks partition_profile/requeue; attempts admitted before partition profiles cannot be dispatched by this toolkit")
+    r = resources_checked(spec["resources"], profile)
+    requeue = ["--requeue", "--open-mode=append"] if r["requeue"] else ["--no-requeue"]
     options = ["sbatch", "--parsable", "--job-name=shk-" + attempt, "--comment=shk:" + attempt,
                "--partition=" + r["partition"], "--cpus-per-task=" + str(r["cpus"]),
-               "--no-requeue", "--ntasks=" + str(r["tasks"]), "--mem=" + str(r["memory_mb"]) + "M",
+               *requeue, "--ntasks=" + str(r["tasks"]), "--mem=" + str(r["memory_mb"]) + "M",
                "--time=" + str(r["walltime_seconds"] // 60)]
     run_directory = spec.get("remote_run_directory")
     if run_directory:
