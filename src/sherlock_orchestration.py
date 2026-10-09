@@ -376,9 +376,13 @@ class Coordinator:
         return self._record(row)
 
     def unresolved(self):
-        """Reserved attempts whose scheduler outcome is still open, oldest first."""
+        """Reserved attempts whose scheduler outcome is still open, oldest first.
+
+        A claim abandoned in `submitting` (dispatcher died after its durable claim) is
+        treated exactly like `unknown`: listed here, never re-dispatched.
+        """
         with closing(self.connect()) as db:
-            rows = db.execute("SELECT * FROM attempts WHERE reserved=1 AND state IN ('submitted','unknown') ORDER BY created, rowid").fetchall()
+            rows = db.execute("SELECT * FROM attempts WHERE reserved=1 AND state IN ('submitting','submitted','unknown') ORDER BY created, rowid").fetchall()
         return [self._record(row) for row in rows]
 
     def admit(self, spec: AttemptSpec, limits: dict, *, grant=None, advertised_policy=None, now=None):

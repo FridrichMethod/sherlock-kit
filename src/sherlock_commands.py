@@ -249,7 +249,7 @@ def reconciled_or_error(coordinator, attempt, rows):
 
 
 def status_all(coordinator, config, transport, *, remote=True):
-    """One bounded query for every reserved submitted/unknown attempt, each reconciled on its own.
+    """One bounded query for every reserved submitting/submitted/unknown attempt, each reconciled on its own.
 
     sacct ANDs its filters, so one --name list selects all attempts; every job is named shk-<attempt>.
     """
@@ -403,7 +403,7 @@ def build_parser():
         check.add_argument('--config', required=True)
         selection = check.add_mutually_exclusive_group(required=True)
         selection.add_argument('--attempt')
-        selection.add_argument('--all', action='store_true', help='Every reserved attempt still submitted/unknown, through one bounded query')
+        selection.add_argument('--all', action='store_true', help='Every reserved attempt still submitting/submitted/unknown, through one bounded query')
         check.add_argument('--local', action='store_true')
         if name == 'reconcile':
             check.add_argument('--acknowledge-preemption', action='store_true',
