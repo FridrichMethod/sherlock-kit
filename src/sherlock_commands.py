@@ -240,6 +240,14 @@ def status(coordinator, attempt_id, config, transport, *, remote=True):
     return coordinator.reconcile(attempt_id, accounting_records(attempt, result['rows']))
 
 
+def reconciled_or_error(coordinator, attempt, rows):
+    """Reconcile one attempt of a batch; its contract violation is reported, never allowed to hide the others."""
+    try:
+        return coordinator.reconcile(attempt['id'], accounting_records(attempt, rows))
+    except SafetyError as exc:
+        return {'attempt': coordinator.get(attempt['id']), 'resolution': 'error', 'error': str(exc), 'scientific_validation': 'unverified'}
+
+
 def status_all(coordinator, config, transport, *, remote=True):
     """One bounded query for every reserved submitted/unknown attempt, each reconciled on its own.
 
@@ -258,7 +266,7 @@ def status_all(coordinator, config, transport, *, remote=True):
     result = scheduler_rows(coordinator, transport, key, sacct_argv(config['principal'], min(attempt['created'] for attempt in owned), selector))
     if result.get('status') != 'complete':
         return [inconclusive_result(attempt, result.get('status')) for attempt in owned] + foreign
-    return [coordinator.reconcile(attempt['id'], accounting_records(attempt, result['rows'])) for attempt in owned] + foreign
+    return [reconciled_or_error(coordinator, attempt, result['rows']) for attempt in owned] + foreign
 
 
 def squeue_argv(partition):
@@ -527,6 +535,11 @@ def unexpected_preemption(result):
     return any(isinstance(item, dict) and item.get('resolution') == 'unexpected_preemption' for item in items)
 
 
+def failed_reconciliations(result):
+    items = result if isinstance(result, list) else [result]
+    return sum(1 for item in items if isinstance(item, dict) and item.get('resolution') == 'error')
+
+
 def main(argv=None):
     from sherlock_kit import TransportConfig
     parser = build_parser()
@@ -548,6 +561,9 @@ def main(argv=None):
         print(json.dumps(result, sort_keys=True, indent=2))
         if unexpected_preemption(result):
             parser.exit(2, 'shk: ' + PREEMPTION_MESSAGE + '\n')
+        failed = failed_reconciliations(result)
+        if failed:
+            parser.exit(2, f'shk: {failed} attempt(s) could not be reconciled; see the "error" entries\n')
         return code
     except (SafetyError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         parser.exit(2, f'shk: {exc}\n')

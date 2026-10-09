@@ -108,7 +108,7 @@ class CommandBoundaryTests(unittest.TestCase):
         self.assertEqual(self.accounting(Submit=stamp(CREATED - SUBMIT_TIME_TOLERANCE_SECONDS + 1), Start=stamp(CREATED - SUBMIT_TIME_TOLERANCE_SECONDS + 2))[0]['state'], 'COMPLETED')
         with self.assertRaisesRegex(SafetyError, 'malformed'):
             parse_rows('a|b|c\n')
-        self.assertEqual(parse_rows('')[:0], [])
+        self.assertEqual(parse_rows(''), [])
         self.assertEqual(parse_rows(sacct_line('x', CREATED) + '|\n\n')[0]['JobName'], 'shk-x')
         with self.assertRaisesRegex(SafetyError, 'conflicts with acknowledgement'):
             parse_accounting(sacct_line(self.attempt['id'], CREATED), {**self.attempt, 'created': CREATED, 'job_id': '999'})
@@ -254,6 +254,25 @@ class CommandBoundaryTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual([item['resolution'] for item in output], ['inconclusive'])
         self.assertIn('another principal', output[0]['reason'])
+
+    def test_status_all_isolates_per_attempt_errors(self):
+        coordinator = Coordinator(self.root / 'isolate')
+        ack = lambda stdout: (lambda command: RemoteResult('complete', stdout=stdout, returncode=0, dispatched=True))
+        first = coordinator.admit(spec(task='a'), MANY)['id']
+        coordinator.dispatch(first, ack('101'))
+        second = coordinator.admit(spec(task='b'), MANY)['id']
+        coordinator.dispatch(second, ack('102'))
+        created = min(row['created'] for row in coordinator.unresolved())
+        rows = '\n'.join((sacct_line(first, created, JobID='101', JobIDRaw='101'),
+                          sacct_line(second, created, JobID='102', JobIDRaw='102', User='someone-else'))) + '\n'
+        config = self.config_file(coordinator, limits=MANY)
+        code, output, err = self.run_main(['reconcile', '--all', '--config', config], recorder([], rows))
+        self.assertEqual(code, 2)
+        self.assertEqual([item['resolution'] for item in output], ['terminal', 'error'])
+        self.assertIn('ownership', output[1]['error'])
+        self.assertIn('could not be reconciled', err)
+        self.assertEqual((coordinator.get(first)['state'], coordinator.get(first)['reserved']), ('terminal', 0))
+        self.assertEqual((coordinator.get(second)['state'], coordinator.get(second)['reserved']), ('submitted', 1))
 
     def test_status_all_without_unresolved_attempts_queries_nothing(self):
         coordinator = Coordinator(self.root / 'idle')
