@@ -4,8 +4,10 @@
 
 Partition profiles, requeue-aware reconciliation, batch reconciliation and
 partition occupancy. Every new path is tested offline against synthetic scheduler
-responses; no new live pilot was run, so GPU, preemption and requeue handling is
-engineering evidence, not acceptance evidence.
+responses, and a live owners/btrippe GPU pilot on 2026-10-09 exercised GPU
+admission, one operator-issued requeue with restart-aware accounting, `--all`,
+occupancy and DTN fetch (see acceptance evidence); natural preemption remains
+offline evidence. All of it is engineering evidence, not scientific acceptance.
 
 - Packaged partition profile table (`sherlock_kit_data/partitions.json`, module
   `sherlock_partitions`): `normal`, `owners` and `btrippe` with boolean

@@ -81,6 +81,55 @@ It is not validator drift. Raw inputs, private lineage, concrete storage
 configuration and full receipts are retained in the private data archive,
 with relocation inventory and recovery notes; they are not public package files.
 
+## Live GPU pilot (0.2.0)
+
+Run 2026-10-09 with frozen toolkit `ef0879554ced24984028edda86a3d38da2d3366f`
+(policy `561c3eb3…`, partitions `28ed9d1b…`) from one workstation against a new
+pilot namespace under `$GROUP_HOME`; synthetic resumable GPU workload (fp16 matrix
+products with a durable checkpoint every 60 s of compute) plus the bounded
+protocol-stress soak imported from the shipped wheel. No research code or data.
+Budget recorded before dispatch: limits 8 CPUs, 2 GPUs, 2 tasks, 36,000 CPU-seconds,
+9,000 GPU-seconds; two jobs, one planned requeue. `scientific_acceptance=false`.
+
+`shk occupancy --partition btrippe` parsed live `squeue -O` output before the
+borrowed submission: one other user held 2 of the node's 4 H100 GPUs, nothing
+pending; the pilot took 1 GPU for 15 minutes under the profile's courtesy text.
+The borrowed admission carried an identity-bound grant (group membership and OAK
+storage as evidence); a configured grant no longer affected the owners attempt.
+
+| Attempt | Job | Partition | Request | Outcome |
+|---|---|---|---|---|
+| `f8c19b59` | 47099013 | btrippe | 1 GPU, 4 CPU, 16 GB, 15 min, `--no-requeue` | COMPLETED, 506 s on an H100 80GB; 480.0 s GPU compute in 14,489 steps (median 663 TFLOPS fp16); soak 10000 cases passed |
+| `116283cd` | 47099011 | owners | 1 GPU, 4 CPU, 16 GB, 30 min, `--requeue --open-mode=append` | REQUEUED once by the operator after 914 s, then COMPLETED in 363 s on an A100 80GB; 1,200.1 s GPU compute in 13,746 steps across both runs; soak 20000 cases passed |
+
+Requeue drill: `scontrol requeue 47099011` was issued once at 12:12:13 UTC after
+fifteen checkpoints. Slurm reported `CANCELLED … DUE TO JOB REQUEUE` two seconds
+later; neither the batch shell nor the Python workload observed a SIGTERM window
+and the final checkpoint write did not happen, so the restart resumed from the last
+periodic checkpoint (899.5 s, 10,323 steps) and recomputed under a minute of work
+without double counting. The restart waited 69 minutes for an owners GPU (the
+first run had waited 29 minutes); `sacct --duplicates` then showed two rows for one
+JobID (`REQUEUED` Restarts=0 ElapsedRaw 914, `COMPLETED` Restarts=1 ElapsedRaw 363,
+distinct DBIndex). Reconciliation stored the lower bound 914 GPU-seconds with
+`cost_known=0` while the restart was pending and certified 1,277 GPU-seconds /
+5,108 CPU-seconds with `cost_known=1` once the history was complete. The
+restart-0 soak was killed before its report could be copied, so the owners bundle
+holds only the restart-1 soak.
+
+Both bundles were fetched through the DTN with manifest-bound rsync, validated by
+the frozen validator (identity `e5b1208db41c1e33…`), promoted atomically
+with durable receipts, and recovered offline with `fetch --local`
+(`recovered: true`): btrippe 4 files / 9,541,799 bytes, manifest
+`e92e078b7b30213d2c713a2932245cf3f2e30ef7c6c36b91af1422e3aa4fb605`; owners 5 files / 19,105,607 bytes, manifest
+`60cd3cd4f40ae06d1c3e3721de375f54a82f440e3a7631930a254b3cbf7a738b`. Final shared ledger: both attempts terminal,
+zero reservations, 7,132 CPU-seconds and 1,783 GPU-seconds charged for this scope.
+
+Not exercised: natural preemption by a node owner, `unexpected_preemption` on a
+non-preemptible partition, `--acknowledge-preemption`, `--all` over hundreds of
+attempts, and a dispatcher crash leaving a `submitting` claim (the post-pilot review
+found and fixed its exclusion from `--all` in `3e7e798`). Private evidence,
+configuration, specs and receipts stay in the owner's data area.
+
 ## Release-maintenance verification
 
 The cleanup release adds explicit transport/launcher state locators and routes
@@ -122,7 +171,8 @@ missing Python handler exited 2 and blocked. These are version-specific
 observations, not portable guarantees; [structured Codex evidence](codex-hook-failure-modes.md)
 is retained. Global production hooks remain opt-in; doctor cannot attest live trust.
 
-Accepted scope is one authoritative POSIX workstation and immutable CPU allocation.
-No arrays/requeue/restarts, distributed controller, general DDP/GPU recovery or
-other research migration is certified. Windows instruction/guard/install adapters
+Accepted scope is one authoritative POSIX workstation and a single allocation per
+attempt on a packaged partition profile; requeue only on `owners` with a script
+that resumes from its own checkpoints. No arrays, distributed controller, general
+DDP/GPU recovery or other research migration is certified. Windows instruction/guard/install adapters
 do not imply a Windows controller. Borrowed access was never inferred.

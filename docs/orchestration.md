@@ -10,8 +10,10 @@ is a separate local research commit; no research source or data is distributed
 here. The live CPU provenance pilot on `normal` passed shared submission,
 reconciliation, DTN fetch and offline recovery; exact resources, identities and
 limitations are recorded in [acceptance evidence](validation/acceptance.md). The
-GPU, preemption, requeue, `--all` and occupancy paths added in 0.2.0 are tested
-offline against synthetic scheduler responses and have not been live-piloted.
+GPU, requeue, `--all`, occupancy and DTN fetch paths added in 0.2.0 were exercised
+by a live owners/btrippe GPU pilot on 2026-10-09 (one operator-issued requeue with
+restart-aware accounting, two fetched bundles); natural preemption and the
+`unexpected_preemption` path remain offline-tested only.
 
 The authoritative controller and artifact promotion currently require POSIX
 (`fcntl`, Unix ownership and no-follow filesystem checks). Windows instruction,
@@ -201,8 +203,8 @@ jobs and their GPUs (the larger of the generic `gres/gpu=N` and typed
 `partition`, `profile`, `users`, `totals` and `transport`. The query shares the
 60-second cache under a per-partition key. A transport failure exits 1 with empty
 users and the transport status. Occupancy gates nothing; the operator applies the
-profile's courtesy text. The fixed-width column layout is an assumption that
-still needs one live confirmation in a pilot.
+profile's courtesy text. The fixed-width column layout was confirmed once against
+live `squeue` output in the 2026-10-09 pilot.
 
 ## Fetch
 
