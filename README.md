@@ -3,8 +3,9 @@
 [![CI](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml)
 
 Shared Sherlock operational policy, bounded OpenSSH transport, read-only
-diagnostics, typed CPU submission/reconciliation and verified artifact transfer.
-Python 3.11+, POSIX for orchestration, OpenSSH, and rsync for transfers.
+diagnostics, typed submission/reconciliation on packaged partition profiles and
+verified artifact transfer. Python 3.11+, POSIX for orchestration, OpenSSH, and
+rsync for transfers.
 
 Read [SHERLOCK.md](SHERLOCK.md) before operating Sherlock. The toolkit does not
 authorize resources, infer borrowed access, enforce arbitrary shell scripts or
@@ -39,7 +40,8 @@ install dependencies.
 - [Installation and configuration](docs/installation.md): immutable identity,
   explicit state placement, standalone Python API and agent delivery.
 - [Typed operations](docs/orchestration.md): private consumer configuration,
-  submit preview/apply, status/reconciliation and manifest-bound fetch.
+  partition profiles, submit preview/apply, status/reconciliation of one attempt
+  or `--all`, partition occupancy and manifest-bound fetch.
 - [Optional guard](docs/guard.md): narrow patterns, one registration owner,
   actual client trust and failure behavior.
 - [Maintenance](docs/maintenance.md): updates, controller state, recovery,
@@ -48,13 +50,22 @@ install dependencies.
   actual client checks; [synthetic consumer](tests/fixtures/consumer/README.md)
   provides an offline first-day example.
 
-Supported orchestration is one authoritative POSIX workstation and immutable CPU
-allocation. Arrays, requeue/restarts, distributed controllers and general GPU/DDP
-recovery are not supported. Workload source/runtime/input identities, authorized
-storage, budget and scientific validator are explicit consumer inputs. Unknown
-submission outcomes retain reservations and never trigger automatic retries.
-Fetch checks exact inventory, bytes and validator identity before atomic promotion;
-local recovery can finish a durable receipt without network access.
+Supported orchestration is one authoritative POSIX workstation and a single
+allocation per attempt on a packaged partition profile (`normal`, `owners`,
+`btrippe`). Slurm requeue is emitted only where the profile allows it, and a
+requeued script must checkpoint and resume on its own. The GPU, preemption and
+requeue paths are offline-tested against synthetic scheduler responses, not
+live-piloted; the accepted live pilot was CPU work on `normal`. Arrays,
+distributed controllers and general DDP recovery are not supported. Workload
+source/runtime/input identities, authorized storage, budget and scientific
+validator are explicit consumer inputs. `shk occupancy` reports a borrowed
+partition's current use before a courtesy submission and gates nothing;
+`status`/`reconcile --all` cover many open attempts in one bounded query. Unknown
+submission outcomes retain reservations and never trigger automatic retries, and
+an unexpected preemption on a non-preemptible partition keeps its reservation
+until an operator acknowledges it. Fetch checks exact inventory, bytes and
+validator identity before atomic promotion; local recovery can finish a durable
+receipt without network access.
 
 Guard and skill adapters call the same installed toolkit. A file's presence does
 not prove active registration, current trust or enforcement; doctor reports those

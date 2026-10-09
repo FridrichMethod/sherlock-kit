@@ -49,6 +49,13 @@ relevant topic guides before acting; check `hostname` and `SLURM_JOB_ID` first.
   authentication bootstrap. No authentication storms or stored MFA/passwords.
   A lost mutation reply is unknown; preserve its reservation and reconcile identity
   before retrying. `ssh -O check` only checks a local master. Doctor is read-only.
+- Consumer partitions are packaged toolkit profiles (`shk policy --identity` reports
+  `partitions_sha256`); unknown partitions are refused, borrowed partitions need an
+  identity-bound grant and `shk occupancy` first, and `--requeue` is emitted only
+  where the profile allows it:
+  - `btrippe`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed from another group. Run `shk occupancy` first. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00.
+  - `normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.
+  - `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Preemptible: Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.
 
 Full policy and provenance: `shk policy`; installed identity: `shk policy --identity`.
 The toolkit's transport/projection does not enforce arbitrary scripts or certify
@@ -120,6 +127,24 @@ evidence resolves the attempt. A scheduler-visible token is not an idempotency k
 Scheduler completion, execution receipts, artifacts, and scientific validation
 remain separate. Source/runtime/input/policy and attempt identities must bind
 outputs; checkpoints need workload-specific validation.
+
+The budget reservation taken before dispatch covers one run of the frozen
+resources; a requeued job on a preemptible profile may consume several runs. Its
+stored cost is a lower bound summed over the restarts observed so far and never
+decreases; `cost_known` is set only when every restart from 0 to the highest has
+complete accounting, and open or uncertified attempts are charged at the larger of
+the frozen estimate and that lower bound. On a profile that is not preemptible
+(`normal`, `btrippe`, attempts frozen before profiles existed) any `PREEMPTED` or
+`REQUEUED` row, or a restart above zero, is an anomaly: the evidence is recorded,
+the job identity adopted, the reservation kept, and `status`/`reconcile` exit 2 as
+`unexpected_preemption` until an operator has investigated and runs
+`shk reconcile --attempt ID --acknowledge-preemption`, the only release path.
+
+DTN transfers share the control endpoint's authentication cooldown: an active
+cooldown refuses a transfer before rsync starts, and an rsync authentication
+failure (exit 255 with an authentication message) arms it. Transfers are not
+serialized under the shared lock, so N concurrent fetches may each make one
+authentication attempt before the first failure arms the cooldown.
 
 Production installations are frozen revisions with policy SHA256 and schema version.
 Development overrides are visibly labeled. Compare the installed revision/policy
