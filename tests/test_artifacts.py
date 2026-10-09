@@ -3,13 +3,14 @@ import multiprocessing
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from sherlock_artifacts import build_manifest, fetch_bundle, rsync_transfer
+from sherlock_artifacts import TransferError, build_manifest, fetch_bundle, rsync_transfer
 from sherlock_orchestration import SafetyError, digest
 
 D = 'a' * 64
@@ -170,6 +171,73 @@ class ArtifactTests(unittest.TestCase):
             self.fetch()
         self.assertFalse(self.dest.exists())
         self.assertTrue((self.base / '.result.shk-transaction.json').is_file())
+
+    def leftover_file_lists(self):
+        return [path.name for path in self.base.iterdir() if path.name.startswith('.shk-files-')]
+
+    def test_rsync_failure_raises_transfer_error_with_bounded_sanitized_tail(self):
+        stage = self.base / 'stage'
+        stage.mkdir(mode=0o700)
+        with self.assertRaises(TransferError) as caught:
+            rsync_transfer(str(self.base / 'missing-source'), stage, self.manifest)
+        error = caught.exception
+        self.assertIsInstance(error, SafetyError)
+        self.assertIsInstance(error.returncode, int)
+        self.assertNotIn(error.returncode, (0, 255))
+        self.assertIn('No such file or directory', error.stderr_tail)
+        self.assertIn(error.stderr_tail, str(error))
+        self.assertIn(f'exit status {error.returncode}', str(error))
+        self.assertLessEqual(len(error.stderr_tail), 500)
+        self.assertFalse(any(ord(c) < 32 or ord(c) == 127 for c in error.stderr_tail))
+        self.assertNotIn('.shk-files-', str(error))
+        self.assertEqual(self.leftover_file_lists(), [])
+
+    def test_transfer_error_redacts_file_list_and_bounds_long_output(self):
+        stage = self.base / 'stage'
+        stage.mkdir(mode=0o700)
+        def leak(argv, **kwargs):
+            name, = [a[len('--files-from='):] for a in argv if a.startswith('--files-from=')]
+            self.assertTrue(Path(name).is_file())
+            raise subprocess.CalledProcessError(1, argv, stderr=f'rsync: failed to open files-from file {name}: No such file\n'.encode())
+        with patch('sherlock_artifacts.subprocess.run', side_effect=leak), self.assertRaises(TransferError) as caught:
+            rsync_transfer(str(self.source), stage, self.manifest)
+        self.assertEqual(caught.exception.returncode, 1)
+        self.assertNotIn('.shk-files-', str(caught.exception))
+        self.assertNotIn(str(self.base), caught.exception.stderr_tail)
+        self.assertIn('files-from', caught.exception.stderr_tail)
+        def flood(argv, **kwargs):
+            raise subprocess.CalledProcessError(12, argv, stderr=b'x' * 1000 + b'\x00\x7f tail\n')
+        with patch('sherlock_artifacts.subprocess.run', side_effect=flood), self.assertRaises(TransferError) as caught:
+            rsync_transfer(str(self.source), stage, self.manifest)
+        self.assertEqual(caught.exception.returncode, 12)
+        self.assertEqual(len(caught.exception.stderr_tail), 500)
+        self.assertTrue(caught.exception.stderr_tail.endswith('x tail'))
+        self.assertEqual(self.leftover_file_lists(), [])
+
+    def test_rsync_timeout_raises_transfer_error_and_removes_file_list(self):
+        stage = self.base / 'stage'
+        stage.mkdir(mode=0o700)
+        def slow(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, kwargs['timeout'], stderr=b'partial \x1b[31moutput\x1b[0m\n')
+        with patch('sherlock_artifacts.subprocess.run', side_effect=slow), self.assertRaises(TransferError) as caught:
+            rsync_transfer(str(self.source), stage, self.manifest, timeout=7)
+        error = caught.exception
+        self.assertIsInstance(error, SafetyError)
+        self.assertIsNone(error.returncode)
+        self.assertIn('7', str(error))
+        self.assertIn('deadline', str(error))
+        self.assertEqual(error.stderr_tail, 'partial [31moutput[0m')
+        self.assertEqual(self.leftover_file_lists(), [])
+
+    def test_fetch_transfer_error_keeps_transaction_then_resumes(self):
+        self.transfer = lambda stage, m: rsync_transfer(str(self.base / 'missing-source'), stage, m)
+        with self.assertRaises(TransferError):
+            self.fetch()
+        self.assertFalse(self.dest.exists())
+        self.assertTrue((self.base / '.result.shk-transaction.json').is_file())
+        self.transfer = lambda stage, m: rsync_transfer(str(self.source), stage, m)
+        self.assertFalse(self.fetch()['recovered'])
+        self.assertEqual((self.dest / 'result.json').read_text(), '{"value":42}\n')
 
     def test_concurrent_fetchers_one_promotion(self):
         queue = multiprocessing.Queue()

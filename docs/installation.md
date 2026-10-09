@@ -4,9 +4,12 @@
 
 Follow the [README](../README.md) to install a reviewed full commit into a
 dedicated Python 3.11+ environment. A wheel embeds the exact code revision,
-policy SHA256 and schema version. `shk policy --identity` must report
-`install_mode=frozen`. A matching projection is evidence of matching bytes,
-not proof that an active client loaded instructions.
+policy SHA256, schema version and `partitions_sha256`, the SHA256 of the packaged
+partition profile table `sherlock_kit_data/partitions.json`. `shk policy
+--identity` must report `install_mode=frozen`; a frozen install whose packaged
+table differs from its embedded hash refuses to report an identity at all. A
+matching projection is evidence of matching bytes, not proof that an active
+client loaded instructions.
 
 A clean committed checkout can build a wheel:
 
@@ -57,8 +60,11 @@ evidence belong in the user's designated data area, never in public Git.
 The launcher supplies these through `SHERLOCK_KIT_PIN`,
 `SHERLOCK_KIT_CLAUDE_INSTRUCTIONS` and `SHERLOCK_KIT_CODEX_INSTRUCTIONS`.
 Missing authentication, identity mismatch and unverified capabilities stay
-separate. Remote doctor uses fixed bounded reads and existing masters; a local
-master alone does not prove remote or DTN protocol capability.
+separate. A pin compares `schema_version`, `code_revision` and `policy_sha256`,
+and `partitions_sha256` only when the pin advertises it, so pins written before
+partition profiles existed still verify. Remote doctor uses fixed bounded reads
+and existing masters; a local master alone does not prove remote or DTN protocol
+capability.
 
 ```python
 from sherlock_kit import TransportConfig, run_remote
@@ -73,6 +79,23 @@ Local execution uses argv, no stdin, connection/whole-command deadlines and at
 most one dispatch. Arbitrary remote shells or mutating programs still require
 authorization and durable intent; this API is not a command-policy evaluator.
 A lost mutation reply is unknown and cannot authorize retry.
+
+The shared authentication cooldown arms only when OpenSSH itself exits 255 with
+an authentication message (`auth_failure(stderr)`). A remote program's own
+"Permission denied" is relayed text with another exit status and never arms it.
+`cooldown_active(config)` reports the cooldown and fails closed when its state is
+unreadable; `record_auth_failure(config)` arms it explicitly.
+
+`data_transfer(config, source, stage, manifest, timeout=300)` is the data-endpoint
+counterpart of `run_remote`: `source` is the host-less absolute remote directory,
+the configured `data_host` is prepended, the manifest selects exactly which files
+rsync may read, and an active cooldown refuses the transfer before rsync starts.
+rsync failures and deadlines raise `sherlock_artifacts.TransferError` (a
+`SafetyError` carrying `returncode` and a bounded single-line `stderr_tail`), so
+the CLI prints `shk: ...` instead of a traceback. A data-endpoint authentication
+failure (rsync exit 255 with an authentication message) arms the same shared
+cooldown, so the control and data endpoints never produce two authentication
+storms.
 
 ## Client adapters
 

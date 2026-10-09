@@ -18,6 +18,15 @@ if mode == "auth":
 if mode == "disconnect":
     print("Connection to host closed", file=sys.stderr)
     raise SystemExit(255)
+# A remote program failing on a filesystem permission is not a transport
+# authentication failure: OpenSSH relays the text, but the exit status is not 255.
+if mode == "remote-denied":
+    print("PermissionError: [Errno 13] Permission denied: '/synthetic/output/manifest.json'", file=sys.stderr)
+    raise SystemExit(1)
+if mode == "relayed-denied":
+    print("PermissionError: [Errno 13] Permission denied: '/synthetic/output/manifest.json'", file=sys.stderr)
+    print("SHK_UNKNOWN: remote program reported a permission failure")
+    raise SystemExit(0)
 if mode == "timeout":
     time.sleep(5)
 if "-O" in sys.argv:

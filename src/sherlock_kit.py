@@ -22,6 +22,8 @@ import stat
 import subprocess
 import time
 
+from sherlock_partitions import partitions_sha256
+
 SCHEMA_VERSION = 1
 BEGIN = "<!-- SHERLOCK-KIT:BEGIN -->"
 END = "<!-- SHERLOCK-KIT:END -->"
@@ -106,13 +108,19 @@ def _execute(config, command, *, mutation=False):
         # Nonzero transport exit cannot prove remote mutation was rejected.
         status = "unknown"
     elif process.returncode == 255:
-        status = "auth_required" if _auth_failure(stderr) else "unavailable"
+        status = "auth_required" if auth_failure(stderr) else "unavailable"
     else:
         status = "failed"
     return RemoteResult(status, stdout, stderr, process.returncode, dispatched=True)
 
 
-def _auth_failure(stderr):
+def auth_failure(stderr: str) -> bool:
+    """Whether diagnostic text names an authentication failure.
+
+    Text alone is not proof: a remote program's own "Permission denied" is relayed
+    verbatim by OpenSSH. Callers arm the shared cooldown only together with the
+    transport exit status 255.
+    """
     return any(fragment in stderr.lower() for fragment in (
         "permission denied", "authentication failed", "no supported authentication",
         "too many authentication failures", "credentials cache", "ticket expired"))
@@ -218,21 +226,73 @@ Doctor uses a separate fixed mux-only path and never writes this state.
             if _read_backoff(path) > time.time():
                 return RemoteResult("auth_required", stderr="Shared authentication cooldown active; authenticate manually")
             result = _execute(config, command, mutation=mutation)
-            if _auth_failure(result.stderr):
-                data = json.dumps({"schema_version": 1,
-                                   "retry_after": time.time() + config.auth_backoff_seconds}) + "\n"
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-                with os.fdopen(fd, "w") as stream:
-                    os.fchmod(stream.fileno(), 0o600)
-                    stream.write(data)
-                    stream.flush()
-                    os.fsync(stream.fileno())
+            # Only the transport's own exit status proves an authentication failure.
+            if result.returncode == 255 and auth_failure(result.stderr):
+                _arm_backoff(path, config.auth_backoff_seconds)
             return result
     except (OSError, ValueError, ImportError):
         # State failure after dispatch must not convert an ambiguous mutation to not-sent.
         if "result" in locals():
             return result
         return RemoteResult("not_sent", stderr="Shared authentication state unavailable, unsafe, malformed, or busy")
+
+
+def _arm_backoff(path, seconds):
+    data = json.dumps({"schema_version": 1, "retry_after": time.time() + seconds}) + "\n"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as stream:
+        os.fchmod(stream.fileno(), 0o600)
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def record_auth_failure(config: TransportConfig) -> bool:
+    """Arm the shared cooldown after an endpoint rejected authentication.
+
+    Returns False when the shared state is unavailable, unsafe or busy; the caller's
+    own failure still propagates and nothing else is written.
+    """
+    try:
+        path = _backoff_path(config)
+        with _backoff_lock(path):
+            _arm_backoff(path, config.auth_backoff_seconds)
+    except (OSError, ValueError, ImportError):
+        return False
+    return True
+
+
+def cooldown_active(config: TransportConfig) -> bool:
+    """True while the shared cooldown holds, or when its state cannot be trusted (fail closed)."""
+    try:
+        return _read_backoff(_backoff_path(config)) > time.time()
+    except (OSError, ValueError):
+        return True
+
+
+def data_transfer(config: TransportConfig, source: str, stage, manifest, *, timeout=300):
+    """Manifest-selected rsync from the data endpoint, sharing the control cooldown.
+
+    source is the host-less absolute remote directory; the data host is prepended
+    here so callers never assemble host:path strings. An active cooldown refuses the
+    transfer before rsync starts. A data-endpoint authentication failure (rsync exit
+    255 with an authentication message) arms the same shared cooldown as run_remote.
+    """
+    from sherlock_artifacts import TransferError, rsync_transfer
+    from sherlock_orchestration import SafetyError
+    if not isinstance(config, TransportConfig):
+        raise SafetyError("data transfer requires a TransportConfig")
+    if not isinstance(source, str) or not source.startswith("/") or any(ch in source for ch in "\x00\n\r"):
+        raise SafetyError("data transfer source must be an absolute remote path without control characters")
+    if cooldown_active(config):
+        raise SafetyError("Shared authentication cooldown active or its state is unavailable; data transfer refused before dispatch")
+    try:
+        rsync_transfer(config.data_host + ":" + source, stage, manifest,
+                       ssh_command=shlex.join(_ssh_prefix(config)), timeout=timeout)
+    except TransferError as exc:
+        if exc.returncode == 255 and auth_failure(exc.stderr_tail):
+            record_auth_failure(config)
+        raise
 
 
 def _source_root():
@@ -248,7 +308,9 @@ def policy_text() -> str:
 
 
 def policy_identity() -> dict:
+    """Policy, code and packaged partition-profile identity; frozen installs are verified."""
     digest = hashlib.sha256(policy_text().encode("utf-8")).hexdigest()
+    profiles = partitions_sha256()
     root = _source_root()
     if root is not None:
         try:
@@ -257,10 +319,12 @@ def policy_identity() -> dict:
         except (OSError, subprocess.SubprocessError):
             revision = "unversioned"
         return {"schema_version": SCHEMA_VERSION, "code_revision": revision,
-                "policy_sha256": digest, "install_mode": "development"}
+                "policy_sha256": digest, "install_mode": "development", "partitions_sha256": profiles}
     identity = json.loads(resources.files("sherlock_kit_data").joinpath("build_identity.json").read_text())
     if identity.get("schema_version") != SCHEMA_VERSION or identity.get("policy_sha256") != digest:
         raise ValueError("Installed policy identity mismatch")
+    if identity.get("partitions_sha256") != profiles:
+        raise ValueError("Installed partition profile identity mismatch")
     if not re.fullmatch(r"[0-9a-f]{40}", identity.get("code_revision", "")):
         raise ValueError("Installed package does not have a frozen revision")
     return identity
@@ -276,6 +340,16 @@ def policy_projection() -> str:
     identity = policy_identity()
     metadata = f"<!-- source: SHERLOCK.md; schema_version: {SCHEMA_VERSION}; policy_sha256: {identity['policy_sha256']} -->"
     return f"{BEGIN}\n{metadata}\n{text[start:end].strip()}\n{END}\n"
+
+
+def _pin_matches(identity, expected):
+    """Compare an advertised pin; partitions_sha256 only when the pin advertises it."""
+    if not isinstance(expected, dict) or expected.get("schema_version") != SCHEMA_VERSION:
+        return False
+    keys = ["code_revision", "policy_sha256"]
+    if "partitions_sha256" in expected:
+        keys.append("partitions_sha256")
+    return all(isinstance(expected.get(key), str) and identity[key] == expected[key] for key in keys)
 
 
 def _projection_matches(path):
@@ -327,10 +401,7 @@ def doctor(config=None, *, remote=False, advertised_identity=None,
     if advertised_identity:
         try:
             expected = json.loads(Path(advertised_identity).read_text())
-            valid = (isinstance(expected, dict) and expected.get("schema_version") == SCHEMA_VERSION
-                     and isinstance(expected.get("code_revision"), str)
-                     and isinstance(expected.get("policy_sha256"), str))
-            same = valid and all(identity[key] == expected[key] for key in ("schema_version", "code_revision", "policy_sha256"))
+            same = _pin_matches(identity, expected)
             report["advertised_identity"] = "complete" if same and identity["install_mode"] == "frozen" else "configuration_mismatch"
         except (OSError, ValueError):
             report["advertised_identity"] = "configuration_mismatch"
@@ -383,7 +454,7 @@ def doctor(config=None, *, remote=False, advertised_identity=None,
 def main(argv=None):
     import sys
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"submit", "status", "reconcile", "fetch"}:
+    if arguments and arguments[0] in {"submit", "status", "reconcile", "fetch", "occupancy"}:
         from sherlock_commands import main as operations
         return operations(arguments)
     if arguments and arguments[0] == "guard":
@@ -391,7 +462,7 @@ def main(argv=None):
         return guard(arguments[1:])
     parser = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Consumer commands: submit, status, reconcile, fetch. "
+        epilog="Consumer commands: submit, status, reconcile, fetch, occupancy. "
                "Opt-in client adapter: guard. Run shk COMMAND --help for its contract.")
     sub = parser.add_subparsers(dest="operation", required=True)
     policy = sub.add_parser("policy", help="Print canonical policy or installed provenance")

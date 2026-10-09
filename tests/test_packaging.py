@@ -24,8 +24,10 @@ class FrozenInstallTests(unittest.TestCase):
         revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
         policy = subprocess.check_output(["git", "show", f"{revision}:SHERLOCK.md"], cwd=ROOT)
         license_text = subprocess.check_output(["git", "show", f"{revision}:LICENSE"], cwd=ROOT)
+        partitions = subprocess.check_output(["git", "show", f"{revision}:src/sherlock_kit_data/partitions.json"], cwd=ROOT)
         expected = {"schema_version": 1, "code_revision": revision,
-                    "policy_sha256": hashlib.sha256(policy).hexdigest(), "install_mode": "frozen"}
+                    "policy_sha256": hashlib.sha256(policy).hexdigest(), "install_mode": "frozen",
+                    "partitions_sha256": hashlib.sha256(partitions).hexdigest()}
         projection_command = "import sherlock_kit as k; import json; print(json.dumps({'identity': k.policy_identity(), 'policy': k.policy_text(), 'projection': k.policy_projection()}))"
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
@@ -67,6 +69,7 @@ class FrozenInstallTests(unittest.TestCase):
             sdist_source, = unpacked.iterdir()
             self.assertEqual((sdist_source / "LICENSE").read_bytes(), license_text)
             self.assertEqual((sdist_source / "SHERLOCK.md").read_bytes(), policy)
+            self.assertEqual((sdist_source / "src/sherlock_kit_data/partitions.json").read_bytes(), partitions)
             self.assertEqual(json.loads((sdist_source / "src/sherlock_kit_data/build_identity.json").read_text()), expected)
             self.assertTrue((sdist_source / "src/sherlock_kit_data/adapters/codex/skills/sherlock-kit-operate/SKILL.md").is_file())
             # Frozen sdist metadata alone must survive an unrelated surrounding Git
@@ -81,6 +84,8 @@ class FrozenInstallTests(unittest.TestCase):
                 direct_files = {name: direct.read(name) for name in direct.namelist() if not name.endswith("/RECORD")}
                 rebuilt_files = {name: rebuilt.read(name) for name in rebuilt.namelist() if not name.endswith("/RECORD")}
                 self.assertEqual(direct_files, rebuilt_files)
+                self.assertEqual(direct_files["sherlock_kit_data/partitions.json"], partitions)
+                self.assertEqual(json.loads(direct_files["sherlock_kit_data/build_identity.json"]), expected)
                 metadata_path, = [name for name in rebuilt_files if name.endswith(".dist-info/METADATA")]
                 metadata = BytesParser().parsebytes(rebuilt_files[metadata_path])
                 self.assertEqual(metadata["License-Expression"], "MIT")
@@ -101,9 +106,11 @@ class FrozenInstallTests(unittest.TestCase):
             self.assertEqual(result["identity"], expected)
             self.assertEqual(result["policy"].encode(), policy)
             self.assertIn(expected["policy_sha256"], result["projection"])
-            packaged = subprocess.check_output([str(python), "-c", "import importlib.resources as r; import sherlock_orchestration, sherlock_artifacts, sherlock_commands, sherlock_guard; print((r.files('sherlock_kit_data') / 'adapters/claude/.claude-plugin/plugin.json').read_text()); print((r.files('sherlock_kit_data') / 'adapters/codex/skills/sherlock-kit-operate/SKILL.md').is_file())"], cwd=temp, env=env, text=True)
+            packaged = subprocess.check_output([str(python), "-c", "import importlib.resources as r; import sherlock_orchestration, sherlock_artifacts, sherlock_commands, sherlock_guard, sherlock_partitions; print((r.files('sherlock_kit_data') / 'adapters/claude/.claude-plugin/plugin.json').read_text()); print((r.files('sherlock_kit_data') / 'adapters/codex/skills/sherlock-kit-operate/SKILL.md').is_file()); print('partitions=' + sherlock_partitions.partitions_sha256()); print(sorted(sherlock_partitions.partition_profiles()))"], cwd=temp, env=env, text=True)
             self.assertIn('"name": "sherlock-kit"', packaged)
             self.assertIn('True', packaged)
+            self.assertIn("partitions=" + expected["partitions_sha256"], packaged)
+            self.assertIn("['btrippe', 'normal', 'owners']", packaged)
             guard = subprocess.run([str(installed / "bin/shk"), "guard", "--client", "claude"], input=json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "watch -n 1 ssh sherlock-plain squeue"}}), cwd=temp, env=env, capture_output=True, text=True, check=True, timeout=10)
             self.assertEqual(json.loads(guard.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
             pin = temp / "pin.json"
