@@ -21,8 +21,8 @@ shk = "sherlock_kit:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["sherlock_kit", "sherlock_orchestration", "sherlock_artifacts", "sherlock_commands", "sherlock_guard"]
+py-modules = ["sherlock_kit", "sherlock_partitions", "sherlock_orchestration", "sherlock_artifacts", "sherlock_commands", "sherlock_guard"]
 packages = ["sherlock_kit_data"]
 
 [tool.setuptools.package-data]
-sherlock_kit_data = ["SHERLOCK.md", "build_identity.json", "adapters/**"]
+sherlock_kit_data = ["partitions.json", "SHERLOCK.md", "build_identity.json", "adapters/**"]

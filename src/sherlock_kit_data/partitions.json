@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "partitions": {
+    "normal": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": false,
+      "courtesy": ""
+    },
+    "owners": {
+      "preemptible": true,
+      "requeue": true,
+      "borrowed": false,
+      "gpus_allowed": true,
+      "courtesy": "Preemptible: Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap."
+    },
+    "btrippe": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": true,
+      "gpus_allowed": true,
+      "courtesy": "Borrowed from another group. Run `shk occupancy` first. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00."
+    }
+  }
+}
