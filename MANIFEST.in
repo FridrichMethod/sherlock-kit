@@ -1,6 +1,7 @@
 include SHERLOCK.md
 include src/sherlock_kit_data/SHERLOCK.md
 include src/sherlock_kit_data/build_identity.json
+include src/sherlock_kit_data/partitions.json
 recursive-include adapters *
 include README.md LICENSE CHANGELOG.md CONTRIBUTING.md AGENTS.md CLAUDE.md
 recursive-include docs *.md *.json

@@ -1,5 +1,5 @@
 {
   "name": "sherlock-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Thin skills calling the same frozen sherlock-kit installation"
 }
