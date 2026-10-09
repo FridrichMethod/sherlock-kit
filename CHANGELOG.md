@@ -26,7 +26,7 @@ engineering evidence, not acceptance evidence.
   restart on a non-preemptible profile is `unexpected_preemption` (exit 2,
   reservation kept) until `reconcile --attempt ID --acknowledge-preemption`.
   The submit-time tolerance is 300 seconds and the sacct cache key is per attempt.
-- `status --all`/`reconcile --all` reconcile every reserved submitted/unknown
+- `status --all`/`reconcile --all` reconcile every reserved submitting/submitted/unknown
   attempt through one cached `sacct --name` list; a single attempt's contract
   violation is reported as an `error` entry. `occupancy --partition NAME` reports
   per-user running/pending jobs and running GPUs from fixed-width `squeue -O`

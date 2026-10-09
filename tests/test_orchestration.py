@@ -499,6 +499,15 @@ class RestartReconciliationTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in rows], [submitted, unknown])
         self.assertEqual([row['state'] for row in rows], ['submitted', 'unknown'])
         self.assertTrue(all(isinstance(row['spec'], dict) and row['reserved'] == 1 for row in rows))
+        # A dispatcher killed after its durable claim leaves `submitting`; the batch path
+        # must still see it, and identity-bound evidence resolves it like `unknown`.
+        crashed = self.coordinator.admit(spec(task='e'), limits)['id']
+        with self.coordinator.transaction() as db:
+            db.execute("UPDATE attempts SET state='submitting' WHERE id=?", (crashed,))
+        rows = self.coordinator.unresolved()
+        self.assertEqual([(row['id'], row['state']) for row in rows], [(submitted, 'submitted'), (unknown, 'unknown'), (crashed, 'submitting')])
+        self.assertEqual(self.coordinator.reconcile(crashed, [self.evidence(crashed, job_id='777')])['resolution'], 'terminal')
+        self.assertEqual([row['id'] for row in self.coordinator.unresolved()], [submitted, unknown])
 
 
 if __name__ == '__main__':

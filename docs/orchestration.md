@@ -175,7 +175,7 @@ recorded preemption evidence, applies only to non-preemptible profiles and is th
 only release path.
 
 `status --all` and `reconcile --all` cover every reserved attempt still
-`submitted` or `unknown` through one bounded `sacct` query whose selector is a
+`submitting`, `submitted` or `unknown` through one bounded `sacct` query whose selector is a
 single `--name=shk-A,shk-B,...` list (sacct ANDs its filters, so job ids and names
 are never mixed). The response is cached under one `sacct-all` key with the same
 cadence, parsed once and reconciled per attempt; one attempt's contract violation
