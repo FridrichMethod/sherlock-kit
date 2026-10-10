@@ -127,7 +127,12 @@ def auth_failure(stderr: str) -> bool:
 
 
 def _backoff_path(config):
-    """Explicit file, environment root, then XDG default; never create state."""
+    """Explicit file, environment root, then the XDG default; never create state.
+
+    Typed commands refuse to run without one of the first two (sherlock_commands
+    raises before reaching here), so the XDG default serves doctor and other
+    read-only diagnostics only.
+    """
     if config.backoff_file is not None:
         path = Path(config.backoff_file).expanduser()
     elif "SHERLOCK_KIT_STATE_ROOT" in os.environ:
@@ -186,9 +191,18 @@ def _read_backoff(path):
     return value
 
 
+def query_cache_path(config: TransportConfig):
+    """The typed commands' 60 s query cache, next to the backoff file of the same local state root."""
+    return _checked_backoff_path(_backoff_path(config).with_name("query-cache.json"))
+
+
 @contextmanager
-def _backoff_lock(path):
-    # One private state/lock per controller, shared across repositories and aliases.
+def state_lock(path):
+    """Exclusive ``<path>.lock`` beside one private state file; the parent is created 0700 if absent.
+
+    Every state file has its own lock: the backoff lock is held for the whole ssh
+    call by run_remote, so the query cache must never share it.
+    """
     import fcntl
     path = _checked_backoff_path(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -198,7 +212,7 @@ def _backoff_lock(path):
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
-            raise ValueError("Authentication lock must be an owned private regular file")
+            raise ValueError(f"Local state lock {lock.name} must be an owned private regular file")
         deadline = time.monotonic() + 5
         while True:
             try:
@@ -206,11 +220,14 @@ def _backoff_lock(path):
                 break
             except BlockingIOError:
                 if time.monotonic() >= deadline:
-                    raise ValueError("Shared authentication transport is busy")
+                    raise ValueError(f"Local state lock {lock.name} is busy")
                 time.sleep(0.05)
         yield
     finally:
         os.close(fd)
+
+
+_backoff_lock = state_lock
 
 
 def run_remote(config: TransportConfig, argv, mutation=False) -> RemoteResult:
