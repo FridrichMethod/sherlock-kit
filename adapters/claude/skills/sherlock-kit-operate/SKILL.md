@@ -4,7 +4,7 @@ description: Operate an explicitly authorized Sherlock workload through the inst
 ---
 
 Use the existing frozen `shk` installation. Read `shk policy`, including its
-packaged partition profiles (`normal`, `owners`, `btrippe`), then inspect
+packaged partition profiles (ten partitions, each with a courtesy sentence), then inspect
 `shk policy --identity` and local `shk doctor` against the advertised pin.
 Report a missing executable or identity mismatch before a new managed mutation.
 Only request `shk doctor --remote` when remote diagnosis is needed.
@@ -18,14 +18,16 @@ report that capability gate and continue independent diagnosis. This skill does
 not authorize a job, budget increase, access grant, cancellation, or a historical
 campaign restart.
 
-Take resources from the partition profile, never from scheduler visibility. Before
-a submission to a borrowed partition, run `shk occupancy --partition <borrowed>`
-and apply the profile's courtesy text; the toolkit reports occupancy but does not
-gate on it. Set `requeue` only for a script that resumes from its own checkpoints
-(the `owners` default); `--requeue` is emitted only where the profile allows it.
-With many open attempts, use `shk status --all` or `shk reconcile --all` rather
-than one query per attempt. Treat an `unexpected_preemption` result (exit 2) as
-an investigation, not a retry; `shk reconcile --attempt ID
+Take resources from the partition profile, never from scheduler visibility.
+Before a submission to a borrowed partition, run `shk occupancy --partition
+<borrowed>` and apply the profile's courtesy text; the toolkit reports occupancy
+but does not gate on it. A courtesy sentence may confine submission to a time
+window (`possu`: 00:00-07:00 Pacific); outside that window do not submit at all.
+Set `requeue` only for a script that resumes from its own checkpoints (the
+`owners` default); `--requeue` is emitted only where the profile allows it. With
+many open attempts, use `shk status --all` or `shk reconcile --all` rather than
+one query per attempt. Treat an `unexpected_preemption` result (exit 2) as an
+investigation, not a retry; `shk reconcile --attempt ID
 --acknowledge-preemption` is the explicit release once it is understood.
 
 Preserve unresolved mutation evidence and reservations; reconcile the recorded

@@ -15,10 +15,22 @@ sys.path.insert(0, str(ROOT / "src"))
 import sherlock_partitions as partitions
 
 TABLE = ROOT / "src/sherlock_kit_data/partitions.json"
+def flags(preemptible=False, requeue=False, borrowed=False, gpus_allowed=False):
+    return {"preemptible": preemptible, "requeue": requeue, "borrowed": borrowed, "gpus_allowed": gpus_allowed}
+
+
+# Every partition `sh_part` lists for the account (2026-10-10); only owners is preempted.
 EXPECTED_FLAGS = {
-    "normal": {"preemptible": False, "requeue": False, "borrowed": False, "gpus_allowed": False},
-    "owners": {"preemptible": True, "requeue": True, "borrowed": False, "gpus_allowed": True},
-    "btrippe": {"preemptible": False, "requeue": False, "borrowed": True, "gpus_allowed": True},
+    "normal": flags(),
+    "bigmem": flags(),
+    "service": flags(),
+    "dev": flags(gpus_allowed=True),
+    "gpu": flags(gpus_allowed=True),
+    "bioe": flags(gpus_allowed=True),
+    "stat": flags(gpus_allowed=True),
+    "owners": flags(preemptible=True, requeue=True, gpus_allowed=True),
+    "btrippe": flags(borrowed=True, gpus_allowed=True),
+    "possu": flags(borrowed=True, gpus_allowed=True),
 }
 LINE = re.compile(r"`[A-Za-z0-9_.-]+`: preemptible=(yes|no), requeue=(yes|no), borrowed=(yes|no), gpus=(yes|no)\.( \S.*)?")
 
@@ -39,10 +51,18 @@ class PartitionProfileTests(unittest.TestCase):
             self.assertEqual(partitions.partition_profile(name), profile)
         self.assertEqual(profiles["normal"]["courtesy"], "")
         self.assertIn("checkpoint", profiles["owners"]["courtesy"])
-        self.assertIn("shk occupancy", profiles["btrippe"]["courtesy"])
-        self.assertIn("Borrowed", profiles["btrippe"]["courtesy"])
-        for profile in profiles.values():
+        for borrowed in ("btrippe", "possu"):
+            self.assertIn("shk occupancy", profiles[borrowed]["courtesy"])
+            self.assertIn("Borrowed", profiles[borrowed]["courtesy"])
+        self.assertIn("00:00 and 07:00 Pacific", profiles["possu"]["courtesy"])
+        self.assertIn("never submit outside", profiles["possu"]["courtesy"])
+        self.assertEqual({name for name, profile in profiles.items() if profile["borrowed"]}, {"btrippe", "possu"})
+        self.assertEqual({name for name, profile in profiles.items() if profile["preemptible"]}, {"owners"})
+        self.assertEqual({name for name, profile in profiles.items() if profile["requeue"]}, {"owners"})
+        for name, profile in profiles.items():
             self.assertNotIn("\n", profile["courtesy"])
+            if name != "normal":
+                self.assertTrue(profile["courtesy"].endswith("."), name)
 
     def test_sha256_and_text_match_committed_bytes(self):
         raw = TABLE.read_bytes()
@@ -58,7 +78,7 @@ class PartitionProfileTests(unittest.TestCase):
         profiles = partitions.partition_profiles()
         self.assertIsInstance(profiles, MappingProxyType)
         with self.assertRaises(TypeError):
-            profiles["gpu"] = {}
+            profiles["nonexistent"] = {}
         for name in EXPECTED_FLAGS:
             profile = profiles[name]
             self.assertIsInstance(profile, MappingProxyType)
@@ -74,7 +94,7 @@ class PartitionProfileTests(unittest.TestCase):
 
     def test_unknown_partition_refused(self):
         self.assertTrue(issubclass(partitions.PartitionError, ValueError))
-        for name in ("gpu", "", "normal ", "Normal", "owners\n", "btrippe;id", 42, None, ["normal"]):
+        for name in ("nonexistent", "GPU", "", "normal ", "Normal", "owners\n", "btrippe;id", 42, None, ["normal"]):
             with self.assertRaises(partitions.PartitionError) as caught:
                 partitions.partition_profile(name)
             self.assertIn("unknown partition", str(caught.exception))
@@ -151,13 +171,16 @@ class PartitionProfileTests(unittest.TestCase):
     def test_summary_lines_deterministic(self):
         lines = partitions.partition_summary_lines()
         self.assertEqual(lines, partitions.partition_summary_lines())
-        self.assertEqual(lines, [
-            "`btrippe`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. "
-            + partitions.partition_profile("btrippe")["courtesy"],
-            "`normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.",
-            "`owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. "
-            + partitions.partition_profile("owners")["courtesy"],
-        ])
+        def expected(name):
+            agreed = EXPECTED_FLAGS[name]
+            yes_no = ", ".join(f"{label}={'yes' if agreed[key] else 'no'}" for label, key in
+                               (("preemptible", "preemptible"), ("requeue", "requeue"), ("borrowed", "borrowed"), ("gpus", "gpus_allowed")))
+            courtesy = partitions.partition_profile(name)["courtesy"]
+            return f"`{name}`: {yes_no}." + (f" {courtesy}" if courtesy else "")
+
+        self.assertEqual(lines, [expected(name) for name in sorted(EXPECTED_FLAGS)])
+        self.assertEqual(lines[lines.index(expected("normal"))], "`normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.")
+        self.assertIn("`possu`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed", lines[7])
         for line in lines:
             self.assertRegex(line, LINE)
             self.assertNotIn("\n", line)

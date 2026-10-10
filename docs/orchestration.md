@@ -1,19 +1,20 @@
 # Typed consumer operations
 
 This implementation supports one allocation per attempt on a packaged partition
-profile (`normal`, `owners`, `btrippe`), without arrays. Slurm requeue is emitted
-only where the profile allows it (`owners`), and a requeued script must itself
-checkpoint and resume; the toolkit does not certify general DDP or checkpoint
-recovery. A workload supplies its source/runtime/input identities, immutable
-script, resources, output manifest and scientific validator. The rasraser adapter
-is a separate local research commit; no research source or data is distributed
-here. The live CPU provenance pilot on `normal` passed shared submission,
-reconciliation, DTN fetch and offline recovery; exact resources, identities and
-limitations are recorded in [acceptance evidence](validation/acceptance.md). The
-GPU, requeue, `--all`, occupancy and DTN fetch paths added in 0.2.0 were exercised
-by a live owners/btrippe GPU pilot on 2026-10-09 (one operator-issued requeue with
-restart-aware accounting, two fetched bundles); natural preemption and the
-`unexpected_preemption` path remain offline-tested only.
+profile (ten partitions; `shk policy` lists them), without arrays. Slurm requeue
+is emitted only where the profile allows it (`owners`), and a requeued script
+must itself checkpoint and resume; the toolkit does not certify general DDP or
+checkpoint recovery. A workload supplies its source/runtime/input identities,
+immutable script, resources, output manifest and scientific validator. The
+rasraser adapter is a separate local research commit; no research source or data
+is distributed here. The live CPU provenance pilot on `normal` passed shared
+submission, reconciliation, DTN fetch and offline recovery; exact resources,
+identities and limitations are recorded in [acceptance
+evidence](validation/acceptance.md). The GPU, requeue, `--all`, occupancy and
+DTN fetch paths added in 0.2.0 were exercised by a live owners/btrippe GPU pilot
+on 2026-10-09 (one operator-issued requeue with restart-aware accounting, two
+fetched bundles); natural preemption and the `unexpected_preemption` path remain
+offline-tested only.
 
 The authoritative controller and artifact promotion currently require POSIX
 (`fcntl`, Unix ownership and no-follow filesystem checks). Windows instruction,
@@ -33,14 +34,17 @@ forbids it. Admission freezes the profile and `partitions_sha256` into the attem
 and dispatch reads only that frozen copy, so a later table change never alters a
 recorded attempt.
 
-Borrowed profiles (`btrippe`) additionally need an identity-bound `grant` in the
-private configuration: grantee equal to the principal, an evidence reference, a
-validity interval, the partition, the resource scope and the exact shared limits.
-The grant is consulted only for borrowed profiles; a configured `btrippe` grant
-does not affect `normal` or `owners` submissions, whose frozen attempt records
-`grant: null`. Before a borrowed submission run `shk occupancy` and apply the
-profile's courtesy text; the toolkit reports occupancy but never gates on it.
-Historical visibility or a configurable grant field is not authorization.
+Borrowed profiles (`btrippe`, `possu`) additionally need an identity-bound `grant`
+in the private configuration: grantee equal to the principal, an evidence
+reference, a validity interval, the partition, the resource scope and the exact
+shared limits. The grant is consulted only for borrowed profiles; a configured
+borrowed grant does not affect submissions to any other profile, whose frozen
+attempt records `grant: null`. Before a borrowed submission run `shk occupancy`
+and apply the profile's courtesy text; the toolkit reports occupancy but never
+gates on it. A courtesy sentence may confine submission to a time window
+(`possu`: 00:00-07:00 Pacific); the toolkit does not consult the clock, so the
+operator or agent must honour the window before `--apply`. Historical visibility
+or a configurable grant field is not authorization.
 
 ## Private configuration
 

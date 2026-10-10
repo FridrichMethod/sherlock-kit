@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0
+
+Full partition table for the account. The packaged profile table now covers every
+partition `sh_part` lists for the owner, so a spec may name any of them. Profile
+shape, grant rule, admission and reconciliation code are unchanged; this release
+is data and documentation only, with no new live pilot.
+
+- `sherlock_kit_data/partitions.json` adds the public `bigmem`, `dev`, `service`
+  and `gpu` profiles (not preemptible, not borrowed; GPUs allowed on `gpu` and
+  `dev`), the department GPU profiles `bioe` and `stat` (not borrowed, fairshare
+  courtesy) and the borrowed GPU profile `possu` (grant required; its courtesy text
+  confines submission to 00:00-07:00 Pacific). `partitions_sha256` and the policy
+  projection change accordingly; frozen attempts keep the profile they were
+  admitted with.
+- Documentation names every profile and the borrowed set (`btrippe`, `possu`) and
+  states that a courtesy time window is honoured by the operator or agent, not
+  checked by the toolkit.
+
 ## 0.2.0
 
 Partition profiles, requeue-aware reconciliation, batch reconciliation and

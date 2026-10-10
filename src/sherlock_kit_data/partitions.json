@@ -8,6 +8,34 @@
       "gpus_allowed": false,
       "courtesy": ""
     },
+    "bigmem": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": false,
+      "courtesy": "Public high-memory partition: only for jobs that need more memory than normal provides. Follow Sherlock's own limits for it."
+    },
+    "dev": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": true,
+      "courtesy": "Public development partition: debugging and short tests only, never production runs. Follow Sherlock's own limits for it."
+    },
+    "service": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": false,
+      "courtesy": "Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Follow Sherlock's own limits for it."
+    },
+    "gpu": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": true,
+      "courtesy": "Public GPU partition: few GPUs, long queue, never preempted. Follow Sherlock's own per-user GPU limits."
+    },
     "owners": {
       "preemptible": true,
       "requeue": true,
@@ -15,12 +43,33 @@
       "gpus_allowed": true,
       "courtesy": "Preemptible: Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap."
     },
+    "bioe": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": true,
+      "courtesy": "Department GPU partition, not borrowed: respect fairshare and leave room for other department users."
+    },
+    "stat": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": false,
+      "gpus_allowed": true,
+      "courtesy": "Department GPU partition, not borrowed: respect fairshare and leave room for other department users."
+    },
     "btrippe": {
       "preemptible": false,
       "requeue": false,
       "borrowed": true,
       "gpus_allowed": true,
       "courtesy": "Borrowed from another group. Run `shk occupancy` first. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00."
+    },
+    "possu": {
+      "preemptible": false,
+      "requeue": false,
+      "borrowed": true,
+      "gpus_allowed": true,
+      "courtesy": "Borrowed from another group and stricter than btrippe. Run `shk occupancy` first. Submit only between 00:00 and 07:00 Pacific, a few short jobs; never submit outside that window, not even short jobs."
     }
   }
 }

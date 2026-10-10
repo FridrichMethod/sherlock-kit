@@ -110,7 +110,7 @@ class FrozenInstallTests(unittest.TestCase):
             self.assertIn('"name": "sherlock-kit"', packaged)
             self.assertIn('True', packaged)
             self.assertIn("partitions=" + expected["partitions_sha256"], packaged)
-            self.assertIn("['btrippe', 'normal', 'owners']", packaged)
+            self.assertIn("['bigmem', 'bioe', 'btrippe', 'dev', 'gpu', 'normal', 'owners', 'possu', 'service', 'stat']", packaged)
             guard = subprocess.run([str(installed / "bin/shk"), "guard", "--client", "claude"], input=json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "watch -n 1 ssh sherlock-plain squeue"}}), cwd=temp, env=env, capture_output=True, text=True, check=True, timeout=10)
             self.assertEqual(json.loads(guard.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
             pin = temp / "pin.json"

@@ -51,15 +51,16 @@ install dependencies.
   provides an offline first-day example.
 
 Supported orchestration is one authoritative POSIX workstation and a single
-allocation per attempt on a packaged partition profile (`normal`, `owners`,
-`btrippe`). Slurm requeue is emitted only where the profile allows it, and a
-requeued script must checkpoint and resume on its own. The GPU, requeue, batch
-reconciliation and occupancy paths were exercised by a live owners/btrippe GPU
-pilot with one operator-issued requeue; natural preemption handling remains
-offline-tested, and the scientific pilot was CPU work on `normal`. Arrays,
-distributed controllers and general DDP recovery are not supported. Workload
-source/runtime/input identities, authorized storage, budget and scientific
-validator are explicit consumer inputs. `shk occupancy` reports a borrowed
+allocation per attempt on a packaged partition profile (`shk policy` lists them:
+public `normal`, `bigmem`, `gpu`, `dev` and `service`, department `bioe` and
+`stat`, borrowed `btrippe` and `possu`, preemptible `owners`). Slurm requeue is
+emitted only where the profile allows it, and a requeued script must checkpoint
+and resume on its own. The GPU, requeue, batch reconciliation and occupancy
+paths were exercised by a live owners/btrippe GPU pilot with one operator-issued
+requeue; natural preemption handling remains offline-tested, and the scientific
+pilot was CPU work on `normal`. Arrays, distributed controllers and general DDP
+recovery are not supported. Workload source/runtime/input identities, authorized
+storage, budget and scientific validator are explicit consumer inputs. `shk occupancy` reports a borrowed
 partition's current use before a courtesy submission and gates nothing;
 `status`/`reconcile --all` cover many open attempts in one bounded query. Unknown
 submission outcomes retain reservations and never trigger automatic retries, and
