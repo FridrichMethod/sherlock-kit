@@ -456,6 +456,17 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(self.resolved(done[0], first, second, done[2], done[3], events=[submitted(job_id='500'), ack])['resolution'], 'terminal')
         self.assertEqual(self.resolved(*done, events=[submitted(job_id='123')])['reason'], 'job_id_conflict')
 
+    def test_group_conflicts_and_highest_db_index_state(self):
+        conflict = self.resolved(sacct_line(self.id), sacct_line(self.id, State='FAILED', DBIndex='43'))
+        self.assertEqual((conflict['resolution'], conflict['reason']), ('error', 'terminal_state_conflict'))
+        costs = self.resolved(sacct_line(self.id), sacct_line(self.id, ElapsedRaw='61', End=stamp(CREATED + 62), DBIndex='43'))
+        self.assertEqual((costs['resolution'], costs['reason']), ('error', 'accounting_conflicts'))
+        queued = sacct_line(self.id, State='PENDING', Start='Unknown', End='Unknown', ElapsedRaw='0', AllocCPUS='0', AllocTRES='')
+        mixed = self.resolved(queued, sacct_line(self.id, State='RUNNING', End='Unknown', DBIndex='43'))
+        self.assertEqual((mixed['resolution'], mixed['tasks']['running'], mixed['tasks']['pending'], mixed['tasks']['by_state']), ('identified', 1, 0, {'RUNNING': 1}))
+        reversed_order = self.resolved(sacct_line(self.id, State='RUNNING', End='Unknown'), sacct_line(self.id, **{'State': 'PENDING', 'Start': 'Unknown', 'End': 'Unknown', 'ElapsedRaw': '0', 'AllocCPUS': '0', 'AllocTRES': '', 'DBIndex': '43'}))
+        self.assertEqual((reversed_order['tasks']['running'], reversed_order['tasks']['pending']), (0, 1))
+
     def test_released_predicate(self):
         for resolution, by_state, expected in (('not_sent', {}, True), ('abandoned', {}, True), ('terminal', {'FAILED': 2}, True), ('terminal', {'COMPLETED': 1, 'FAILED': 1}, False),
                                                ('identified', {}, False), ('inconclusive', {}, False), ('abandonable', {}, False), ('unexpected_preemption', {}, False), ('error', {}, False)):
@@ -647,6 +658,8 @@ class RunnerTests(RegistryCase):
         invalid = {'not_json': 'nope', 'list': '[]', 'kind': json.dumps({**good, 'kind': 'x'}), 'attempt': json.dumps({**good, 'attempt': 'xyz'}),
                    'key': json.dumps({**good, 'key': D}), 'job_name': json.dumps({**good, 'job_name': 'shk-other'}),
                    'no_job_name_option': json.dumps({**good, 'sbatch_options': ['sbatch', '--parsable']}),
+                   'not_sbatch': json.dumps({**good, 'sbatch_options': ['srun'] + good['sbatch_options'][1:]}),
+                   'no_parsable': json.dumps({**good, 'sbatch_options': [good['sbatch_options'][0]] + good['sbatch_options'][2:]}),
                    'array_option_without_array': json.dumps({**good, 'sbatch_options': good['sbatch_options'] + ['--array=0-3']}),
                    'array_without_option': json.dumps(unstamped(attempt, self.spec(resources={**body['resources'], 'array': {'count': 4}}), sbatch_options=good['sbatch_options'])),
                    'bad_array': json.dumps(unstamped(attempt, self.spec(resources={**body['resources'], 'array': {'count': 1}}))),
@@ -717,6 +730,75 @@ class RunnerTests(RegistryCase):
         self.assertEqual(out, f'SHK_SUBMITTED:{retry}:55\n')
         self.assertEqual(self.marker(body), retry)
         self.assertEqual(len(self.calls_for('sacct')), 1)
+
+    def test_lock_file_symlink_or_directory_is_registry_unsafe(self):
+        for name in ('', 'attempts', 'tasks'):
+            (self.root / name).mkdir(mode=0o700, exist_ok=True)
+        decoy = self.base / 'decoy'
+        decoy.write_text('')
+        (self.root / '.lock').symlink_to(decoy)
+        attempt, code, out, err = self.submit()
+        self.assertEqual((code, out, err), (0, f'SHK_REFUSED:{attempt}:registry_unsafe\n', ''))
+        self.assertEqual(parse_submit_reply(attempt, out), ('refused', 'registry_unsafe'))
+        (self.root / '.lock').unlink()
+        (self.root / '.lock').mkdir(mode=0o700)
+        attempt, code, out, err = self.submit()
+        self.assertEqual((code, out, err), (0, f'SHK_REFUSED:{attempt}:registry_unsafe\n', ''))
+        code, out, err = self.run_main(['event', str(self.root), 'abandon', '{}', attempt])
+        self.assertEqual((code, out, err), (0, f'SHK_EVENT_REFUSED:{attempt}:registry_unsafe\n', ''))
+        self.assertEqual(list((self.root / 'attempts').iterdir()), [])
+        self.assertEqual(list((self.root / 'tasks').iterdir()), [])
+        self.assertFalse(self.calls.exists())
+
+    def test_unwritable_attempts_directory_is_record_write_failed(self):
+        for name in ('', 'attempts', 'tasks'):
+            (self.root / name).mkdir(mode=0o700, exist_ok=True)
+        attempts = self.root / 'attempts'
+        attempts.chmod(0o500)
+        self.addCleanup(attempts.chmod, 0o700)
+        body = self.spec()
+        attempt, code, out, err = self.submit(body)
+        self.assertEqual((code, out, err), (0, f'SHK_REFUSED:{attempt}:record_write_failed\n', ''))
+        self.assertEqual(parse_submit_reply(attempt, out), ('refused', 'record_write_failed'))
+        self.assertIsNone(self.files(attempt))
+        self.assertIsNone(self.marker(body))
+        self.assertFalse(self.calls.exists())
+
+    def test_null_array_is_a_single_job(self):
+        body = self.spec()
+        body['resources'] = {**body['resources'], 'array': None}
+        attempt = self.new_id()
+        text = json.dumps({**unstamped(attempt, self.spec()), 'spec': body})
+        attempt, code, out, _ = self.submit(attempt=attempt, record_text=text, sbatch_stdout='91\n')
+        self.assertEqual((code, out), (0, f'SHK_SUBMITTED:{attempt}:91\n'))
+        stored = self.load(attempt, 'record.json')
+        self.assertIsNone(stored['spec']['resources']['array'])
+        row = sacct_line(attempt, int(stored['created']), JobID='91', JobIDRaw='91')
+        self.assertEqual(resolve(stored, [submitted('91')], rows(row), time.time())['resolution'], 'terminal')
+
+    def test_claim_failure_is_not_sent(self):
+        original = registry.write_once
+        body = self.spec()
+        marker = self.root / 'tasks' / task_key(body)
+
+        def failing_with(error):
+            def failing(path, data):
+                if Path(path) == marker:
+                    raise error
+                return original(path, data)
+            return failing
+
+        for error, needle in ((FileExistsError(17, 'File exists'), 'appeared'), (OSError(28, 'No space left on device'), 'No space left')):
+            with self.subTest(error=type(error).__name__), patch.object(registry, 'write_once', failing_with(error)):
+                attempt, code, out, _ = self.submit(body)
+                self.assertEqual((code, out), (0, f'SHK_NOT_SENT:{attempt}:claim_failed\n'))
+                self.assertEqual(parse_submit_reply(attempt, out), ('not_sent', 'claim_failed'))
+                self.assertEqual(self.files(attempt), ['not_sent.json', 'record.json'])
+                not_sent = self.load(attempt, 'not_sent.json')
+                self.assertEqual(not_sent['reason'], 'claim_failed')
+                self.assertIn(needle, not_sent['detail'])
+                self.assertIsNone(self.marker(body))
+                self.assertEqual(self.calls_for('sbatch'), [])
 
     def test_submit_registry_busy_writes_nothing(self):
         for name in ('', 'attempts', 'tasks'):
@@ -955,6 +1037,23 @@ class ReaderTests(RegistryCase):
         self.assertEqual(document['sacct']['argv'][-1], '--name=shk-' + hex32(0xd0))
 
 
+    def test_unlistable_attempt_directory_is_isolated(self):
+        good, bad = hex32(0xd5), hex32(0xd6)
+        stored = self.seed(good, self.spec(), created=CREATED, events=[('submitted.json', {'job_id': '1', 'cluster': None, 'submitted_at': CREATED, 'sbatch': {}})])
+        self.seed(bad, self.spec(task='dark'), created=CREATED + 1)
+        self.attempt_dir(bad).chmod(0)
+        self.addCleanup(self.attempt_dir(bad).chmod, 0o700)
+        document = self.read('--open', sacct_stdout=sacct_line(good, JobID='1', JobIDRaw='1') + '\n')
+        self.assertEqual(document['registry']['open_count'], 2)
+        by_id = {entry['attempt']: entry for entry in document['attempts']}
+        self.assertEqual((by_id[good]['record'], by_id[good]['errors']), (stored, []))
+        self.assertEqual((by_id[bad]['exists'], by_id[bad]['record'], by_id[bad]['events']), (True, None, []))
+        self.assertTrue(any(error.startswith('listing:') for error in by_id[bad]['errors']), by_id[bad]['errors'])
+        self.assertEqual(document['sacct']['argv'][-1], '--name=shk-' + good)
+        self.assertEqual(len(self.calls_for('sacct')), 1)
+        self.assertEqual(resolve(stored, by_id[good]['events'], document['sacct']['rows'], time.time())['resolution'], 'terminal')
+
+
 class EventTests(RegistryCase):
     def event(self, kind, *ids, note='', **fake):
         code, out, err = self.run_main(['event', str(self.root), kind, json.dumps({'note': note}), *ids], **fake)
@@ -1044,6 +1143,33 @@ class EventTests(RegistryCase):
         code, out, err = self.run_main(['event', str(self.root), 'bogus', '{}', done])
         self.assertEqual((code, out), (1, ''))
         self.assertIn('unknown event kind', err)
+
+
+    def test_event_write_failure_is_unknown(self):
+        old = hex32(0xf7)
+        self.seed(old, self.spec(), created=time.time() - 2 * ABANDON_SECONDS)
+        original = registry.write_once
+
+        def failing(path, data):
+            if Path(path).name == 'abandoned.json':
+                raise OSError(28, 'No space left on device')
+            return original(path, data)
+
+        with patch.object(registry, 'write_once', failing):
+            replies = self.event('abandon', old, sacct_stdout='', squeue_stdout='')
+        self.assertEqual((len(replies), replies[0][:2]), (1, (old, 'unknown')))
+        self.assertIn('No space left', replies[0][2])
+        self.assertEqual(self.files(old), ['record.json'])
+        self.assertEqual(self.event('abandon', old, sacct_stdout='', squeue_stdout=''), [(old, 'written', 'abandoned.json')])
+
+    def test_event_on_absent_registry_creates_nothing(self):
+        attempt = hex32(0xf8)
+        self.assertEqual(self.event('abandon', attempt, sacct_stdout=''), [(attempt, 'refused', 'unknown_attempt')])
+        self.assertFalse(self.root.exists())
+        self.assertFalse(self.calls.exists())
+        self.root.mkdir(mode=0o750)
+        self.assertEqual(self.event('abandon', attempt, sacct_stdout=''), [(attempt, 'refused', 'registry_unsafe')])
+        self.assertEqual(list(self.root.iterdir()), [])
 
 
 class FetchManifestTests(RegistryCase):

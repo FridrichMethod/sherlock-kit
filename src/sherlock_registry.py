@@ -573,9 +573,28 @@ def checked_root(root_text):
     return root
 
 
+def existing_root(root_text):
+    """checked_root's checks without creating anything: an event writer never materialises a registry."""
+    root = Path(root_text)
+    if not root.is_absolute() or any(ancestor.is_symlink() for ancestor in root.parents):
+        raise RegistryError("registry_unsafe")
+    for directory in (root, root / "attempts", root / "tasks"):
+        try:
+            _checked_private_directory(directory)
+        except FileNotFoundError:
+            raise RegistryError("unknown_attempt") from None
+        except OSError:
+            raise RegistryError("registry_unsafe") from None
+    return root
+
+
 def acquire_lock(root):
     """flock on .lock, polled up to LOCK_TIMEOUT_SECONDS; the descriptor is returned to release_lock."""
-    fd = os.open(lock_path(root), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        fd = os.open(lock_path(root), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    except OSError:
+        # ELOOP (a symlinked .lock), EISDIR, EACCES: the lock file fails the regular/owned check.
+        raise RegistryError("registry_unsafe") from None
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
@@ -750,11 +769,11 @@ def checked_record(text):
         raise RegistryError("record_invalid")
     _checked_spec(record.get("spec"))
     options = record.get("sbatch_options")
-    if not isinstance(options, list) or not options or not all(isinstance(option, str) for option in options):
+    if not isinstance(options, list) or options[:2] != ["sbatch", "--parsable"] or not all(isinstance(option, str) for option in options):
         raise RegistryError("record_invalid")
     if record.get("key") != task_key(record["spec"]) or record.get("job_name") != "shk-" + attempt or "--job-name=shk-" + attempt not in options:
         raise RegistryError("record_invalid")
-    if any(option.startswith("--array") for option in options) != ("array" in record["spec"]["resources"]):
+    if any(option.startswith("--array") for option in options) != (record["spec"]["resources"].get("array") is not None):
         raise RegistryError("record_invalid")
     return record
 
@@ -878,8 +897,11 @@ def _submit_locked(root, record, program_sha256, payload, notes):
         os.mkdir(directory, 0o700)
     except FileExistsError:
         raise RegistryError("attempt_exists") from None
+    except OSError:
+        raise RegistryError("record_write_failed") from None
     stamped = {**record, "created": time.time(), "created_on": socket.gethostname(), "principal_uid": os.getuid(), "program_sha256": program_sha256}
     try:
+        _fsync_directory(root / "attempts")
         write_once(directory / "record.json", encoded(stamped))
     except OSError:
         raise RegistryError("record_write_failed") from None
@@ -934,7 +956,12 @@ def open_attempts(root):
     for item in os.scandir(root / "attempts"):
         if not item.is_dir(follow_symlinks=False) or not HEX32.fullmatch(item.name):
             continue
-        names = set(os.listdir(item.path))
+        try:
+            names = set(os.listdir(item.path))
+        except OSError:
+            # Unlistable (or vanished since scandir): load_attempt records the listing error in `errors`.
+            entries.append(load_attempt(root, item.name))
+            continue
         if "record.json" in names and not names & CLOSING_FILES:
             entries.append(load_attempt(root, item.name))
     entries.sort(key=lambda entry: (_created_of(entry["record"]) is None, _created_of(entry["record"]) or 0, entry["attempt"]))
@@ -1056,6 +1083,8 @@ def _write_event(root, kind, entry, report, note):
     try:
         write_once(directory / name, encoded(body))
     except FileExistsError:
+        # Single-instance events already exist; for `ack-<epoch>.json` this also covers a second ack
+        # within the same second, which the fresh resolution above makes practically unreachable.
         return "SHK_EVENT_REFUSED:" + attempt + ":already_present"
     except OSError as exc:
         return "SHK_EVENT_UNKNOWN:" + attempt + ":" + str(exc).replace("\n", " ")
@@ -1098,7 +1127,7 @@ def run_event(args):
     if kind != "resolved" and len(attempts) != 1:
         return _emit_lines(["SHK_EVENT_REFUSED:" + attempt + ":invalid_request" for attempt in attempts])
     try:
-        root = checked_root(root_text)
+        root = existing_root(root_text)
         lock = acquire_lock(root)
     except RegistryError as exc:
         return _emit_lines(["SHK_EVENT_REFUSED:" + attempt + ":" + str(exc) for attempt in attempts])
