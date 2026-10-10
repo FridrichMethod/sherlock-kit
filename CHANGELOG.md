@@ -87,7 +87,8 @@ it has run. The partition-table change has no live pilot of its own.
   in-process against a temporary registry with fake Slurm binaries, including
   three concurrent runners on one logical task; `tests/fake_remote.py` drives the
   CLI the same way; `tests/test_release_metadata.py` ties the version strings,
-  the projection, the documented config keys and the duplicated constants.
+  the projection, the documented config keys and the skill adapters, and
+  `tests/test_orchestration.py` ties the constants duplicated from the registry.
 
 ## 0.2.0
 

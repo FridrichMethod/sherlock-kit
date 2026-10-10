@@ -34,8 +34,11 @@ Never edit, rename or delete a registry file by hand: every file is create-once
 and readers treat an unexpected or malformed file as an `error` entry for that
 attempt. The registry program creates the root and its two subdirectories on
 the first submission and refuses a root that is not an owned private directory.
-The local cache may be deleted at any time when no typed command is running; it
-holds no attempt state. Set the launcher/transport root explicitly; see
+`query-cache.json` and its lock may be removed when no typed command is running
+(the next query simply runs again; no attempt state lives there). Never remove
+`auth-backoff.json` while a cooldown is armed: it is the shared authentication
+cooldown that keeps a failed login from being retried, not attempt state. Set
+the launcher/transport root explicitly; see
 [installation](installation.md). Do not globally change `XDG_STATE_HOME` to
 relocate one application's state. Do not place registries, caches, credentials,
 private grants or research inputs in Git.

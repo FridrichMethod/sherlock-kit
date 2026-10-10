@@ -170,31 +170,32 @@ characters), freezes the record (the spec with checked resources,
 a borrowed profile) together with the exact option list, `sbatch --parsable
 --job-name=shk-ID --comment=shk:ID --partition=NAME [--array=0-N-1[%M]]
 --cpus-per-task=C --requeue --open-mode=append | --no-requeue --ntasks=T
---mem=MM --time=MIN --chdir=RUN --output=RUN/slurm-%j.out --error=... [-G G]
+--mem=<MB>M --time=MIN --chdir=RUN --output=RUN/slurm-%j.out --error=... [-G G]
 [--constraint=...] [--signal=...]`, and makes exactly one remote call: the
 registry program's `submit`. The program is the `sherlock_registry` module's own
 source shipped as a self-decoding `python3 -c` argument, so runner, reader and
 event writer always run the toolkit's exact code; the CLI refuses to send when
 the quoted argv exceeds 100,000 characters.
 
-On the login node the runner validates, without writing, the record (shape, id,
-key recomputed from `project`/`campaign`/`task`, job name `shk-ID`, an array
-option exactly when `array` is frozen), the principal (`pwd` name of the uid
-equals the spec principal), the registry root and the workload: the run
+On the login node the runner validates the record (shape, id, key recomputed
+from `project`/`campaign`/`task`, job name `shk-ID`, an array option exactly
+when `array` is frozen), the principal (`pwd` name of the uid equals the spec
+principal), the registry root (created 0700 with `attempts/` and `tasks/` when
+absent, refused unless an owned private directory) and the workload: the run
 directory must be an existing canonical directory and the script bytes must hash
 to `script_digest` and contain no `#SBATCH` line; those bytes are what sbatch
-reads on stdin. It then holds the registry lock (`.lock`, `flock`, polled up to
-20 s) through the end: applies the deduplication rule, creates `attempts/ID/`
-and `record.json` (stamped `created`, `created_on`, `principal_uid`,
-`program_sha256`) before sbatch, claims `tasks/<key>`, runs sbatch with
-`SBATCH_*` removed from the environment, writes `submitted.json` (`job_id`,
-`cluster`, `submitted_at`, sbatch return code and bounded stdout/stderr) and
-prints exactly one line, last. Submission outcomes:
+reads on stdin. Under the registry lock (`.lock`, `flock`, polled up to 20 s) it
+applies the deduplication rule, creates `attempts/ID/` and `record.json`
+(stamped `created`, `created_on`, `principal_uid`, `program_sha256`) before
+sbatch, claims `tasks/<key>`, runs sbatch with `SBATCH_*` removed from the
+environment and writes `submitted.json` (`job_id`, `cluster`, `submitted_at`,
+sbatch return code and bounded stdout/stderr); it then releases the lock, prints
+exactly one line, last, and exits. Submission outcomes:
 
 | Runner line | `resolution` | `recorded` | exit | meaning |
 |---|---|---|---|---|
 | `SHK_SUBMITTED:ID:JOB` | `submitted` | `true` | 0 | `job_id` is JOB; `record.json`, the task marker and `submitted.json` exist. |
-| `SHK_NOT_SENT:ID:REASON` | `not_sent` | `true` | 1 | sbatch never ran (`sbatch_unavailable`, `claim_failed`); `not_sent.json` closes the attempt. Resubmit naming ID as `parent_attempt`. |
+| `SHK_NOT_SENT:ID:REASON` | `not_sent` | `true` | 1 | sbatch never ran (`sbatch_unavailable`, `claim_failed`); `not_sent.json` closes the attempt. Resubmit naming the current marker (normally ID) as `parent_attempt`. |
 | `SHK_REFUSED:ID:TOKEN` | error `shk: ...` | - | 2 | Nothing a reader can see was written; the id is discarded. The token is translated (table below). |
 | `SHK_UNKNOWN:ID:RC` | `unknown` | `true` | 2 | sbatch ran but returned no usable job id (non-zero exit, unparsable output or a foreign cluster suffix); `submitted.json` has `job_id: null`. |
 | malformed or lost reply | `unknown` | `null` | 2 | Timeout, disconnect or an unparsable reply after dispatch; the record may exist. |
@@ -311,8 +312,10 @@ current restart (`waived {"<task>": {restart, state}}`, the note and the
 observation's row digest, task counts and cost). A waiver covers restarts up to
 the recorded one, so a later restart is a new anomaly, and the acknowledgement
 now needs the network. The event writer refuses with `preemptible_profile`,
-`not_applicable:RESOLUTION`, `already_present`, `unverifiable` (sacct or squeue
-failed), `registry_busy` or `unknown_attempt`.
+`not_applicable:RESOLUTION`, `not_applicable:error:REASON` (the attempt's files
+could not be analysed), `already_present`, `unverifiable` (sacct or squeue
+failed), `invalid_request` (an ack or abandon naming other than exactly one
+attempt), `registry_busy`, `registry_unsafe` or `unknown_attempt`.
 
 `shk reconcile --attempt ID --abandon [--note TEXT]` closes an `abandonable`
 attempt. The CLI first requires a complete read of the attempt (the cached one
@@ -325,8 +328,9 @@ otherwise) and writes `abandoned.json` (`at`, `age_seconds`, `note`, the exact
 `{"operation": "ack"|"abandon", "attempt", "note", "event", "outcome",
 "transport", "scientific_validation"}`: `written` exits 0 with the file name in
 `event`, `not_sent` (cooldown or ssh never started) exits 1, a lost or unparsable
-reply exits 2 as `unknown` with the `shk status --attempt ID` hint, and a
-refusal exits 2 as `shk: registry refused --abandon: REASON`.
+reply exits 2 as `unknown` with a `hint` key (`shk status --attempt ID`; an
+unparsable reply after dispatch also carries `detail`), and a refusal exits 2 as
+`shk: registry refused --abandon: REASON`.
 
 `reconcile` (never `status`) also sends one `event resolved ID...` call for the
 attempts it just found `terminal` without a `resolved.json`; the writer verifies
@@ -366,9 +370,10 @@ earlier on another login node (NFS attribute cache), while `--attempt ID` is
 exact; an array task that never appears in accounting keeps the attempt
 `identified` with `missing > 0` (only an attempt with no rows at all becomes
 `abandonable`); `--acknowledge-preemption` needs the network; an `owners`
-attempt admitted with `requeue: false` but requeued by an operator stays
-`identified` and cannot be acknowledged because its profile is preemptible; a
-second acknowledgement within the same second is refused as `already_present`;
+attempt admitted with `requeue: false` but requeued by an operator carries the
+informational flag `requeued_without_requeue`, resolves `identified`/`terminal`
+like any other attempt and cannot be acknowledged (its profile is preemptible);
+a second acknowledgement within the same second is refused as `already_present`;
 an attempt resolved `terminal` before Slurm records a further restart row is
 flagged `reopened_after_resolved` on a later read but its `resolved.json` stays.
 

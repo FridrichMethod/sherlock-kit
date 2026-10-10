@@ -53,8 +53,9 @@ and the typed commands place `query-cache.json` and its own lock beside them.
 An explicit `TransportConfig(backoff_file=...)` has highest priority. An invalid
 explicit root fails closed. Without either, standalone transport retains the
 standard `$XDG_STATE_HOME/sherlock-kit` (or `~/.local/state/sherlock-kit`)
-fallback for compatibility; only read-only diagnostics ever reach it. Policy,
-guard and local doctor create no runtime state.
+fallback for compatibility; typed commands never reach it, and standalone API
+callers should set an explicit root rather than rely on it. Policy, guard and
+local doctor create no runtime state.
 
 The dotfiles installer accepts `--state-root /path/to/private/sherlock-kit`
 (PowerShell `-StateRoot`). It stores the locator in its existing active pointer;
