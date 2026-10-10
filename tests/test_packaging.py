@@ -106,7 +106,7 @@ class FrozenInstallTests(unittest.TestCase):
             self.assertEqual(result["identity"], expected)
             self.assertEqual(result["policy"].encode(), policy)
             self.assertIn(expected["policy_sha256"], result["projection"])
-            packaged = subprocess.check_output([str(python), "-c", "import importlib.resources as r; import sherlock_orchestration, sherlock_artifacts, sherlock_commands, sherlock_guard, sherlock_partitions; print((r.files('sherlock_kit_data') / 'adapters/claude/.claude-plugin/plugin.json').read_text()); print((r.files('sherlock_kit_data') / 'adapters/codex/skills/sherlock-kit-operate/SKILL.md').is_file()); print('partitions=' + sherlock_partitions.partitions_sha256()); print(sorted(sherlock_partitions.partition_profiles()))"], cwd=temp, env=env, text=True)
+            packaged = subprocess.check_output([str(python), "-c", "import importlib.resources as r; import sherlock_orchestration, sherlock_artifacts, sherlock_commands, sherlock_guard, sherlock_partitions, sherlock_registry; print((r.files('sherlock_kit_data') / 'adapters/claude/.claude-plugin/plugin.json').read_text()); print((r.files('sherlock_kit_data') / 'adapters/codex/skills/sherlock-kit-operate/SKILL.md').is_file()); print('partitions=' + sherlock_partitions.partitions_sha256()); print(sorted(sherlock_partitions.partition_profiles()))"], cwd=temp, env=env, text=True)
             self.assertIn('"name": "sherlock-kit"', packaged)
             self.assertIn('True', packaged)
             self.assertIn("partitions=" + expected["partitions_sha256"], packaged)
