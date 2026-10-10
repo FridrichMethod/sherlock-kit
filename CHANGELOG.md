@@ -7,10 +7,12 @@ SQLite ledger with its reservations, budgets and cost caps is gone: the only
 durable attempt state is an attempt registry on Sherlock (`registry_root`) plus
 Slurm accounting, so any POSIX workstation with the frozen toolkit and the
 private configuration can operate. Every new path is tested offline by executing
-the real registry program against fake `sbatch`/`sacct`/`squeue` binaries. The
-live CPU pilot of the registry and array paths on `normal` is pending; its
-evidence will be added to the acceptance document and this sentence updated when
-it has run. The partition-table change has no live pilot of its own.
+the real registry program against fake `sbatch`/`sacct`/`squeue` binaries. A
+live CPU pilot on `normal` on 2026-10-10 (one 4-task array, throttle 2) exercised
+the registry runner, `status` through the throttled, partial and terminal phases,
+`reconcile --all`, DTN fetch with the attempt sidecar and `fetch --local`; see
+the acceptance document. Lost replies, `--abandon` and preemption paths remain
+offline evidence. The partition-table change has no live pilot of its own.
 
 - Registry (`sherlock_registry`, standard library, Python 3.11-3.14): the CLI
   ships the module's own source to the login node as a self-decoding

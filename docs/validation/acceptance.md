@@ -1,10 +1,9 @@
 # Acceptance evidence
 
 Release 0.3.0 replaced the local SQLite ledger with the attempt registry on
-Sherlock (`registry_root`) and added job arrays; the evidence below predates
-that change and is unaltered. The live pilot of the 0.3.0 registry and array
-paths is pending, and its evidence will be recorded in a separate section added
-after the pilot.
+Sherlock (`registry_root`) and added job arrays; the 0.1.0 and 0.2.0 evidence
+below predates that change and is unaltered. The 0.3.0 registry and array paths
+were exercised by the live CPU pilot recorded in "Live registry pilot (0.3.0)".
 
 Foundation and CPU pilot accepted 2026-10-08 UTC. This is engineering acceptance,
 not certification of scientific results or arbitrary command compliance.
@@ -135,6 +134,36 @@ non-preemptible partition, `--acknowledge-preemption`, `--all` over hundreds of
 attempts, and a dispatcher crash leaving a `submitting` claim (the post-pilot review
 found and fixed its exclusion from `--all` in `3e7e798`). Private evidence,
 configuration, specs and receipts stay in the owner's data area.
+
+## Live registry pilot (0.3.0)
+
+Run 2026-10-10 UTC with the frozen toolkit 0bd51b0 (`shk` reinstalled through
+dotfiles, pin and projection regenerated) against a fresh `registry_root` on
+group storage. One attempt, one Slurm job array on `normal`, CPU only; the
+workload was a 720-second fuzz of the toolkit's own `resolve()` contract per task
+(about 3.8 million randomised attempts per task, all invariants held). This is
+engineering acceptance of the registry, array and fetch mechanics, not a
+scientific result.
+
+| Item | Observed |
+|---|---|
+| Submission | `submit --apply`: offline gates, one `id -un` probe, one runner call; reply `SHK_SUBMITTED`, job `47245971`, exit 0. The registry held `record.json` (stamped `created`/`created_on` by the login node), `submitted.json` (sbatch rc 0) and the task marker before the reply reached the workstation. |
+| Resources | 4 tasks, throttle 2, 1 CPU, 2 GB, 20 min; `--array=0-3%2`, `slurm-%A_%a.out/.err` under the run directory. |
+| `status` 17:26Z | `identified`: tasks `RUNNING 2, missing 2`. Slurm accounting showed no row for the two tasks held by the throttle (no `N_[2-3]` aggregate); `squeue` listed them as `PENDING JobArrayTaskLimit`. |
+| `status` 17:50Z | `identified`: `COMPLETED 2, RUNNING 2`, cost lower bound 1,476 CPU-s, `known false`. |
+| `status` 17:54Z | `terminal`: `COMPLETED 4`, cost 2,932 CPU-s (738+738+728+728), `known true`, no anomalies. |
+| `reconcile --all` | One read, one `event resolved` call; `resolved.json` written (`rows_sha256` recorded); the next listing is empty. |
+| Accounting shape | Task rows `47245971_0..3` with raw ids 47245981, 47245982, 47246202 and 47245971: the last task to leave the array kept the array id as its raw id, as the resolver expects. |
+| Fetch | Manifest of 4 files / 1,532 bytes written on Sherlock, fetched through `sherlock-dtn` into a 0700 stage, validator passed, atomic promotion, receipt and `.array-soak.shk-attempt.json` sidecar beside the bundle; `fetch --local` recovered the receipt offline (`recovered: true`). |
+
+Not exercised live: lost ssh replies and `--abandon`, duplicate-task refusal,
+preemption or requeue of an array task, `--acknowledge-preemption`, borrowed
+partitions. Those rest on the offline tests that execute the real registry
+program against fake Slurm binaries. One documentation correction followed the
+pilot: pending array tasks held by the throttle are reported as `missing`, not
+`pending`, because Sherlock's accounting has no row for them yet. The private
+configuration, spec, status readings, receipts and bundle live outside Git in the
+owner's data area.
 
 ## Release-maintenance verification
 

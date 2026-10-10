@@ -15,11 +15,13 @@ cooldown and a 60-second query cache, so any POSIX workstation with the frozen
 toolkit and the same private configuration can operate. The 0.1.0 CPU
 provenance pilot on `normal` and the 0.2.0 owners/btrippe GPU pilot (one
 operator-issued requeue, `--all`, occupancy, two DTN fetches) are recorded in
-[acceptance evidence](validation/acceptance.md). The live pilot of the registry
-and array paths introduced in 0.3.0 is pending; until it has run, those paths
-rest on offline tests that execute the real registry program against fake Slurm
-binaries. Natural preemption and the `unexpected_preemption` path remain
-offline-tested only.
+[acceptance evidence](validation/acceptance.md), as is the 2026-10-10 CPU pilot
+of the 0.3.0 registry and array paths on `normal` (one 4-task array with
+throttle 2: registry writes, `status` through the pending and partial phases,
+`reconcile --all`, DTN fetch with the attempt sidecar and `fetch --local`).
+Lost replies, `--abandon`, natural preemption and the `unexpected_preemption`
+path remain offline-tested only, through tests that execute the real registry
+program against fake Slurm binaries.
 
 The CLI and artifact promotion require POSIX (`fcntl`, Unix ownership and
 no-follow filesystem checks); the registry program needs `python3` 3.11+ and
@@ -274,7 +276,9 @@ printed). Absence from accounting is never proof of non-submission.
 Rows are checked before they count: steps and other job names are skipped;
 `JobID` is a plain id (task 0 of a single job), `N_k` (array task k) or an
 aggregate `N_[a-b,c%t]` whose index set is expanded (a pending aggregate is
-pending tasks, a `CANCELLED` aggregate is terminal tasks that cost nothing);
+pending tasks, a `CANCELLED` aggregate is terminal tasks that cost nothing; on
+Sherlock, tasks still held back by the array throttle had no accounting row at
+all in the 2026-10-10 pilot and therefore count as missing until they start);
 `User` and `Cluster` must equal the frozen spec; a `Submit` more than 300 s
 before `created` is `stale_submit`; `AllocCPUS` must equal `cpus x tasks` once
 started; GPUs come from `AllocTRES` (generic `gres/gpu=N` or the sum of typed
@@ -369,7 +373,8 @@ Known residual limits: `--all` may miss an attempt directory created seconds
 earlier on another login node (NFS attribute cache), while `--attempt ID` is
 exact; an array task that never appears in accounting keeps the attempt
 `identified` with `missing > 0` (only an attempt with no rows at all becomes
-`abandonable`); `--acknowledge-preemption` needs the network; an `owners`
+`abandonable`), and tasks waiting behind the array throttle are exactly such
+rows-less tasks until Slurm starts them; `--acknowledge-preemption` needs the network; an `owners`
 attempt admitted with `requeue: false` but requeued by an operator carries the
 informational flag `requeued_without_requeue`, resolves `identified`/`terminal`
 like any other attempt and cannot be acknowledged (its profile is preemptible);

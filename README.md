@@ -77,9 +77,9 @@ inventory, bytes and validator identity before atomic promotion and keeps an
 attempt sidecar beside the bundle, so local recovery can finish a durable
 receipt without network access.
 
-The 0.1.0 CPU pilot and the 0.2.0 owners/btrippe GPU pilot are recorded in the
-acceptance evidence; the live pilot of the 0.3.0 registry and array paths is
-pending, and natural preemption handling remains offline-tested.
+The 0.1.0 CPU pilot, the 0.2.0 owners/btrippe GPU pilot and the 0.3.0 registry
+and array CPU pilot are recorded in the acceptance evidence; lost replies,
+`--abandon` and natural preemption handling remain offline-tested.
 
 Guard and skill adapters call the same installed toolkit. A file's presence does
 not prove active registration, current trust or enforcement; doctor reports those
