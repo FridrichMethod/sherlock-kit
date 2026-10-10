@@ -24,8 +24,15 @@ from sherlock_commands import OPTIONAL_CONFIG, REQUIRED_CONFIG
 VERSION = re.compile(r"\d+\.\d+\.\d+")
 CHANGELOG_HEADING = re.compile(r"^## (\S+)", re.MULTILINE)
 FENCED_JSON = re.compile(r"^```json\n(.*?)^```", re.MULTILINE | re.DOTALL)
+# A line of docs/orchestration.md may name a removed key only when that same line also
+# says it is refused, removed or a 0.2.0 migration concern; the rule is per line, so a
+# sentence whose removal word falls on the next line is rejected (see the test docstring).
 REMOVAL_CONTEXT = re.compile(r"refus|0\.2\.0|migrat|remov|no longer|dropped|not a config", re.IGNORECASE)
 REMOVED_KEYS = ("state_root", "limits")
+# Plain-token needles the changelog entry of each release must contain; markdown
+# formatting around a token (code spans, wrapping) is the author's choice. Bumping the
+# version means adding its row here.
+RELEASE_NEEDLES = {"0.3.0": ("registry_root", "--abandon", "array")}
 SKILLS = ("adapters/claude/skills/sherlock-kit-operate/SKILL.md", "adapters/codex/skills/sherlock-kit-operate/SKILL.md")
 SAMPLE = {"z": [1, 2.5, {"b": None, "a": "λ   text"}], "a": {"nested": [True, False, "x"]}, "n": 10 ** 20}
 
@@ -79,6 +86,10 @@ class ReleaseMetadataTests(unittest.TestCase):
     def test_orchestration_guide_does_not_offer_the_removed_ledger_keys(self):
         """`state_root` and `limits` are refused by the CLI; the guide may only mention them as removed or refused.
 
+        Rule for the docs author: every line that contains a backticked removed key must
+        itself match ``REMOVAL_CONTEXT`` (refus / 0.2.0 / migrat / remov / no longer /
+        dropped / not a config). Keep the key and its removal word on one line; a
+        sentence wrapped so the removal word lands on the next line fails the check.
         Every fenced JSON example that looks like a private configuration must use the
         current key set and name ``registry_root``.
         """
@@ -102,8 +113,9 @@ class ReleaseMetadataTests(unittest.TestCase):
         sections = [section for section in changelog_sections() if CHANGELOG_HEADING.match(section).group(1) == project]
         self.assertEqual(len(sections), 1, f"CHANGELOG.md needs exactly one '## {project}' entry")
         entry = sections[0]
-        self.assertEqual(project, "0.3.0")
-        for needle in ("`registry_root`", "`--abandon`", "array"):
+        self.assertIn(project, RELEASE_NEEDLES, "add this release's changelog needles to RELEASE_NEEDLES")
+        # Token checks, not formatting checks: `--abandon` inside a longer code span counts.
+        for needle in RELEASE_NEEDLES[project]:
             with self.subTest(needle=needle):
                 self.assertIn(needle, entry)
 

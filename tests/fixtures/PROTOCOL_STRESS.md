@@ -65,9 +65,11 @@ The seven families are:
   the shipped reader; the shipped program and the imported `resolve()` must agree,
   per-task counts and the summed cost must match the generated plan, identical
   duplicate rows, step rows and another attempt's rows change nothing, `released`
-  follows the COMPLETED rule, `event resolved` closes exactly a terminal attempt
-  once and removes it from `--open`, and `event ack` waives exactly the anomalous
-  task at its top restart and is refused everywhere else.
+  follows the COMPLETED rule, the anomaly list is exactly empty on a regular plan
+  and exactly `acknowledged_preemption` after the waiver, `event resolved` closes
+  exactly a terminal attempt once and removes it from `--open`, and `event ack`
+  waives exactly the anomalous task at its top restart and is refused everywhere
+  else.
 - `fetch_death`: real death at five artifact durability boundaries and during a
   partial transfer; the attempt sidecar is durable before the transaction, a
   corrupt same-mtime stage byte is repaired, and the rerun promotes exactly the

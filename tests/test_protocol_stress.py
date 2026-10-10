@@ -38,7 +38,8 @@ class ProtocolStressTests(unittest.TestCase):
     def test_real_process_registry_rsync_smoke_and_audit_chain(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "report"
-            report = stress.run(root, duration_seconds=60, seed=20261007, max_cases=16)
+            # max_cases bounds the run; the generous deadline keeps a loaded runner from truncating it.
+            report = stress.run(root, duration_seconds=600, seed=20261007, max_cases=16)
             self.assertEqual(report["status"], "passed")
             self.assertEqual(report["case_count"], 16)
             self.assertFalse(report["live_integration"])

@@ -7,7 +7,8 @@ executes the shipped ``python3 -c`` stub against this test's temporary
 ``registry_root`` with fake ``sbatch``/``sacct``/``squeue`` on PATH. The data
 endpoint is a patched ``sherlock_kit.data_transfer``. Accounting timestamps derive
 from the seeded records and the query cadence is aged in the local cache file, so
-no test sleeps or depends on the wall clock.
+no test sleeps. The registry program stamps ``now`` from the real clock, so the one
+"fresh" refusal seeds a record created ten seconds ago; it stays fresh for 900 s.
 """
 from contextlib import ExitStack
 import dataclasses

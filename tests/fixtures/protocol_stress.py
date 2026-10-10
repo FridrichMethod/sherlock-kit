@@ -248,7 +248,7 @@ def check_registry(case):
         if stat.S_ISREG(info.st_mode):
             require(stat.S_IMODE(info.st_mode) == 0o600, f"registry file not 0600: {path}")
     require(not (root / ".lock").exists() or stat.S_ISREG((root / ".lock").lstat().st_mode), "registry lock is not a regular file")
-    summary, keys = [], {}
+    summary, keys, parents = [], {}, {}
     for directory in sorted((root / "attempts").iterdir()):
         names = sorted(path.name for path in directory.iterdir())
         require("record.json" in names, f"attempt without record.json: {directory.name}")
@@ -260,10 +260,15 @@ def check_registry(case):
         for name in names:
             require(name == "record.json" or name in EVENT_FILES or (name.startswith("ack-") and name.endswith(".json")), f"unexpected registry file: {name}")
         keys.setdefault(record["key"], []).append(directory.name)
+        if record["spec"].get("parent_attempt") is not None:
+            parents.setdefault(record["key"], set()).add(record["spec"]["parent_attempt"])
         summary.append({"attempt": directory.name, "key": record["key"], "files": names, "parent": record["spec"].get("parent_attempt")})
     for path in (root / "tasks").iterdir():
         target = path.read_text().strip()
         require(target in keys.get(path.name, ()), f"task marker {path.name} names a missing or foreign attempt {target}")
+        # D2: the marker names the latest attempt, the one no sibling record of the key calls its parent.
+        childmost = [attempt for attempt in keys[path.name] if attempt not in parents.get(path.name, ())]
+        require(childmost == [target], f"task marker {path.name} names {target}, not the childmost attempt {childmost}")
     return summary
 
 
@@ -295,8 +300,15 @@ def race_case(case, config):
         require(all(marker(case, key_of(case, config, task=tasks[i])) == ids[i] for i in range(3)), "markers do not name their attempts")
     sbatch = tool_calls(case, "sbatch")
     require(len(sbatch) == len(submitted), "sbatch ran for a refused attempt")
+    # Each admitted attempt runs sbatch exactly once with its frozen option list (minus the program name) and the script bytes.
+    frozen_argv = {ids[i]: json.loads(texts[i])["sbatch_options"][1:] for i in range(3)}
+    owners = []
     for call in sbatch:
-        require(call["stdin"].encode("latin-1") == SCRIPT and call["sbatch_env"] == [] and call["argv"][0] == "--parsable", "sbatch received other bytes or inherited SBATCH_*")
+        owner = [attempt for attempt in submitted if "--job-name=shk-" + attempt in call["argv"]]
+        require(len(owner) == 1 and call["argv"] == frozen_argv[owner[0]], f"sbatch argv is not the frozen option list: {call['argv']}")
+        require(call["stdin"].encode("latin-1") == SCRIPT and call["sbatch_env"] == [], "sbatch received other bytes or inherited SBATCH_*")
+        owners.append(owner[0])
+    require(sorted(owners) == submitted, "sbatch calls do not match the admitted attempts one to one")
     for attempt in submitted:
         require(files(case, attempt) == ["record.json", "submitted.json"], "submitted attempt lacks its two create-once files")
         require(read(case.registry / "attempts" / attempt / "submitted.json")["job_id"] == str(config["job"] + ids.index(attempt)), "job id not recorded")
@@ -451,10 +463,11 @@ def resolution_case(case, config):
         require(waiver["waived"] == {"0": {"restart": 1, "state": plan[0]["final"]}} and waiver["note"] == "fixture waiver", f"waiver names other tasks: {waiver['waived']}")
         expected, _ = expected_resolution({**config, "anomaly": False}, plan, present, config["partition"])
         _, result = read_attempt(case, attempt, stdout)
-        require(result["resolution"] == expected and "acknowledged_preemption" in result["anomalies"], "waiver did not resolve the anomaly")
+        require(result["resolution"] == expected and result["anomalies"] == ["acknowledged_preemption"], f"waiver did not resolve the anomaly: {result['anomalies']}")
         require(event(case, "ack", attempt, stdout) == ("refused", "not_applicable:" + expected), "second waiver accepted")
         observed.append("waived")
     else:
+        require(result["anomalies"] == [], f"spurious anomaly flags on a regular plan: {result['anomalies']}")
         refusal = "preemptible_profile" if config["partition"] == "owners" else "not_applicable:" + expected
         require(event(case, "ack", attempt, stdout) == ("refused", refusal), "waiver accepted without an anomaly")
     if expected == "terminal":
