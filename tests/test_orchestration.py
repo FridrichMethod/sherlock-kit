@@ -254,9 +254,9 @@ class PartitionProfileAdmissionTests(unittest.TestCase):
 
     def test_unknown_partition_refused_offline(self):
         with self.assertRaisesRegex(SafetyError, 'unknown partition'):
-            resources_checked(self.resources('gpu'))
+            resources_checked(self.resources('nonexistent'))
         with self.assertRaisesRegex(SafetyError, 'unknown partition'):
-            self.coordinator.admit(spec(resources=self.resources('gpu')), LIMITS)
+            self.coordinator.admit(spec(resources=self.resources('nonexistent')), LIMITS)
         with closing(self.coordinator.connect()) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM attempts').fetchone()[0], 0)
 

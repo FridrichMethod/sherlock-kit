@@ -583,7 +583,7 @@ class CommandBoundaryTests(unittest.TestCase):
         self.assertEqual((code, err), (1, ''))
         self.assertEqual(report, {'partition': 'btrippe', 'profile': dict(partition_profile('btrippe')), 'users': {},
                                   'totals': {'running_jobs': 0, 'running_gpus': 0, 'pending_jobs': 0}, 'transport': 'auth_required'})
-        code, report, err = self.run_main(['occupancy', '--config', config, '--partition', 'gpu'], AssertionError('network ran'))
+        code, report, err = self.run_main(['occupancy', '--config', config, '--partition', 'nonexistent'], AssertionError('network ran'))
         self.assertEqual((code, report), (2, None))
         self.assertIn('unknown partition', err)
         code, report, err = self.run_main(['occupancy', '--config', config, '--partition', 'normal'], recorder([], squeue_line('erin', 'RUNNING', 'cpu=1,gres/gpu=x') + '\n'))

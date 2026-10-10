@@ -53,9 +53,16 @@ relevant topic guides before acting; check `hostname` and `SLURM_JOB_ID` first.
   `partitions_sha256`); unknown partitions are refused, borrowed partitions need an
   identity-bound grant and `shk occupancy` first, and `--requeue` is emitted only
   where the profile allows it:
+  - `bigmem`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public high-memory partition: only for jobs that need more memory than normal provides. Follow Sherlock's own limits for it.
+  - `bioe`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition, not borrowed: respect fairshare and leave room for other department users.
   - `btrippe`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed from another group. Run `shk occupancy` first. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00.
+  - `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public development partition: debugging and short tests only, never production runs. Follow Sherlock's own limits for it.
+  - `gpu`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public GPU partition: few GPUs, long queue, never preempted. Follow Sherlock's own per-user GPU limits.
   - `normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.
   - `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Preemptible: Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.
+  - `possu`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed from another group and stricter than btrippe. Run `shk occupancy` first. Submit only between 00:00 and 07:00 Pacific, a few short jobs; never submit outside that window, not even short jobs.
+  - `service`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Follow Sherlock's own limits for it.
+  - `stat`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition, not borrowed: respect fairshare and leave room for other department users.
 
 Full policy and provenance: `shk policy`; installed identity: `shk policy --identity`.
 The toolkit's transport/projection does not enforce arbitrary scripts or certify
@@ -134,11 +141,12 @@ stored cost is a lower bound summed over the restarts observed so far and never
 decreases; `cost_known` is set only when every restart from 0 to the highest has
 complete accounting, and open or uncertified attempts are charged at the larger of
 the frozen estimate and that lower bound. On a profile that is not preemptible
-(`normal`, `btrippe`, attempts frozen before profiles existed) any `PREEMPTED` or
-`REQUEUED` row, or a restart above zero, is an anomaly: the evidence is recorded,
-the job identity adopted, the reservation kept, and `status`/`reconcile` exit 2 as
-`unexpected_preemption` until an operator has investigated and runs
-`shk reconcile --attempt ID --acknowledge-preemption`, the only release path.
+(every profile except `owners`, and attempts frozen before profiles existed) any
+`PREEMPTED` or `REQUEUED` row, or a restart above zero, is an anomaly: the
+evidence is recorded, the job identity adopted, the reservation kept, and
+`status`/`reconcile` exit 2 as `unexpected_preemption` until an operator has
+investigated and runs `shk reconcile --attempt ID --acknowledge-preemption`, the
+only release path.
 
 DTN transfers share the control endpoint's authentication cooldown: an active
 cooldown refuses a transfer before rsync starts, and an rsync authentication

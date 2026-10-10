@@ -212,7 +212,7 @@ class CliFlowTests(unittest.TestCase):
         owners = self.spec_file('owners', resources=on_partition('owners', gpus=1))
         code, output, err = self.run_main(['submit', '--config', config, '--spec', owners], AssertionError('network ran'))
         self.assertEqual((code, output['resources']['requeue'], output['resources']['gpus']), (0, True, 1))
-        refused = {'unknown partition': on_partition('gpu'), 'GPU': on_partition('normal', gpus=1), 'requeue': on_partition('btrippe', requeue=True)}
+        refused = {'unknown partition': on_partition('nonexistent'), 'GPU': on_partition('normal', gpus=1), 'requeue': on_partition('btrippe', requeue=True)}
         for message, resources in refused.items():
             path = self.spec_file(message.replace(' ', '-'), resources=resources)
             for arguments in (['submit', '--config', config, '--spec', path], ['submit', '--config', config, '--spec', path, '--apply']):
