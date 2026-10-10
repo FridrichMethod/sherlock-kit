@@ -2,21 +2,92 @@
 
 ## 0.3.0
 
-Full partition table for the account. The packaged profile table now covers every
-partition `sh_part` lists for the owner, so a spec may name any of them. Profile
-shape, grant rule, admission and reconciliation code are unchanged; this release
-is data and documentation only, with no new live pilot.
+Slurm as the source of truth, job arrays and the full partition table. The local
+SQLite ledger with its reservations, budgets and cost caps is gone: the only
+durable attempt state is an attempt registry on Sherlock (`registry_root`) plus
+Slurm accounting, so any POSIX workstation with the frozen toolkit and the
+private configuration can operate. Every new path is tested offline by executing
+the real registry program against fake `sbatch`/`sacct`/`squeue` binaries. The
+live CPU pilot of the registry and array paths on `normal` is pending; its
+evidence will be added to the acceptance document and this sentence updated when
+it has run. The partition-table change has no live pilot of its own.
 
-- `sherlock_kit_data/partitions.json` adds the public `bigmem`, `dev`, `service`
-  and `gpu` profiles (not preemptible, not borrowed; GPUs allowed on `gpu` and
-  `dev`), the department GPU profiles `bioe` and `stat` (not borrowed, fairshare
-  courtesy) and the borrowed GPU profile `possu` (grant required; its courtesy text
-  confines submission to 00:00-07:00 Pacific). `partitions_sha256` and the policy
-  projection change accordingly; frozen attempts keep the profile they were
-  admitted with.
-- Documentation names every profile and the borrowed set (`btrippe`, `possu`) and
-  states that a courtesy time window is honoured by the operator or agent, not
-  checked by the toolkit.
+- Registry (`sherlock_registry`, standard library, Python 3.11-3.14): the CLI
+  ships the module's own source to the login node as a self-decoding
+  `python3 -c` program with `submit`, `read`, `event` and `fetch-manifest`
+  subcommands, so runner, reader and event writer resolve attempts with the same
+  code against a query taken on the login node under the registry lock. Layout
+  under `registry_root` (owned, 0700, no symlinks): `.lock`, `tasks/<key>` (the
+  latest attempt of a logical task), `attempts/<id>/record.json`,
+  `submitted.json`, `not_sent.json`, `ack-<epoch>.json`, `abandoned.json` and
+  `resolved.json`. Every file is create-once (private temporary file plus
+  `link`), nothing is read-modify-written and timestamps are stamped on the
+  login node.
+- Private configuration: new required key `registry_root` (absolute canonical
+  POSIX path on the control host); `state_root` and `limits` are refused by the
+  unknown-field message as the migration signal. Typed commands keep only
+  `auth-backoff.json` and the new 60 s query cache `query-cache.json` (0600,
+  its own lock, sentinel semantics, expired entries pruned on write, malformed
+  or public files refused) under an explicit `transport.backoff_file` or
+  `SHERLOCK_KIT_STATE_ROOT`; with neither they refuse to run instead of using
+  `$HOME`. Grants keep grantee, evidence reference, validity, partitions and
+  scope; a legacy limits member is ignored.
+- Submission: `submit --apply` makes one runner call per attempt with a fresh
+  id, records `record.json` before `sbatch` and maps the single reply line to
+  `submitted` (exit 0), `not_sent` (exit 1, recorded; resubmit naming the id as
+  `parent_attempt`), a translated refusal (exit 2, nothing recorded) or `unknown`
+  (exit 2, `shk status --attempt ID`). Logical-task deduplication and the retry
+  rule live in the registry: a retry names `parent_attempt`, and the parent must
+  be `not_sent`, `abandoned` or `terminal` without a `COMPLETED` task.
+- Job arrays: `resources.array = {"count": 2..1000, "throttle": 1..count}`
+  emits `--array=0-<count-1>[%throttle]` and `slurm-%A_%a` logs; sacct `N_k`
+  task rows and `N_[a-b%t]` pending or cancelled aggregates are reconciled per
+  task and restart, reported as `tasks {count, terminal, running, pending,
+  missing, by_state, incomplete_history}`, with cost summed over complete task
+  and restart groups and `known` only when every task is terminal with complete
+  accounting.
+- Reconciliation: `status`/`reconcile --attempt ID` and `--all` make one cached
+  reader call (one `sacct --name=shk-A,shk-B,...` on the login node; 500 open
+  attempts, 50,000 rows); resolutions are `not_sent`, `abandoned`,
+  `inconclusive`, `abandonable`, `identified`, `terminal`,
+  `unexpected_preemption` and `error`. New `reconcile --attempt ID --abandon
+  [--note T]` closes an attempt that stayed absent from accounting for 900 s
+  without a known job id after a fresh `squeue` check on the login node;
+  `--acknowledge-preemption [--note T]` now writes a per-task waiver under the
+  registry lock from a fresh query and needs the network. `reconcile` writes
+  `resolved.json` for fresh terminal attempts, which bounds `--all`; a
+  `submitted.json` job id that differs from accounting is an `error`
+  (`job_id_conflict`) and never releases. `status --local` and
+  `reconcile --local` are removed.
+- Fetch: the control-side manifest read is the registry's `fetch-manifest`, and
+  an attempt sidecar `.NAME.shk-attempt.json` (attempt, producer, validator
+  identity, manifest and its SHA256) is written durably beside the destination
+  before the transaction record; `fetch --local` recovers from that sidecar
+  alone, so a destination promoted by 0.2.0 needs one remote fetch first.
+- Removed: `Coordinator`, SQLite, budgets, reservations, cost floor, quarantine,
+  `recover`, `scheduler_cost`, legacy-profile dispatch, evidence helpers,
+  `REMOTE_MANIFEST`, `state_root`, `limits`. 0.2.0 ledger attempts are not
+  migrated: resolve them with the old installation, then archive
+  `coordinator.sqlite3`.
+- Full partition table: `sherlock_kit_data/partitions.json` adds the public
+  `bigmem`, `dev`, `service` and `gpu` profiles (not preemptible, not borrowed;
+  GPUs allowed on `gpu` and `dev`), the department GPU profiles `bioe` and `stat`
+  (not borrowed, fairshare courtesy) and the borrowed GPU profile `possu` (grant
+  required; its courtesy text confines submission to 00:00-07:00 Pacific).
+  `partitions_sha256` changes accordingly; frozen attempts keep the profile they
+  were admitted with. Documentation names every profile and the borrowed set
+  (`btrippe`, `possu`) and states that a courtesy time window is honoured by the
+  operator or agent, not checked by the toolkit.
+- Policy: two projection bullets change (a lost mutation reply is resolved by
+  `shk status --attempt ID` against the registry and accounting; "budgets" is
+  dropped from the explicit-inputs sentence) and the decisions section describes
+  the registry model. `policy_sha256` changes, so the dotfiles pin and both
+  delivered projections must be regenerated before new managed admissions.
+- Tests: `tests/test_registry.py` executes the runner, reader and event writer
+  in-process against a temporary registry with fake Slurm binaries, including
+  three concurrent runners on one logical task; `tests/fake_remote.py` drives the
+  CLI the same way; `tests/test_release_metadata.py` ties the version strings,
+  the projection, the documented config keys and the duplicated constants.
 
 ## 0.2.0
 

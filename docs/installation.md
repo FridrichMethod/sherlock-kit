@@ -22,36 +22,48 @@ may set `SHERLOCK_KIT_BUILD_REVISION=REV` during its build; this must be the exa
 verified 40-character commit and agree with Git when a checkout is present.
 Archives unpacked under unrelated Git repositories must not inherit their HEAD.
 
-## Explicit state location
+## Local cache root and registry root
 
-Use a private, durable directory outside all consuming worktrees and scratch.
-All consumers on the authoritative workstation share the same admission/budget
-state; per-worktree databases do not coordinate resources. Private configuration
-files are mode 0600 and controller directories are owned mode 0700.
+Typed commands keep two kinds of state. Durable attempt state lives on Sherlock
+in the attempt registry named by the private configuration's `registry_root`,
+an absolute canonical path on the control host that the registry runner creates
+as an owned 0700 directory (with `attempts/` and `tasks/`) on the first
+submission; see [typed operations](orchestration.md). Nothing durable about an
+attempt lives on the workstation, so any POSIX workstation with the frozen
+toolkit and the same private configuration can operate, and no workstation is
+"authoritative".
 
-Typed commands require `--config` with an explicit absolute `state_root`. Their
-authentication cooldown uses that root unless `transport.backoff_file` or
-`SHERLOCK_KIT_STATE_ROOT` is set. For standalone transport calls, select an
-absolute root before use:
+Locally, typed commands keep only the shared authentication cooldown
+`auth-backoff.json` and the 60-second query cache `query-cache.json`, side by
+side under one explicit private location: `transport.backoff_file` in the
+private configuration or the `SHERLOCK_KIT_STATE_ROOT` environment root. With
+neither set a typed command refuses to run (`typed commands need an explicit
+local state location: set transport.backoff_file or SHERLOCK_KIT_STATE_ROOT`)
+rather than fall back to `$HOME`. Use a private, durable directory outside all
+consuming worktrees and scratch; private configuration files are mode 0600 and
+the local root is an owned 0700 directory. For standalone transport calls,
+select an absolute root before use:
 
 ```sh
 export SHERLOCK_KIT_STATE_ROOT=/path/to/private/sherlock-kit
 ```
 
-The transport places `auth-backoff.json` and its lock directly under that root.
+The transport places `auth-backoff.json` and its lock directly under that root,
+and the typed commands place `query-cache.json` and its own lock beside them.
 An explicit `TransportConfig(backoff_file=...)` has highest priority. An invalid
 explicit root fails closed. Without either, standalone transport retains the
-standard `$XDG_STATE_HOME/sherlock-kit` (or `~/.local/state/sherlock-kit`) fallback
-for compatibility. Choose an explicit root to avoid that HOME fallback. Policy,
+standard `$XDG_STATE_HOME/sherlock-kit` (or `~/.local/state/sherlock-kit`)
+fallback for compatibility; only read-only diagnostics ever reach it. Policy,
 guard and local doctor create no runtime state.
 
 The dotfiles installer accepts `--state-root /path/to/private/sherlock-kit`
 (PowerShell `-StateRoot`). It stores the locator in its existing active pointer;
 upgrades preserve it. The stable launcher supplies that root unless the caller
-has already set `SHERLOCK_KIT_STATE_ROOT`. This does not grant filesystem access
-or create a controller. Package environments and client configuration remain
-in their documented standard installation locations. Pilot data and private
-evidence belong in the user's designated data area, never in public Git.
+has already set `SHERLOCK_KIT_STATE_ROOT`; since 0.3.0 that root holds only the
+cooldown and the query cache. This does not grant filesystem access or create a
+registry. Package environments and client configuration remain in their
+documented standard installation locations. Pilot data and private evidence
+belong in the user's designated data area, never in public Git.
 
 ## Diagnostics and Python API
 

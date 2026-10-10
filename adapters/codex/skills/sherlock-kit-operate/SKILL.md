@@ -15,8 +15,8 @@ For the user's authorized task, inspect the installed command help, then call
 available in the installed release define their arguments; do not invent flags or
 replace them with raw SSH wrappers. If an orchestration command is unavailable,
 report that capability gate and continue independent diagnosis. This skill does
-not authorize a job, budget increase, access grant, cancellation, or a historical
-campaign restart.
+not authorize a job, access grant, cancellation, or a historical campaign
+restart.
 
 Take resources from the partition profile, never from scheduler visibility.
 Before a submission to a borrowed partition, run `shk occupancy --partition
@@ -24,17 +24,26 @@ Before a submission to a borrowed partition, run `shk occupancy --partition
 but does not gate on it. A courtesy sentence may confine submission to a time
 window (`possu`: 00:00-07:00 Pacific); outside that window do not submit at all.
 Set `requeue` only for a script that resumes from its own checkpoints (the
-`owners` default); `--requeue` is emitted only where the profile allows it. With
-many open attempts, use `shk status --all` or `shk reconcile --all` rather than
-one query per attempt. Treat an `unexpected_preemption` result (exit 2) as an
-investigation, not a retry; `shk reconcile --attempt ID
---acknowledge-preemption` is the explicit release once it is understood.
+`owners` default); `--requeue` is emitted only where the profile allows it. A
+job array is requested with `resources.array` (`count` 2 to 1000, optional
+`throttle`); the script must lay its tasks out from `SLURM_ARRAY_TASK_ID`, and
+status reports per-task counts. With many open attempts, use `shk status --all`
+or `shk reconcile --all` rather than one query per attempt; open attempts resolve
+from the registry on Sherlock and Slurm accounting, never from a local file.
+Treat an `unexpected_preemption` result (exit 2) as an investigation, not a
+retry; `shk reconcile --attempt ID --acknowledge-preemption` is the explicit
+release once it is understood. Use `shk reconcile --attempt ID --abandon` only
+after the toolkit reports the attempt `abandonable` and you have checked it
+yourself; it closes an attempt that never reached accounting.
 
-Preserve unresolved mutation evidence and reservations; reconcile the recorded
-attempt identity before another submission. A fetched artifact requires the
-consumer's scientific validator. Report revision, attempt, and validation outcome.
-Keep durable state outside worktrees and scratch. Do not implement a scheduler,
-transfer engine, retry loop, or ledger in this adapter.
+Treat an `unknown` submission as an attempt that may exist: run `shk status
+--attempt ID` and let the registry and accounting resolve it before another
+submission, and retry a logical task only by naming its `parent_attempt`. A
+fetched artifact requires the consumer's scientific validator. Report revision,
+attempt, and validation outcome. Durable attempt state lives in `registry_root`
+on Sherlock; the workstation keeps only the authentication cooldown and query
+cache under the explicit local state root, outside worktrees and scratch. Do not
+implement a scheduler, transfer engine, retry loop, or ledger in this adapter.
 
 Install only this namespaced skill in the client's owned skill directory. Global
 policy projections deliver instructions separately; the owner's opt-in dotfiles
