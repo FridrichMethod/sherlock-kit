@@ -1,4 +1,5 @@
 import copy
+import json
 import multiprocessing
 import os
 from pathlib import Path
@@ -10,22 +11,26 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
-from sherlock_artifacts import TransferError, build_manifest, fetch_bundle, rsync_transfer
-from sherlock_orchestration import SafetyError, digest
+import sherlock_artifacts
+from sherlock_artifacts import (ATTEMPT_SIDECAR_LIMIT, TransferError, attempt_record, attempt_sidecar_path, build_manifest,
+                               durable_json, fetch_bundle, read_attempt_sidecar, rsync_transfer)
+from sherlock_orchestration import SafetyError, canonical, digest
 
 D = 'a' * 64
 PRODUCER = dict(attempt='1' * 32, cluster='sherlock', principal='fixture', code_digest=D, input_digest=D, runtime_digest=D, policy_digest=D)
+VALIDATOR = dict(validator_path='/authorized/workload/validate.py', validator_digest='c' * 64, validator_function='check_result')
 
 
 def concurrent_fetch(source, destination, manifest, queue):
     try:
-        answer = fetch_bundle(manifest, Path(destination), lambda stage, m: rsync_transfer(source, stage, m), source_manifest=lambda: manifest, validator=lambda root: (root / 'result.json').read_text() == '{"value":42}\n', validator_digest=D)
+        sidecar = attempt_record(PRODUCER['attempt'], PRODUCER, VALIDATOR, manifest)
+        answer = fetch_bundle(manifest, Path(destination), lambda stage, m: rsync_transfer(source, stage, m), source_manifest=lambda: manifest, validator=lambda root: (root / 'result.json').read_text() == '{"value":42}\n', validator_digest=D, attempt_record=sidecar)
         queue.put(('ok', answer['recovered']))
     except Exception as exc:
         queue.put(('error', str(exc)))
 
 
-class ArtifactTests(unittest.TestCase):
+class ArtifactFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
@@ -48,6 +53,28 @@ class ArtifactTests(unittest.TestCase):
         options.update(kwargs)
         return fetch_bundle(self.manifest, self.dest, self.transfer, **options)
 
+    def sidecar(self, **overrides):
+        record = attempt_record(PRODUCER['attempt'], PRODUCER, VALIDATOR, self.manifest)
+        record.update(overrides)
+        return record
+
+    def metadata_files(self):
+        return sorted(path.name for path in self.base.iterdir() if path.name.startswith('.result.'))
+
+    def recording_writer(self, written):
+        original = durable_json
+        def record(path, value):
+            written.append(Path(path).name)
+            original(path, value)
+        return patch('sherlock_artifacts.durable_json', side_effect=record)
+
+    def manifest_for(self, attempt_id):
+        manifest = copy.deepcopy(self.manifest)
+        manifest['producer']['attempt'] = attempt_id
+        return manifest
+
+
+class ArtifactTests(ArtifactFixture):
     def test_real_rsync_fetch_exact_inventory_and_receipt(self):
         result = self.fetch()
         self.assertFalse(result['recovered'])
@@ -249,6 +276,192 @@ class ArtifactTests(unittest.TestCase):
             worker.join(10)
             self.assertEqual(worker.exitcode, 0)
         self.assertEqual(sorted(results), [('ok', False), ('ok', True)])
+        self.assertEqual(read_attempt_sidecar(self.dest), self.sidecar())
+        self.assertEqual([name for name in self.metadata_files() if 'attempt' in name], ['.result.shk-attempt.json'])
+
+
+class AttemptSidecarTests(ArtifactFixture):
+    def test_attempt_record_shape_and_sidecar_path(self):
+        record = self.sidecar()
+        self.assertEqual(set(record), {'schema_version', 'attempt', 'producer', 'validator_path', 'validator_digest', 'validator_function', 'manifest', 'manifest_sha256'})
+        self.assertEqual(record['schema_version'], 1)
+        self.assertEqual(record['attempt'], PRODUCER['attempt'])
+        self.assertEqual(record['producer'], PRODUCER)
+        self.assertEqual({key: record[key] for key in VALIDATOR}, VALIDATOR)
+        self.assertEqual(record['manifest'], self.manifest)
+        self.assertEqual(record['manifest_sha256'], digest(self.manifest))
+        self.assertIsNot(record['producer'], PRODUCER)
+        self.assertIsNot(record['manifest'], self.manifest)
+        self.assertEqual(attempt_sidecar_path(self.dest), self.base / '.result.shk-attempt.json')
+        linked_parent = self.base / 'linked'
+        linked_parent.symlink_to(self.base, target_is_directory=True)
+        with self.assertRaises(SafetyError):
+            attempt_sidecar_path(linked_parent / 'result')
+
+    def test_attempt_record_rejects_malformed_inputs(self):
+        cases = [
+            dict(attempt_id=''), dict(attempt_id=42), dict(attempt_id='bad\nid'),
+            dict(producer={**PRODUCER, 'code_digest': 'xyz'}), dict(producer={k: v for k, v in PRODUCER.items() if k != 'cluster'}), dict(producer='fixture'),
+            dict(validator={**VALIDATOR, 'validator_digest': 'short'}), dict(validator={**VALIDATOR, 'validator_function': 'not an identifier'}),
+            dict(validator={**VALIDATOR, 'validator_path': 'relative/validate.py'}), dict(validator={k: v for k, v in VALIDATOR.items() if k != 'validator_path'}),
+            dict(validator=None), dict(manifest=[]), dict(manifest={**self.manifest, 'producer': 'missing'}),
+        ]
+        for case in cases:
+            arguments = dict(attempt_id=PRODUCER['attempt'], producer=PRODUCER, validator=VALIDATOR, manifest=self.manifest)
+            arguments.update(case)
+            with self.subTest(case=case), self.assertRaises(SafetyError):
+                attempt_record(**arguments)
+
+    def test_sidecar_written_before_transaction_and_read_back(self):
+        written = []
+        with self.recording_writer(written):
+            result = self.fetch(attempt_record=self.sidecar())
+        self.assertFalse(result['recovered'])
+        self.assertEqual(written, ['.result.shk-attempt.json', '.result.shk-transaction.json', '.result.shk-receipt.json'])
+        sidecar = attempt_sidecar_path(self.dest)
+        self.assertTrue(sidecar.is_file())
+        self.assertEqual(sidecar.stat().st_mode & 0o077, 0)
+        self.assertEqual(sidecar.read_text(), canonical(self.sidecar()) + '\n')
+        self.assertEqual(read_attempt_sidecar(self.dest), self.sidecar())
+        self.assertEqual(result['receipt']['manifest_sha256'], digest(self.manifest))
+
+    def test_sidecar_survives_crash_before_transaction_and_is_verified_on_recovery(self):
+        def crash(point):
+            if point == 'intent_committed':
+                raise RuntimeError('simulated process termination')
+        with self.assertRaises(RuntimeError):
+            self.fetch(fault=crash, attempt_record=self.sidecar())
+        self.assertTrue(attempt_sidecar_path(self.dest).is_file())
+        self.assertTrue((self.base / '.result.shk-transaction.json').is_file())
+        self.assertFalse(self.dest.exists())
+        written = []
+        with self.recording_writer(written):
+            self.assertFalse(self.fetch(attempt_record=self.sidecar())['recovered'])
+        self.assertEqual(written, ['.result.shk-transaction.json', '.result.shk-receipt.json'])
+        self.assertEqual(read_attempt_sidecar(self.dest), self.sidecar())
+
+    def test_recovery_branch_writes_missing_sidecar_and_refuses_conflicting_one(self):
+        def crash(point):
+            if point == 'promoted':
+                raise RuntimeError()
+        with self.assertRaises(RuntimeError):
+            self.fetch(fault=crash)
+        self.assertTrue(self.dest.is_dir())
+        self.assertFalse(attempt_sidecar_path(self.dest).exists())
+        written = []
+        with self.recording_writer(written):
+            self.assertTrue(self.fetch(attempt_record=self.sidecar(), source_manifest=lambda: (_ for _ in ()).throw(ConnectionError()))['recovered'])
+        self.assertEqual(written, ['.result.shk-attempt.json', '.result.shk-receipt.json'])
+        self.assertEqual(read_attempt_sidecar(self.dest), self.sidecar())
+        self.assertTrue(self.fetch(attempt_record=self.sidecar())['recovered'])
+        foreign = attempt_record('2' * 32, {**PRODUCER, 'attempt': '2' * 32}, VALIDATOR, self.manifest_for('2' * 32))
+        durable_json(attempt_sidecar_path(self.dest), foreign)
+        with self.assertRaisesRegex(SafetyError, 'existing attempt sidecar conflicts'):
+            self.fetch(attempt_record=self.sidecar())
+        self.assertEqual(read_attempt_sidecar(self.dest), foreign)
+
+    def test_existing_sidecar_conflict_refused_before_transaction(self):
+        other_validator = attempt_record(PRODUCER['attempt'], PRODUCER, {**VALIDATOR, 'validator_digest': 'd' * 64}, self.manifest)
+        durable_json(attempt_sidecar_path(self.dest), other_validator)
+        with self.assertRaisesRegex(SafetyError, 'existing attempt sidecar conflicts'):
+            self.fetch(attempt_record=self.sidecar())
+        self.assertFalse(self.dest.exists())
+        self.assertFalse((self.base / '.result.shk-transaction.json').exists())
+        self.assertEqual(read_attempt_sidecar(self.dest), other_validator)
+        self.assertFalse(self.fetch(attempt_record=other_validator)['recovered'])
+        self.assertEqual(read_attempt_sidecar(self.dest), other_validator)
+
+    def test_sidecar_disagreeing_with_manifest_refused_before_lock(self):
+        cases = [
+            dict(manifest_sha256='b' * 64),
+            dict(producer={**PRODUCER, 'input_digest': 'b' * 64}),
+            dict(attempt='2' * 32),
+            dict(manifest=self.manifest_for('2' * 32)),
+        ]
+        for case in cases:
+            with self.subTest(case=case), self.assertRaisesRegex(SafetyError, 'attempt sidecar (disagrees with manifest|malformed)'):
+                self.fetch(attempt_record=self.sidecar(**case))
+            self.assertEqual(self.metadata_files(), [])
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            self.fetch(attempt_record={'schema_version': 2})
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            self.fetch(attempt_record='sidecar')
+        self.assertEqual(self.metadata_files(), [])
+        self.assertFalse(self.dest.exists())
+
+    def test_sidecar_follows_the_manifest_passed_to_fetch(self):
+        foreign = self.manifest_for('2' * 32)
+        record = attempt_record('2' * 32, foreign['producer'], VALIDATOR, foreign)
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar disagrees with manifest'):
+            self.fetch(attempt_record=record)
+        self.assertEqual(self.metadata_files(), [])
+
+    def test_reader_refuses_symlink_public_oversized_missing_and_malformed(self):
+        sidecar = attempt_sidecar_path(self.dest)
+        with self.assertRaises(FileNotFoundError):
+            read_attempt_sidecar(self.dest)
+        target = self.base / 'elsewhere.json'
+        durable_json(target, self.sidecar())
+        sidecar.symlink_to(target)
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            read_attempt_sidecar(self.dest)
+        sidecar.unlink()
+        durable_json(sidecar, self.sidecar())
+        for mode in (0o640, 0o604, 0o644):
+            os.chmod(sidecar, mode)
+            with self.subTest(mode=oct(mode)), self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+                read_attempt_sidecar(self.dest)
+        os.chmod(sidecar, 0o600)
+        self.assertEqual(read_attempt_sidecar(self.dest), self.sidecar())
+        with patch('sherlock_artifacts.os.geteuid', return_value=os.geteuid() + 1), self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            read_attempt_sidecar(self.dest)
+        sidecar.unlink()
+        (self.base / 'sidecar-dir').mkdir()
+        sidecar.symlink_to(self.base / 'sidecar-dir')
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            read_attempt_sidecar(self.dest)
+        sidecar.unlink()
+        with open(sidecar, 'w') as stream:
+            os.fchmod(stream.fileno(), 0o600)
+            stream.write('{"padding":"' + 'x' * ATTEMPT_SIDECAR_LIMIT + '"}\n')
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            read_attempt_sidecar(self.dest)
+        for content in ('{not json', '[]', 'null', '"text"', json.dumps({**self.sidecar(), 'schema_version': 2}),
+                        json.dumps({k: v for k, v in self.sidecar().items() if k != 'validator_path'}),
+                        json.dumps({**self.sidecar(), 'extra': True}), json.dumps({**self.sidecar(), 'manifest_sha256': 'b' * 64}),
+                        json.dumps({**self.sidecar(), 'attempt': '2' * 32}), json.dumps({**self.sidecar(), 'validator_function': 'not valid'})):
+            with open(sidecar, 'w') as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                stream.write(content)
+            with self.subTest(content=content[:40]), self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+                read_attempt_sidecar(self.dest)
+        linked_parent = self.base / 'linked'
+        linked_parent.symlink_to(self.base, target_is_directory=True)
+        with self.assertRaises(SafetyError):
+            read_attempt_sidecar(linked_parent / 'result')
+
+    def test_fetch_refuses_unsafe_existing_sidecar_under_lock(self):
+        sidecar = attempt_sidecar_path(self.dest)
+        durable_json(sidecar, self.sidecar())
+        os.chmod(sidecar, 0o644)
+        with self.assertRaisesRegex(SafetyError, 'attempt sidecar'):
+            self.fetch(attempt_record=self.sidecar())
+        self.assertFalse((self.base / '.result.shk-transaction.json').exists())
+        os.chmod(sidecar, 0o600)
+        self.assertFalse(self.fetch(attempt_record=self.sidecar())['recovered'])
+
+    def test_attempt_record_none_keeps_previous_behaviour(self):
+        written = []
+        with self.recording_writer(written):
+            result = self.fetch()
+        self.assertFalse(result['recovered'])
+        self.assertEqual(written, ['.result.shk-transaction.json', '.result.shk-receipt.json'])
+        self.assertEqual(self.metadata_files(), ['.result.shk-lock', '.result.shk-receipt.json', '.result.shk-transaction.json'])
+        self.assertFalse(attempt_sidecar_path(self.dest).exists())
+        with self.recording_writer(written):
+            self.assertTrue(self.fetch()['recovered'])
+        self.assertFalse(attempt_sidecar_path(self.dest).exists())
+        self.assertEqual(result, {'destination': str(self.dest), 'receipt': {'schema_version': 1, 'manifest_sha256': digest(self.manifest), 'producer': PRODUCER, 'validator_sha256': D}, 'recovered': False})
 
 
 if __name__ == '__main__':
