@@ -47,8 +47,9 @@ relevant topic guides before acting; check `hostname` and `SLURM_JOB_ID` first.
   managed client/sandbox restrictions. The site module is `pi-coding-agent`.
 - Use bounded noninteractive OpenSSH, normally `sherlock-plain`, and human
   authentication bootstrap. No authentication storms or stored MFA/passwords.
-  A lost mutation reply is unknown; preserve its reservation and reconcile identity
-  before retrying. `ssh -O check` only checks a local master. Doctor is read-only.
+  A lost mutation reply is unknown; the attempt record on Sherlock and Slurm
+  accounting are the truth: run `shk status --attempt ID` before any retry.
+  `ssh -O check` only checks a local master. Doctor is read-only.
 - Consumer partitions are packaged toolkit profiles (`shk policy --identity` reports
   `partitions_sha256`); unknown partitions are refused, borrowed partitions need an
   identity-bound grant and `shk occupancy` first, and `--requeue` is emitted only
@@ -66,7 +67,7 @@ relevant topic guides before acting; check `hostname` and `SLURM_JOB_ID` first.
 
 Full policy and provenance: `shk policy`; installed identity: `shk policy --identity`.
 The toolkit's transport/projection does not enforce arbitrary scripts or certify
-scientific results. Consumer resources, grants, budgets, and validators are explicit.
+scientific results. Consumer resources, grants and validators are explicit.
 <!-- SHERLOCK-KIT:PROJECTION:END -->
 
 ## Site requirements and recommendations
@@ -75,10 +76,10 @@ The compact rules above reflect the mandatory installed agent guide and topic
 guides read on 2026-10-07. A job's ten-minute useful-work floor comes from that
 guide; thirty minutes and dependencies are site recommendations, not a reason to
 add sleeps. An observed partition/node is inventory, never evidence of a grant.
-Borrowed admission requires grantee, allowed use, validity window, limits, and an
-evidence reference. Hardware eligibility depends on workload dtype, memory, GPU
-count, CUDA architectures, and kernels. V100 lacking native bf16 does not itself
-disqualify GROMACS mixed-precision MD; validate the actual build.
+Borrowed admission requires grantee, allowed use, validity window, partitions,
+scope and an evidence reference. Hardware eligibility depends on workload dtype,
+memory, GPU count, CUDA architectures, and kernels. V100 lacking native bf16 does
+not itself disqualify GROMACS mixed-precision MD; validate the actual build.
 
 [Filesystem policy](https://www.sherlock.stanford.edu/docs/storage/filesystems/)
 describes persistent `$HOME`/`$GROUP_HOME`, unbacked scratch, the 90-day content-based
@@ -129,24 +130,49 @@ Transport argv is quoted for a POSIX-compatible remote shell. Supplying `sh -c`
 or a program that mutates files is still a mutation; the API does not analyze
 arbitrary programs. Before dispatch, missing executable/backoff is not-sent.
 Timeout, disconnect, parse failure, or crash after possible mutation dispatch is
-unknown, never proof of rejection. Preserve reservations until identity-bound
-evidence resolves the attempt. A scheduler-visible token is not an idempotency key.
-Scheduler completion, execution receipts, artifacts, and scientific validation
-remain separate. Source/runtime/input/policy and attempt identities must bind
-outputs; checkpoints need workload-specific validation.
+unknown, never proof of rejection. The attempt record on Sherlock and Slurm
+accounting resolve an unknown attempt; never retry it. A scheduler-visible token
+is not an idempotency key. Scheduler completion, execution receipts, artifacts,
+and scientific validation remain separate. Source/runtime/input/policy and
+attempt identities must bind outputs; checkpoints need workload-specific
+validation.
 
-The budget reservation taken before dispatch covers one run of the frozen
-resources; a requeued job on a preemptible profile may consume several runs. Its
-stored cost is a lower bound summed over the restarts observed so far and never
-decreases; `cost_known` is set only when every restart from 0 to the highest has
-complete accounting, and open or uncertified attempts are charged at the larger of
-the frozen estimate and that lower bound. On a profile that is not preemptible
-(every profile except `owners`, and attempts frozen before profiles existed) any
-`PREEMPTED` or `REQUEUED` row, or a restart above zero, is an anomaly: the
-evidence is recorded, the job identity adopted, the reservation kept, and
-`status`/`reconcile` exit 2 as `unexpected_preemption` until an operator has
-investigated and runs `shk reconcile --attempt ID --acknowledge-preemption`, the
-only release path.
+Durable attempt state is an attempt registry on Sherlock (`registry_root`, an
+owned 0700 directory on the control host) plus Slurm accounting; there is no
+local ledger, reservation, budget or cost cap. Every typed command ships the
+registry program to the login node, where the runner validates the record and
+the script bytes, takes the registry lock, writes `record.json` before `sbatch`,
+claims the logical task marker and records the reply, and where the reader and
+the event writer resolve attempts with the same code against a fresh `sacct`
+query taken there. Files are create-once and never rewritten; the task marker
+is the only file replaced, and only by an admitted retry that names its
+`parent_attempt`. A retry is admitted only when the parent is `not_sent`,
+`abandoned` or `terminal` without a `COMPLETED` task; absence from accounting
+is never release.
+
+Accounting is reconciled per array task and Slurm restart: the highest restart
+is authoritative, a task is terminal only with a complete restart history, cost
+sums `ElapsedRaw x AllocCPUS` and GPU seconds over complete task-and-restart
+groups, and `cost.known` is set only when every task is terminal with complete
+accounting and none is missing. On a profile that is not preemptible (every
+profile except `owners`) any `PREEMPTED` or `REQUEUED` row, or a restart above
+zero, is an anomaly: the job identity is adopted and `status`/`reconcile` exit 2
+as `unexpected_preemption` until an operator has investigated and runs
+`shk reconcile --attempt ID --acknowledge-preemption`, which writes a per-task
+waiver under the registry lock from a fresh query. An attempt with no accounting
+rows after 900 s and no known job id is `abandonable`; only
+`shk reconcile --attempt ID --abandon`, after a fresh `sacct` and `squeue`
+check on the login node, closes it. `reconcile` writes `resolved.json` for
+terminal attempts, which bounds `--all` to the open ones.
+
+The workstation keeps only the shared authentication cooldown and a 60-second
+query cache (`auth-backoff.json`, `query-cache.json`) under one explicit private
+state root; typed commands refuse to run without it rather than fall back to
+`$HOME`. Residual limits: `--all` may miss an attempt directory created seconds
+earlier on another login node while `--attempt ID` is exact; an array task
+never seen in accounting keeps its attempt `identified` with a missing count;
+acknowledging a preemption needs the network; a destination fetched by 0.2.0
+needs one remote fetch before `fetch --local`.
 
 DTN transfers share the control endpoint's authentication cooldown: an active
 cooldown refuses a transfer before rsync starts, and an rsync authentication

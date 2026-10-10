@@ -1,5 +1,11 @@
 # Acceptance evidence
 
+Release 0.3.0 replaced the local SQLite ledger with the attempt registry on
+Sherlock (`registry_root`) and added job arrays; the evidence below predates
+that change and is unaltered. The live pilot of the 0.3.0 registry and array
+paths is pending, and its evidence will be recorded in a separate section added
+after the pilot.
+
 Foundation and CPU pilot accepted 2026-10-08 UTC. This is engineering acceptance,
 not certification of scientific results or arbitrary command compliance.
 Original implementation plans and detailed session journals remain in Git history
