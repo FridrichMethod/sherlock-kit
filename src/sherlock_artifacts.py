@@ -1,12 +1,15 @@
 """Manifest-bound bundle transfer with same-filesystem recoverable promotion."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager
+import errno
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import stat
 import subprocess
@@ -17,6 +20,11 @@ from sherlock_orchestration import DIGEST, SafetyError, canonical, digest
 
 IDENTITY_FIELDS = ("attempt", "cluster", "principal", "code_digest", "input_digest", "runtime_digest", "policy_digest")
 STDERR_TAIL_LIMIT = 500
+VALIDATOR_FIELDS = ("validator_path", "validator_digest", "validator_function")
+ATTEMPT_RECORD_FIELDS = ("schema_version", "attempt", "producer", *VALIDATOR_FIELDS, "manifest", "manifest_sha256")
+# A remote manifest is at most 4 MiB; the sidecar embeds it plus a few short fields.
+ATTEMPT_SIDECAR_LIMIT = 4 * 1024 * 1024 + 64 * 1024
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 class TransferError(SafetyError):
@@ -92,15 +100,19 @@ def destination_lock(destination):
         os.close(fd)
 
 
-def checked_manifest(manifest, *, expected_identity=None, max_items=10000, max_bytes=64 * 1024 * 1024):
-    if manifest.get("schema_version") != 1:
-        raise SafetyError("unsupported manifest schema")
-    identity = manifest.get("producer", {})
+def checked_producer(identity):
     if not isinstance(identity, dict) or not all(isinstance(identity.get(key), str) and identity[key] for key in IDENTITY_FIELDS):
         raise SafetyError("producer identity missing")
     for key in IDENTITY_FIELDS[3:]:
         if not DIGEST.fullmatch(identity[key]):
             raise SafetyError("producer digest malformed")
+    return identity
+
+
+def checked_manifest(manifest, *, expected_identity=None, max_items=10000, max_bytes=64 * 1024 * 1024):
+    if manifest.get("schema_version") != 1:
+        raise SafetyError("unsupported manifest schema")
+    identity = checked_producer(manifest.get("producer", {}))
     if expected_identity is not None and identity != expected_identity:
         raise SafetyError("manifest producer does not match admitted attempt")
     files = manifest.get("files")
@@ -184,6 +196,109 @@ def build_manifest(root, producer):
     return manifest
 
 
+def _clean_text(value):
+    return isinstance(value, str) and bool(value) and not any(ch in value for ch in "\x00\n\r")
+
+
+def _normalized_json(value):
+    try:
+        return json.loads(canonical(value))
+    except (TypeError, ValueError):
+        raise SafetyError("attempt sidecar malformed") from None
+
+
+def checked_attempt_record(record):
+    """Shape and internal consistency of an attempt sidecar; the manifest itself is checked by fetch_bundle."""
+    record = _normalized_json(record)
+    if not isinstance(record, Mapping) or sorted(record) != sorted(ATTEMPT_RECORD_FIELDS) or record["schema_version"] != 1:
+        raise SafetyError("attempt sidecar malformed")
+    if not _clean_text(record["attempt"]):
+        raise SafetyError("attempt sidecar malformed")
+    try:
+        checked_producer(record["producer"])
+    except SafetyError:
+        raise SafetyError("attempt sidecar malformed") from None
+    path, validator_digest, function = (record[key] for key in VALIDATOR_FIELDS)
+    if not _clean_text(path) or not path.startswith("/"):
+        raise SafetyError("attempt sidecar malformed")
+    if not isinstance(validator_digest, str) or not DIGEST.fullmatch(validator_digest):
+        raise SafetyError("attempt sidecar malformed")
+    if not isinstance(function, str) or not IDENTIFIER.fullmatch(function):
+        raise SafetyError("attempt sidecar malformed")
+    manifest, manifest_digest = record["manifest"], record["manifest_sha256"]
+    if not isinstance(manifest, Mapping) or not isinstance(manifest_digest, str) or not DIGEST.fullmatch(manifest_digest):
+        raise SafetyError("attempt sidecar malformed")
+    if manifest_digest != digest(manifest) or record["producer"] != manifest.get("producer") or record["attempt"] != record["producer"]["attempt"]:
+        raise SafetyError("attempt sidecar disagrees with manifest")
+    return record
+
+
+def attempt_record(attempt_id, producer, validator, manifest):
+    """The durable attempt identity kept next to a fetched bundle for network-free local recovery."""
+    if not isinstance(validator, Mapping) or not all(key in validator for key in VALIDATOR_FIELDS):
+        raise SafetyError("attempt sidecar malformed")
+    record = {"schema_version": 1, "attempt": attempt_id, "producer": producer,
+              **{key: validator[key] for key in VALIDATOR_FIELDS},
+              "manifest": manifest, "manifest_sha256": digest(_normalized_json(manifest))}
+    return checked_attempt_record(record)
+
+
+def attempt_sidecar_path(destination):
+    destination = no_symlink_ancestors(destination)
+    return destination.parent / ("." + destination.name + ".shk-attempt.json")
+
+
+def read_attempt_sidecar(destination):
+    """Only a private regular file owned by the caller; a missing sidecar raises FileNotFoundError."""
+    path = attempt_sidecar_path(destination)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise SafetyError("attempt sidecar symlink refused") from None
+        raise
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise SafetyError("attempt sidecar is not a regular file")
+        if info.st_uid != os.geteuid():
+            raise SafetyError("attempt sidecar owner mismatch")
+        if info.st_mode & 0o077:
+            raise SafetyError("attempt sidecar must remain private")
+        if info.st_size > ATTEMPT_SIDECAR_LIMIT:
+            raise SafetyError("attempt sidecar exceeds size limit")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(ATTEMPT_SIDECAR_LIMIT + 1)
+    finally:
+        os.close(fd)
+    if len(raw) > ATTEMPT_SIDECAR_LIMIT:
+        raise SafetyError("attempt sidecar exceeds size limit")
+    try:
+        record = json.loads(raw)
+    except ValueError:
+        raise SafetyError("attempt sidecar malformed") from None
+    return checked_attempt_record(record)
+
+
+def _agreeing_sidecar(record, manifest):
+    """The caller's sidecar must describe exactly the manifest being fetched."""
+    record = checked_attempt_record(record)
+    producer = manifest["producer"]
+    if record["manifest_sha256"] != digest(manifest) or record["producer"] != producer or record["attempt"] != producer["attempt"]:
+        raise SafetyError("attempt sidecar disagrees with manifest")
+    return record
+
+
+def _ensure_sidecar(destination, record):
+    """Under the destination lock: an existing sidecar must equal the new one, else write it durably."""
+    path = attempt_sidecar_path(destination)
+    if path.is_symlink() or path.exists():
+        if canonical(read_attempt_sidecar(destination)) != canonical(record):
+            raise SafetyError("existing attempt sidecar conflicts")
+        return
+    durable_json(path, record)
+
+
 def rsync_transfer(source, stage, manifest, *, ssh_command=None, timeout=300):
     """Exact file selection, resumable private stage, then independent verification."""
     if not isinstance(source, str) or any(ch in source for ch in "\x00\n\r"):
@@ -214,17 +329,21 @@ def rsync_transfer(source, stage, manifest, *, ssh_command=None, timeout=300):
 
 def fetch_bundle(manifest, destination, transfer, *, source_manifest, validator,
                  validator_digest, expected_identity=None, max_items=10000,
-                 max_bytes=64 * 1024 * 1024, fault=None):
+                 max_bytes=64 * 1024 * 1024, fault=None, attempt_record=None):
     """Recover after either side of rename/receipt without exposing partial bytes.
 
     transfer(stage, manifest) transfers bytes only. source_manifest() rereads the
     immutable manifest through the control endpoint, never through a DTN shell.
     validator(stage) is the workload's scientific validator, not a generic regex.
+    attempt_record, when given, is written as .NAME.shk-attempt.json immediately
+    before the transaction record (or on recovery, before the receipt) so a later
+    local recovery needs no network; an existing sidecar must equal it.
     """
     manifest = json.loads(canonical(manifest))
     total = checked_manifest(manifest, expected_identity=expected_identity, max_items=max_items, max_bytes=max_bytes)
     if not DIGEST.fullmatch(validator_digest):
         raise SafetyError("validator identity must be pinned")
+    sidecar = None if attempt_record is None else _agreeing_sidecar(attempt_record, manifest)
     manifest_digest = digest(manifest)
     def crash(point):
         if fault:
@@ -249,9 +368,13 @@ def fetch_bundle(manifest, destination, transfer, *, source_manifest, validator,
             if validator(destination) is not True:
                 raise SafetyError("scientific validation failed for promoted bundle")
             verify_bundle(destination, manifest)
+            if sidecar is not None:
+                _ensure_sidecar(destination, sidecar)
             durable_json(receipt_path, metadata)
             return {"destination": str(destination), "receipt": metadata, "recovered": True}
         stable()
+        if sidecar is not None:
+            _ensure_sidecar(destination, sidecar)
         durable_json(transaction_path, metadata)
         crash("intent_committed")
         no_symlink_ancestors(stage)
