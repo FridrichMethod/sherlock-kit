@@ -98,7 +98,7 @@ class ConfigTests(CommandCase):
                 config.write_text(json.dumps({**base, 'registry_root': wrong}))
                 with self.assertRaisesRegex(SafetyError, 'registry_root must be an absolute POSIX path without control characters'):
                     private_config(config)
-        for wrong in ('/a/../b', '/a/./b', '/a//b', '/a/b/', '/a/b/..'):
+        for wrong in ('/a/../b', '/a/./b', '/a//b', '/a/b/', '/a/b/..', '//a', '//a/b'):
             with self.subTest(registry_root=wrong):
                 config.write_text(json.dumps({**base, 'registry_root': wrong}))
                 with self.assertRaisesRegex(SafetyError, r'registry_root must be canonical: no \., \.\. or repeated/trailing slashes'):
@@ -229,6 +229,14 @@ class SubmitTests(CommandCase):
         self.assertEqual((code, err), (1, ''))
         self.assertEqual((output['resolution'], output['recorded'], output['transport'], output['job_id']), ('not_sent', False, 'not_sent', None))
         self.assertIsNone(self.files(output['attempt']['id']))
+        # The shared cooldown answers before ssh starts (dispatched False): nothing reached Slurm, so no status hint.
+        self.remote.fail('submit', RemoteResult('auth_required', stderr='Shared authentication cooldown active; authenticate manually'))
+        code, output, err = self.submit(['submit', '--config', config, '--spec', path, '--apply'])
+        self.assertEqual((code, err), (1, ''))
+        self.assertEqual((output['resolution'], output['recorded'], output['transport'], output['job_id']), ('not_sent', False, 'auth_required', None))
+        self.assertEqual(output['reason'], 'Shared authentication cooldown active; authenticate manually')
+        self.assertNotIn('hint', output)
+        self.assertIsNone(self.files(output['attempt']['id']))
         self.remote.fail('submit', RemoteResult('unknown', stderr='Connection closed', returncode=255, dispatched=True))
         code, output, err = self.submit(['submit', '--config', config, '--spec', path, '--apply'])
         self.assertEqual(code, 2)
@@ -240,7 +248,7 @@ class SubmitTests(CommandCase):
         self.remote.fail('submit', RemoteResult('complete', stdout='', returncode=0, dispatched=True))
         code, output, err = self.submit(['submit', '--config', config, '--spec', path, '--apply'])
         self.assertEqual((code, output['resolution'], output['reason']), (2, 'unknown', 'malformed_reply'))
-        self.assertEqual([argv[3] for argv in self.remote.program_calls()], ['submit'] * 6)
+        self.assertEqual([argv[3] for argv in self.remote.program_calls()], ['submit'] * 7)
 
     def test_apply_gates_precede_the_runner(self):
         config = self.config()
@@ -342,14 +350,14 @@ class StatusTests(CommandCase):
         self.assertEqual(self.files(done['attempt']), ['record.json', 'resolved.json', 'submitted.json'])
         resolved = json.loads((self.registry / 'attempts' / done['attempt'] / 'resolved.json').read_text())
         self.assertEqual((resolved['resolution'], resolved['job_id'], resolved['cost']['known']), ('terminal', '101', True))
-        self.assertEqual(query_keys(self.state), [self.read_key('read-all')])
-        code, cached, err = self.run_main(['status', '--all', '--config', config], AssertionError('cadence violated'))
-        self.assertEqual((code, [item['resolution'] for item in cached]), (0, ['terminal', 'identified']))
-        self.assertEqual(cached[0]['events'], ['submitted'])
-        expire_queries(self.state)
+        # The written closure forgets the cached listing, so the next --all within the cadence reads afresh and the closed attempt is gone.
+        self.assertEqual(query_keys(self.state), [])
         code, output, err = self.run_main(['status', '--all', '--config', config])
         self.assertEqual((code, [item['attempt']['attempt'] for item in output]), (0, [running['attempt']]))
-        self.assertEqual(len(self.remote.program_calls('event')), 1)
+        self.assertEqual(query_keys(self.state), [self.read_key('read-all')])
+        code, cached, err = self.run_main(['status', '--all', '--config', config], AssertionError('cadence violated'))
+        self.assertEqual((code, cached), (0, output))
+        self.assertEqual((len(self.remote.program_calls('read')), len(self.remote.program_calls('event'))), (2, 1))
 
     def test_reconcile_all_isolates_errors_and_resolved_refusals_are_not_fatal(self):
         done = self.seed(events=[submitted_event('101')], task='a')
@@ -364,14 +372,54 @@ class StatusTests(CommandCase):
         self.assertIn('1 attempt(s) could not be reconciled', err)
         self.assertEqual(self.files(done['attempt']), ['record.json', 'resolved.json', 'submitted.json'])
         self.assertEqual(self.files(foreign['attempt']), ['record.json', 'submitted.json'])
-        # The cached read still lists the resolved attempt as fresh terminal; the writer refuses again, non-fatally.
+        # A written closure forgets the cached read: the next run reads afresh, no longer lists the closed attempt and sends no event.
         code, output, err = self.run_main(['reconcile', '--all', '--config', config])
         self.assertEqual(code, 2)
-        self.assertEqual(output[0]['resolved_event'], 'refused:already_present')
-        self.assertEqual(output[0]['events'], ['submitted'])
+        self.assertEqual([item['resolution'] for item in output], ['error'])
+        self.assertEqual((len(self.remote.program_calls('read')), len(self.remote.program_calls('event'))), (2, 1))
+        # A refusal is non-fatal and keeps the cached read, so the next run within the cadence repeats the event call.
+        late = self.seed(created=CREATED + 2, events=[submitted_event('103')], task='c')
+        self.remote.fake['sacct_stdout'] += sacct_line(late['attempt'], CREATED + 2, JobID='103', JobIDRaw='103', DBIndex='44') + '\n'
+        expire_queries(self.state)
+        self.remote.fail('event', RemoteResult('complete', stdout=f'SHK_EVENT_REFUSED:{late["attempt"]}:already_present\n', returncode=0, dispatched=True))
+        code, output, err = self.run_main(['reconcile', '--all', '--config', config])
+        self.assertEqual((code, [item['resolution'] for item in output]), (2, ['error', 'terminal']))
+        self.assertEqual((output[1]['resolved_event'], output[1]['events']), ('refused:already_present', ['submitted']))
         self.remote.fail('event', RemoteResult('unknown', stderr='lost', returncode=255, dispatched=True))
         code, output, err = self.run_main(['reconcile', '--all', '--config', config])
-        self.assertEqual((code, output[0]['resolved_event'], output[0]['resolution']), (2, 'transport:unknown', 'terminal'))
+        self.assertEqual((code, output[1]['resolved_event'], output[1]['resolution']), (2, 'transport:unknown', 'terminal'))
+        self.assertEqual((len(self.remote.program_calls('read')), len(self.remote.program_calls('event'))), (3, 3))
+
+    def test_reconcile_one_writes_resolved_and_forgets_the_cached_read(self):
+        record = self.seed(events=[submitted_event('123')])
+        attempt = record['attempt']
+        self.remote.fake['sacct_stdout'] = sacct_line(attempt) + '\n'
+        config = self.config()
+        code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt])
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual((output['resolution'], output['events'], output['cost']['known']), ('terminal', ['submitted', 'resolved'], True))
+        read, event = self.remote.program_calls()
+        self.assertEqual((read[3], event[3:8]), ('read', ['event', str(self.registry), 'resolved', '{}', attempt]))
+        self.assertEqual(self.files(attempt), ['record.json', 'resolved.json', 'submitted.json'])
+        # Within the cadence, status reads afresh (the closure changed the attempt) and sees the event on Sherlock.
+        code, output, err = self.run_main(['status', '--config', config, '--attempt', attempt])
+        self.assertEqual((code, output['resolution'], output['events']), (0, 'terminal', ['resolved', 'submitted']))
+        self.assertEqual(len(self.remote.program_calls('read')), 2)
+        code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt], AssertionError('cadence violated'))
+        self.assertEqual((code, output['events']), (0, ['resolved', 'submitted']))
+        self.assertEqual(len(self.remote.program_calls('event')), 1)
+
+    def test_preemption_keeps_the_error_and_abandonable_notes(self):
+        preempted = self.seed(events=[submitted_event('101')], task='a')
+        foreign = self.seed(created=CREATED + 1, events=[submitted_event('102')], task='b')
+        lost = self.seed(created=CREATED + 2, events=[submitted_event(None)], task='c')
+        self.remote.fake['sacct_stdout'] = '\n'.join((sacct_line(preempted['attempt'], JobID='101', JobIDRaw='101', State='RUNNING', Restarts='1', End='Unknown'),
+                                                      sacct_line(foreign['attempt'], CREATED + 1, JobID='102', JobIDRaw='102', User='someone-else', DBIndex='43'))) + '\n'
+        code, output, err = self.run_main(['status', '--all', '--config', self.config()])
+        self.assertEqual((code, [item['resolution'] for item in output]), (2, ['unexpected_preemption', 'error', 'abandonable']))
+        self.assertEqual(err, 'shk: 1 attempt(s) could not be reconciled; see the "error" entries\n'
+                              f'shk: {sherlock_commands.abandon_hint(1)}\nshk: {PREEMPTION_MESSAGE}\n')
+        self.assertEqual(self.remote.program_calls('event'), [])
 
     def test_status_all_with_nothing_open_reads_once_and_runs_no_sacct(self):
         self.seed(events=[('not_sent.json', {'at': 1, 'reason': 'claim_failed', 'detail': ''})], marker=False)
@@ -423,6 +471,33 @@ class StatusTests(CommandCase):
         self.assertEqual((code, output['resolution'], output['error']), (2, 'error', 'rows_for_abandoned_attempt'))
         code, output, err = self.run_main(['status', '--all', '--config', config])
         self.assertEqual((code, output), (0, []))
+        # A closing event needs no rows: a sacct outage leaves the closed attempt closed, annotated with the outage.
+        expire_queries(self.state)
+        self.remote.fake.update(sacct_rc='1', sacct_stderr='sacct: error: slurmdbd down\n')
+        code, output, err = self.run_main(['status', '--config', config, '--attempt', record['attempt']])
+        self.assertEqual((code, output['resolution'], output['transport'], output['events'], err), (0, 'abandoned', 'sacct:failed', ['abandoned', 'submitted'], ''))
+        open_attempt = self.seed(events=[submitted_event('124')], task='open')
+        code, output, err = self.run_main(['status', '--config', config, '--attempt', open_attempt['attempt']])
+        self.assertEqual((code, output['resolution'], output['transport']), (0, 'inconclusive', 'sacct:failed'))
+
+    def test_unreadable_record_is_an_isolated_error_and_refuses_events(self):
+        record = self.seed(events=[submitted_event('123')])
+        attempt = record['attempt']
+        (self.registry / 'attempts' / attempt / 'record.json').write_bytes(b'not json\n')
+        self.remote.fake['sacct_stdout'] = sacct_line(attempt, State='RUNNING', Restarts='1', End='Unknown') + '\n'
+        config = self.config()
+        code, output, err = self.run_main(['status', '--config', config, '--attempt', attempt])
+        self.assertEqual((code, output['resolution'], output['attempt'], output['events']), (2, 'error', {'attempt': attempt}, ['submitted']))
+        self.assertTrue(output['error'].startswith('registry_entry_errors:record.json:'), output['error'])
+        self.assertIn('1 attempt(s) could not be reconciled', err)
+        for flag in ('--acknowledge-preemption', '--abandon'):
+            with self.subTest(flag=flag):
+                code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt, flag], AssertionError('cadence violated'))
+                self.assertEqual((code, output), (2, None))
+                self.assertIn('record', err)
+                self.assertNotIn('NoneType', err)
+        self.assertEqual(self.remote.program_calls('event'), [])
+        self.assertEqual(self.files(attempt), ['record.json', 'submitted.json'])
 
     def test_array_status_counts_pending_aggregate_then_terminal_cost(self):
         record = self.seed(events=[submitted_event('500')], resources={**spec().resources, 'array': {'count': 4, 'throttle': 2}})
@@ -492,6 +567,12 @@ class EventTests(CommandCase):
         self.remote.fail('event', RemoteResult('not_sent', stderr='cooldown'))
         code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', old['attempt'], '--abandon'])
         self.assertEqual((code, output['outcome'], output['transport']), (1, 'not_sent', 'not_sent'))
+        # The shared cooldown answers before ssh starts: nothing was sent, so no status hint and exit 1.
+        self.remote.fail('event', RemoteResult('auth_required', stderr='Shared authentication cooldown active; authenticate manually'))
+        code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', old['attempt'], '--abandon'])
+        self.assertEqual((code, output['outcome'], output['transport'], output['event']), (1, 'not_sent', 'auth_required', None))
+        self.assertNotIn('hint', output)
+        self.assertEqual(err, 'shk: Shared authentication cooldown active; authenticate manually\n')
         code, output, err = self.run_main(['reconcile', '--all', '--config', config, '--abandon'], AssertionError('network ran'))
         self.assertEqual((code, output), (2, None))
         self.assertIn('requires --attempt', err)
@@ -500,6 +581,52 @@ class EventTests(CommandCase):
         self.assertEqual(code, 2)
         self.assertIn('another principal', err)
         self.assertEqual(len(self.remote.program_calls('event')), events)
+
+    def test_event_mutations_need_a_fresh_registry_read(self):
+        """Ownership and the cheap pre-checks come from the read; without one, nothing is written."""
+        old = self.seed(events=[submitted_event(None)])
+        attempt = old['attempt']
+        denied = RemoteResult('auth_required', stderr='denied', returncode=255, dispatched=True)
+        for flag in ('--abandon', '--acknowledge-preemption'):
+            for principal in (PRINCIPAL, 'other'):
+                with self.subTest(flag=flag, principal=principal):
+                    config = self.config(principal=principal)
+                    if (self.state / 'query-cache.json').exists():
+                        expire_queries(self.state)
+                    self.remote.fail('read', denied)
+                    code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt, flag])
+                    self.assertEqual((code, output), (2, None))
+                    self.assertIn(f'{flag} needs a fresh registry read', err)
+                    self.assertIn('auth_required', err)
+                    # The transport failure is the cached result for the cadence: a retry within 60 s is refused without any network use.
+                    self.remote.failures.clear()
+                    code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt, flag], AssertionError('cadence violated'))
+                    self.assertEqual((code, output), (2, None))
+                    self.assertIn('the last read is auth_required', err)
+                    self.assertEqual(self.remote.program_calls('event'), [])
+                    self.assertEqual(self.files(attempt), ['record.json', 'submitted.json'])
+        # A failed status read (query raised) leaves the cadence sentinel, which blocks the mutation for the same cadence.
+        config = self.config()
+        expire_queries(self.state)
+        self.remote.fail('read', OSError('ssh binary vanished'))
+        code, output, err = self.run_main(['status', '--config', config, '--attempt', attempt])
+        self.assertEqual((code, output), (2, None))
+        self.assertIn('ssh binary vanished', err)
+        self.remote.failures.clear()
+        code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt, '--abandon'], AssertionError('cadence violated'))
+        self.assertEqual((code, output), (2, None))
+        self.assertIn('--abandon needs a fresh registry read', err)
+        self.assertIn(QUERY_SENTINEL['status'], err)
+        self.assertEqual(self.remote.program_calls('event'), [])
+        # Once the read succeeds, the same command writes; the written closure forgets the cached read.
+        expire_queries(self.state)
+        code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt, '--abandon'])
+        self.assertEqual((code, output['outcome'], err), (0, 'written', ''))
+        self.assertEqual(len(self.remote.program_calls('event')), 1)
+        code, output, err = self.run_main(['reconcile', '--config', config, '--attempt', attempt, '--abandon'])
+        self.assertEqual((code, output), (2, None))
+        self.assertIn('not abandonable (resolution abandoned)', err)
+        self.assertEqual(len(self.remote.program_calls('event')), 1)
 
     def test_unexpected_preemption_exits_two_until_acknowledged(self):
         record = self.seed(events=[submitted_event('123')])
@@ -611,6 +738,24 @@ class QueryCacheTests(CommandCase):
             with self.assertRaisesRegex(SafetyError, 'exceeds'):
                 cached_query(path, 'big', lambda: {'rows': list(range(100))}, now=7000.0)
         self.assertEqual(query_cache(self.state)['big']['body'], QUERY_SENTINEL)
+
+    def test_forget_queries_drops_only_the_named_keys_and_never_raises_after_a_write(self):
+        path = self.state / 'query-cache.json'
+        moment = fake_remote.now()
+        cached_query(path, 'a', lambda: 1, now=moment)
+        cached_query(path, 'b', lambda: 2, now=moment)
+        self.assertEqual(sherlock_commands.forget_queries(path, ['a', 'never-cached']), ())
+        self.assertEqual(query_keys(self.state), ['b'])
+        self.assertEqual(sherlock_commands.forget_queries(path, ['never-cached']), ())
+        self.assertEqual(query_keys(self.state), ['b'])
+        self.assertEqual(sherlock_commands.forget_queries(self.state / 'absent.json', ['b']), ())
+        # A mutation already written on Sherlock must be reported as written even when the local cache is unusable.
+        path.write_text('not json')
+        path.chmod(0o600)
+        notes = sherlock_commands.forget_queries(path, ['b'])
+        self.assertEqual(len(notes), 1)
+        self.assertIn('query cache not refreshed after the write', notes[0])
+        self.assertEqual(path.read_text(), 'not json')
 
     def test_cached_query_fails_closed_on_malformed_symlink_or_public_file(self):
         path = self.state / 'query-cache.json'

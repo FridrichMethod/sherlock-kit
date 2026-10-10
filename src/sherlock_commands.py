@@ -99,7 +99,8 @@ def checked_registry_root(value):
     """An absolute canonical POSIX path: the runner compares it byte for byte on every call."""
     if not isinstance(value, str) or not value.startswith('/') or any(ord(c) < 32 or ord(c) == 127 for c in value):
         raise SafetyError('registry_root must be an absolute POSIX path without control characters')
-    if any(part in {'.', '..'} for part in PurePosixPath(value).parts) or value != str(PurePosixPath(value)):
+    # PurePosixPath keeps a leading double slash (an implementation-defined root), so it is refused explicitly.
+    if any(part in {'.', '..'} for part in PurePosixPath(value).parts) or value != str(PurePosixPath(value)) or value.startswith('//'):
         raise SafetyError('registry_root must be canonical: no ., .. or repeated/trailing slashes')
     return value
 
@@ -224,6 +225,27 @@ def cached_query(path, key, query, now=None):
     return result
 
 
+def forget_queries(path, keys):
+    """Drop the cached scopes a mutation of ours just changed, so the next read within the cadence is fresh.
+
+    Returns stderr notes instead of raising: the mutation is already durable on
+    Sherlock, so a cache problem here must not misreport it.
+    """
+    from sherlock_kit import state_lock
+    path, dropped = Path(path), set(keys)
+    try:
+        if path.is_symlink():
+            raise SafetyError(CACHE_MESSAGE)
+        with state_lock(path):
+            entries = _read_cache(path)
+            kept = {key: entry for key, entry in entries.items() if key not in dropped}
+            if len(kept) != len(entries):
+                _write_cache(path, kept, time.time())
+    except (SafetyError, OSError, ValueError) as exc:
+        return (f'query cache not refreshed after the write ({exc}); the next read within {QUERY_CACHE_SECONDS} s may be stale',)
+    return ()
+
+
 # ---------------------------------------------------------------- registry reads and resolution
 
 def controller_identity(config):
@@ -244,11 +266,26 @@ def controller_owns(record, config):
         raise SafetyError('controller cannot query another principal/cluster')
 
 
+def query_key(config, transport, *suffix):
+    """The cache key of one bounded query scope: controller identity, control host, then the scope."""
+    return canonical([config['cluster'], config['principal'], transport.control_host, *suffix])
+
+
+def read_keys(config, transport, attempts):
+    """Every cached read scope that a closure of ``attempts`` changes: the listing of open attempts and each attempt's own read."""
+    return [query_key(config, transport, 'read-all'), *(query_key(config, transport, 'read', attempt) for attempt in attempts)]
+
+
+def forget_reads(config, transport, attempts):
+    from sherlock_kit import query_cache_path
+    return forget_queries(query_cache_path(transport), read_keys(config, transport, attempts))
+
+
 def read_registry(config, transport, selection, key_suffix):
     """One reader call per cache key and cadence: ``{'status', 'document'}``; malformed reader output raises."""
     from sherlock_kit import query_cache_path, run_remote
     argv = program_argv('read', config['registry_root'], *selection)
-    key = canonical([config['cluster'], config['principal'], transport.control_host, *key_suffix])
+    key = query_key(config, transport, *key_suffix)
 
     def query():
         result = run_remote(transport, argv)
@@ -283,13 +320,24 @@ def entry_error(entry, reason):
             'events': event_kinds(entry), 'scientific_validation': 'unverified'}
 
 
+def closed_by_event(entry):
+    """A not_sent or abandoned event decides the resolution without accounting rows (D4: the event wins)."""
+    return any(event['kind'] in {'not_sent', 'abandoned'} for event in entry['events'])
+
+
 def resolved_entry(entry, document):
-    """resolve() for one reader entry; a registry-level problem is an isolated error, a sacct problem inconclusive."""
+    """resolve() for one reader entry; a registry-level problem is an isolated error, a sacct problem inconclusive.
+
+    A sacct outage cannot reopen an attempt closed by its own event, so such an
+    attempt resolves from its events alone and carries the outage in ``transport``.
+    """
     if entry['errors']:
         return entry_error(entry, 'registry_entry_errors:' + ';'.join(entry['errors']))
     sacct = document.get('sacct')
     if sacct is None or sacct['status'] != 'complete' or sacct['truncated']:
         status = 'absent' if sacct is None else ('truncated' if sacct['status'] == 'complete' else sacct['status'])
+        if closed_by_event(entry):
+            return {**attempt_result(entry, resolve(entry['record'], entry['events'], [], document['now'])), 'transport': 'sacct:' + status}
         return inconclusive_result(entry['record'], 'sacct:' + status)
     return attempt_result(entry, resolve(entry['record'], entry['events'], sacct['rows'], document['now']))
 
@@ -305,11 +353,14 @@ def selected_entry(document, attempt, config):
 
 
 def with_resolved_events(results, config, transport):
-    """reconcile only: one ``event resolved`` call for the fresh terminal attempts; refusals are non-fatal."""
+    """reconcile only: one ``event resolved`` call for the fresh terminal attempts; refusals are non-fatal.
+
+    Returns ``(results, notes)``; a written closure forgets the cached reads it changed.
+    """
     from sherlock_kit import run_remote
     fresh = [result for result in results if result.get('resolution') == 'terminal' and 'resolved' not in result['events']]
     if not fresh:
-        return results
+        return results, ()
     ids = [result['attempt']['attempt'] for result in fresh]
     reply = run_remote(transport, program_argv('event', config['registry_root'], 'resolved', '{}', *ids), mutation=True)
     replies = {}
@@ -329,7 +380,9 @@ def with_resolved_events(results, config, transport):
             return {**result, 'events': [*result['events'], 'resolved']}
         return {**result, 'resolved_event': outcome + ':' + value}
 
-    return [annotated(result) for result in results]
+    written = [attempt for attempt, (outcome, _) in replies.items() if outcome == 'written' and attempt in ids]
+    notes = forget_reads(config, transport, written) if written else ()
+    return [annotated(result) for result in results], notes
 
 
 def abandon_hint(count):
@@ -341,14 +394,15 @@ def check_outcome(result, notes=()):
     """Exit code and stderr notes for one attempt result or a batch."""
     items = result if isinstance(result, list) else [result]
     resolutions = [item.get('resolution') for item in items if isinstance(item, dict)]
-    if 'unexpected_preemption' in resolutions:
-        return Outcome(result, 2, (*notes, PREEMPTION_MESSAGE))
     failed = resolutions.count('error')
     extra = [f'{failed} attempt(s) could not be reconciled; see the "error" entries'] if failed else []
     abandonable = resolutions.count('abandonable')
     if abandonable:
         extra.append(abandon_hint(abandonable))
-    return Outcome(result, 2 if failed else 0, (*notes, *extra))
+    preempted = 'unexpected_preemption' in resolutions
+    if preempted:
+        extra.append(PREEMPTION_MESSAGE)
+    return Outcome(result, 2 if failed or preempted else 0, (*notes, *extra))
 
 
 def status_one(args, config, transport, *, reconcile):
@@ -358,9 +412,10 @@ def status_one(args, config, transport, *, reconcile):
         return Outcome(inconclusive_result({'attempt': attempt}, read['status']))
     document = read['document']
     result = resolved_entry(selected_entry(document, attempt, config), document)
+    notes = ()
     if reconcile:
-        result, = with_resolved_events([result], config, transport)
-    return check_outcome(result)
+        (result,), notes = with_resolved_events([result], config, transport)
+    return check_outcome(result, notes)
 
 
 def status_all(args, config, transport, *, reconcile):
@@ -379,7 +434,8 @@ def status_all(args, config, transport, *, reconcile):
     if document['registry'].get('truncated'):
         notes = (f'open attempts truncated at {MAX_OPEN}; resolve some and run again',)
     if reconcile:
-        results = with_resolved_events(results, config, transport)
+        results, event_notes = with_resolved_events(results, config, transport)
+        notes = (*notes, *event_notes)
     return check_outcome(results, notes)
 
 
@@ -388,6 +444,8 @@ def status_all(args, config, transport, *, reconcile):
 def event_precheck(kind, entry, result):
     """Cheap refusals from the last read; the event writer re-checks under the registry lock with fresh sacct."""
     resolution = result['resolution']
+    if entry['record'] is None or resolution == 'error':
+        raise SafetyError(f'attempt record cannot be used ({result.get("reason")}); repair the registry entry before any event')
     if kind == 'ack':
         if entry['record']['spec']['partition_profile']['preemptible']:
             raise SafetyError('acknowledgement applies to non-preemptible partitions only; this profile is preemptible')
@@ -414,16 +472,17 @@ def event_operation(args, config, transport):
         raise SafetyError(f'{flag} requires --attempt; it changes exactly one investigated attempt')
     attempt = checked_attempt_id(args.attempt)
     read = read_registry(config, transport, ['--attempt', attempt], ['read', attempt])
-    record = {'attempt': attempt}
-    if read['status'] == 'complete':
-        entry = selected_entry(read['document'], attempt, config)
-        event_precheck(kind, entry, resolved_entry(entry, read['document']))
-        record = entry['record']
+    # Ownership and the cheap pre-checks come from this read; without it nothing is sent (a failed read holds the cadence sentinel).
+    if read['status'] != 'complete':
+        raise SafetyError(f'{flag} needs a fresh registry read of the attempt before it writes; the last read is {read["status"]}')
+    entry = selected_entry(read['document'], attempt, config)
+    event_precheck(kind, entry, resolved_entry(entry, read['document']))
     note = args.note or ''
     reply = run_remote(transport, program_argv('event', config['registry_root'], kind, canonical({'note': note}), attempt), mutation=True)
-    base = {'operation': kind, 'attempt': record, 'note': note, 'event': None, 'transport': reply.status, 'scientific_validation': 'unverified'}
+    base = {'operation': kind, 'attempt': entry['record'], 'note': note, 'event': None, 'transport': reply.status, 'scientific_validation': 'unverified'}
     hint = 'shk status --attempt ' + attempt
-    if reply.status == 'not_sent':
+    if not reply.dispatched or reply.status == 'not_sent':
+        # Cooldown or ssh never started: nothing reached the registry, so no mutation is in doubt.
         return Outcome({**base, 'outcome': 'not_sent'}, 1, (stderr_tail(reply.stderr),) if reply.stderr.strip() else ())
     if reply.status != 'complete':
         return Outcome({**base, 'outcome': 'unknown', 'hint': hint}, 2, (hint,))
@@ -432,7 +491,7 @@ def event_operation(args, config, transport):
         raise SafetyError(f'registry refused {flag}: {value}')
     if outcome != 'written':
         return Outcome({**base, 'outcome': 'unknown', 'detail': value, 'hint': hint}, 2, (hint,))
-    return Outcome({**base, 'outcome': 'written', 'event': value})
+    return Outcome({**base, 'outcome': 'written', 'event': value}, 0, forget_reads(config, transport, [attempt]))
 
 
 # ---------------------------------------------------------------- occupancy
@@ -535,7 +594,8 @@ def submit_outcome(attempt, frozen, config, reply):
             'transport': reply.status, 'job_id': None, 'reason': None}
     hint = 'shk status --attempt ' + attempt
     tail = stderr_tail(reply.stderr)
-    if reply.status == 'not_sent':
+    if not reply.dispatched or reply.status == 'not_sent':
+        # Cooldown or ssh never started: nothing reached Slurm and no record exists, so a status hint would dead-end.
         return Outcome({**base, 'resolution': 'not_sent', 'recorded': False, 'reason': tail or 'transport not started'}, 1)
     if reply.status != 'complete':
         return Outcome({**base, 'resolution': 'unknown', 'recorded': None, 'hint': hint}, 2, (hint, *(('remote stderr: ' + tail,) if tail else ())))
