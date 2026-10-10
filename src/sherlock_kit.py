@@ -186,9 +186,18 @@ def _read_backoff(path):
     return value
 
 
+def query_cache_path(config: TransportConfig):
+    """The typed commands' 60 s query cache, next to the backoff file of the same local state root."""
+    return _checked_backoff_path(_backoff_path(config).with_name("query-cache.json"))
+
+
 @contextmanager
-def _backoff_lock(path):
-    # One private state/lock per controller, shared across repositories and aliases.
+def state_lock(path):
+    """Exclusive ``<path>.lock`` beside one private state file; the parent is created 0700 if absent.
+
+    Every state file has its own lock: the backoff lock is held for the whole ssh
+    call by run_remote, so the query cache must never share it.
+    """
     import fcntl
     path = _checked_backoff_path(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -211,6 +220,9 @@ def _backoff_lock(path):
         yield
     finally:
         os.close(fd)
+
+
+_backoff_lock = state_lock
 
 
 def run_remote(config: TransportConfig, argv, mutation=False) -> RemoteResult:
