@@ -1,5 +1,7 @@
 include README.md LICENSE CHANGELOG.md
+include CONTRIBUTING.md AGENTS.md
 include bin/shk
+recursive-include docs *.md
 recursive-include src/sherlock_kit/data *
 recursive-include tests *
 global-exclude *.py[cod]

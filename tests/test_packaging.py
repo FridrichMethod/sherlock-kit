@@ -164,11 +164,14 @@ class BuildTests(HeadCase):
         ])
         with tarfile.open(sdist) as bundle:
             members = {m.name.split("/", 1)[1]: m for m in bundle.getmembers() if "/" in m.name}
-        for rel in (
+        for rel in (  # with the files test_release_metadata reads, so the suite runs from it
             "bin/shk",
             "LICENSE",
             "CHANGELOG.md",
             "README.md",
+            "CONTRIBUTING.md",
+            "AGENTS.md",
+            "docs/design.md",
             *(f"src/{DATA}{c}" for c in CONTENT),
         ):
             self.assertIn(rel, members)
