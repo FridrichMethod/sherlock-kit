@@ -1,8 +1,8 @@
 """Run the whole offline suite: ``python tests/run_suite.py``.
 
 When CI or SHK_REQUIRE_ALL is set (to anything but "", "0", "false" or "no"),
-any skipped test fails the run, so missing rsync, shellcheck, dash or packaging
-prerequisites cannot pass silently. SHK_BUILD_PYTHON (an interpreter with
+any skipped test fails the run, so missing rsync, dash, ssh or packaging
+prerequisites cannot pass silently (shellcheck runs in pre-commit). SHK_BUILD_PYTHON (an interpreter with
 setuptools>=80 and wheel) is inherited by the packaging tests; when set it must
 name an existing file. A file entry point keeps multiprocessing spawn workers
 from re-running the suite on import.

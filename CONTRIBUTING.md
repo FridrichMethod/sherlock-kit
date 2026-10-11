@@ -62,7 +62,8 @@ git diff --check
   realistically happen. Lean is not a line count; do not compress code to save
   lines.
 - Remote programs under `src/sherlock_kit/data/remote/` are fixed POSIX `sh`,
-  passed literally and linted with `shellcheck -s sh`; they print only `SHK_`
+  passed literally, linted with `shellcheck -s sh` and formatted with
+  `shfmt -ln posix -i 4` (both in pre-commit); they print only `SHK_`
   lines and sanitize `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*`.
 - Contract paths: `src/sherlock_kit/data/rules/workstation.md`,
   `src/sherlock_kit/data/rules/cluster.md`,
