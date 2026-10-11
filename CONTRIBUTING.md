@@ -42,8 +42,9 @@ git diff --check
   (fully annotated, `[tool.mypy]` in `pyproject.toml`), shellcheck `--shell=sh`
   and shfmt on the remote programs, mdformat on the documentation (never on
   package data: the rules and the skill are delivered byte for byte) and the
-  usual file checks. Tests are linted, not type-checked. The `ruff` pin in the
-  `dev` extra equals the ruff-pre-commit `rev`; bump both together.
+  usual file checks. Tests are linted, not type-checked. The `ruff` and `mypy`
+  pins in the `dev` extra equal the ruff-pre-commit and mirrors-mypy `rev`s;
+  bump each pin together with its hook.
 - Tests stay on `unittest`; `tests/run_suite.py` runs them all.
 - Run the suite on the oldest and newest supported Pythons (3.11 and 3.14; CI runs
   both). With `CI` or `SHK_REQUIRE_ALL` set, any skip fails the run; without

@@ -28,7 +28,7 @@ repos:
         exclude: ^src/sherlock_kit/data/
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+    rev: v1.19.1 # keep the dev extra's mypy pin in pyproject.toml equal to this
     hooks:
       - id: mypy
         args: [--config-file=pyproject.toml]

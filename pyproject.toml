@@ -27,10 +27,10 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
-    "mypy",
+    # Same versions as the mirrors-mypy and ruff-pre-commit revs in .pre-commit-config.yaml,
+    # so a local `mypy` or `ruff check` agrees with the hooks and with CI.
+    "mypy==1.19.1",
     "pre-commit",
-    # Same version as the ruff-pre-commit rev in .pre-commit-config.yaml, so a local
-    # `ruff check` agrees with the hook and with CI.
     "ruff==0.15.5",
 ]
 
