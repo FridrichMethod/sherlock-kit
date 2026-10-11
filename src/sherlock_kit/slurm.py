@@ -1,50 +1,151 @@
-"""shk submit / status / cancel / occupancy with Slurm as the only record (frozen 0.4.0).
+"""shk submit, status, cancel and occupancy, with Slurm as the only record.
 
-One read (data/remote/query.sh) per command; submit adds one mutation (submit.sh, script on
-stdin) and cancel is one mutation (cancel.sh: scancel -u USER --name=NAME). resolve_name()
-is pure: one name's squeue + sacct rows grouped by base job id -> new | live | done |
-failed | stale. live refuses even with --resubmit; done/failed need --resubmit REASON;
-stale (spec files, no rows) submits like new. Reads print next_check_after (now + 60 s); a
-lost mutation reply prints action "unknown" (exit 5); exit 6 when a newest job has anomalies.
+Every command makes one read (data/remote/query.sh: one squeue and one sacct for all
+selected names); submit adds one mutation (submit.sh, the script on stdin) and cancel is
+one mutation (cancel.sh: scancel -u USER --name=NAME). resolve_name() is pure: one name's
+rows grouped by base job id give new | live | done | failed | stale. live refuses even with
+--resubmit, done and failed need --resubmit REASON, stale (spec files, no rows) submits
+like new. Remote calls print next_check_after (now + 60 s); a lost mutation reply is
+action "unknown" (exit 5); exit 6 when the newest job of a listed name has an anomaly.
 """
 from __future__ import annotations
 
+import argparse
 from collections import Counter
-from dataclasses import asdict
-from datetime import timedelta
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 import json
 import re
 import secrets
 import shlex
+from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import executor as executors, partitions, spec
-from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, EXIT_REFUSED, EXIT_UNKNOWN, Outcome, ShkError
+from sherlock_kit.errors import (
+    EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, EXIT_REFUSED, EXIT_UNKNOWN, Outcome, ShkError,
+)
 
-JOB_ID = re.compile(r"([1-9][0-9]*)(?:_(?:([0-9]+)|\[([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)(?:%[0-9]+)?\]))?")
-QUEUE = ("JobID", "State", "Reason", "Partition", "JobName")  # query.sh: squeue -o "%i|%T|%r|%P|%j"
-ACCT = ("JobID", "State", "Partition", "ElapsedRaw", "AllocCPUS", "AllocTRES", "Submit", "Restarts", "ExitCode", "JobName")
-OCCUPANCY = (("UserName", 64), ("State", 24), ("tres-alloc", 128))  # squeue -O prefix, layout confirmed live
-TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "BOOT_FAIL",
-                      "DEADLINE", "PREEMPTED", "REVOKED"})
-RUNNING = frozenset({"RUNNING", "COMPLETING", "SUSPENDED", "CONFIGURING", "STAGE_OUT", "SIGNALING", "RESIZING", "STOPPED"})
-MAX_ROWS, CADENCE = 50_000, timedelta(seconds=60)
-REFUSALS = {"SHK_LIVE": ("live", "wait; check shk status at most once per 60 s"),
-            "SHK_REJECTED": ("slurm_rejected", "read the message; shk status shows whether anything was queued"),
-            "SHK_REFUSED": ("remote_refused", "nothing ran; fix the cause, then retry once")}
+if TYPE_CHECKING:
+    from sherlock_kit.cli import Context
+
+JOB_ID = re.compile(
+    r"([1-9][0-9]*)"  # base job id
+    r"(?:_(?:([0-9]+)"  # N_k: one array task
+    r"|\[([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)(?:%[0-9]+)?\]))?"  # N_[a-b,c%t]: aggregate
+)
+QUEUE_FIELDS = ("JobID", "State", "Reason", "Partition", "JobName")  # query.sh squeue -o
+ACCT_FIELDS = ("JobID", "State", "Partition", "ElapsedRaw", "AllocCPUS", "AllocTRES", "Submit",
+               "Restarts", "ExitCode", "JobName")  # query.sh sacct --format; JobName stays last
+OCCUPANCY_COLUMNS = (("UserName", 64), ("State", 24), ("tres-alloc", 128))  # squeue -O, live layout
+TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY",
+                      "BOOT_FAIL", "DEADLINE", "PREEMPTED", "REVOKED"})
+RUNNING = frozenset({"RUNNING", "COMPLETING", "SUSPENDED", "CONFIGURING", "STAGE_OUT",
+                     "SIGNALING", "RESIZING", "STOPPED"})
+MAX_ROWS = 50_000
+CADENCE = timedelta(seconds=60)
+SINCE_DAYS, SINCE_DAYS_ALL = 30, 7
+BUDGET_JOBS, BUDGET_MINUTES = 2, 120  # "about 2 jobs x 2 h while others are active" (btrippe)
 
 
-def job_id(text: str) -> tuple:
-    """(base, task, indices) of N, N_k or an aggregate N_[a-b,c%t]; a malformed id raises ValueError."""
-    match, indices = JOB_ID.fullmatch(text), set()
-    for part in (match[3] or "").split(",") if match and match[3] else ():
+@dataclass(frozen=True)
+class Refusal:
+    token: str
+    hint: str
+
+
+REFUSALS = {  # remote markers that mean nothing was submitted or cancelled (exit 3)
+    "SHK_LIVE": Refusal("live", "wait; check shk status at most once per 60 s"),
+    "SHK_REJECTED": Refusal("slurm_rejected",
+                            "read the message; shk status shows whether anything was queued"),
+    "SHK_REFUSED": Refusal("remote_refused", "nothing ran; fix the cause, then retry once"),
+}
+
+
+# ---------------------------------------------------------------- parsing the read
+
+@dataclass(frozen=True)
+class SpecFile:
+    """The newest <name>.<jobid>.json in a run directory (SHK_SPEC)."""
+    job_id: int
+    task_count: int | None  # 1 for a single job; None when the file cannot be read
+
+
+@dataclass(frozen=True)
+class Read:
+    """One complete query.sh reply."""
+    user: str | None
+    host: str | None
+    queue: list[str]  # squeue rows (SHK_Q)
+    acct: list[str]  # sacct rows (SHK_A)
+    occupancy: dict[str, list[str]]  # partition -> fixed-width squeue -O rows (SHK_O)
+    specs: dict[str, SpecFile]  # name -> newest spec file (SHK_SPEC)
+    spec_files: dict[str, int]  # name -> spec files in its run directory (SHK_S)
+
+
+def _task_count(text: str) -> int | None:
+    try:
+        array = json.loads(text)["resources"]["array"]
+        return 1 if array is None else int(array["count"])
+    except (ValueError, KeyError, TypeError):  # truncated, hand-edited or foreign file
+        return None
+
+
+def _grouped(records: list[str]) -> dict[str, list[str]]:
+    grouped: dict[str, list[str]] = {}
+    for record in records:
+        key, _, rest = record.partition("|")
+        grouped.setdefault(key, []).append(rest)
+    return grouped
+
+
+def parse_read(stdout: str, tools: Iterable[str]) -> Read:
+    """A query.sh reply; complete only with SHK_END and SHK_RC 0 from every tool (else exit 1)."""
+    records: dict[str, list[str]] = {"SHK_Q": [], "SHK_A": [], "SHK_O": [], "SHK_S": [],
+                                     "SHK_SPEC": []}
+    facts: dict[str, str] = {}
+    for line in stdout.splitlines():
+        kind, separator, rest = line.partition("|")
+        if separator and kind in records:
+            records[kind].append(rest)
+        elif line.startswith("SHK_"):
+            key, _, value = line.rpartition(" ")
+            facts[key or value] = value
+    codes = {tool: facts.get(f"SHK_RC {tool}") for tool in tools}
+    if "SHK_END" not in facts or any(code != "0" for code in codes.values()):
+        raise ShkError(EXIT_LOCAL, "malformed_read",
+                       f"query incomplete: end={'SHK_END' in facts}, rc={codes}",
+                       hint="retry once after 60 s; shk doctor --remote checks the remote tools")
+    specs = {}
+    for name, rest in _grouped(records["SHK_SPEC"]).items():
+        job, _, text = rest[-1].partition("|")
+        specs[name] = SpecFile(int(job), _task_count(text))
+    counts = {name: int(found[-1]) for name, found in _grouped(records["SHK_S"]).items()}
+    return Read(user=facts.get("SHK_USER"), host=facts.get("SHK_HOST"), queue=records["SHK_Q"],
+                acct=records["SHK_A"], occupancy=_grouped(records["SHK_O"]), specs=specs,
+                spec_files=counts)
+
+
+# ---------------------------------------------------------------- squeue and sacct rows
+
+def _indices(aggregate: str) -> list[int]:
+    indices: set[int] = set()
+    for part in aggregate.split(","):
         first, _, last = part.partition("-")
-        if not int(first) <= int(last or first) < spec.ARRAY_MAX_TASKS:
-            match = None
-            break
-        indices.update(range(int(first), int(last or first) + 1))
+        low, high = int(first), int(last or first)
+        if not low <= high < spec.ARRAY_MAX_TASKS:
+            raise ValueError(f"array range {part!r}")
+        indices.update(range(low, high + 1))
+    return sorted(indices)
+
+
+def job_id(text: str) -> tuple[int, int | None, list[int] | None]:
+    """(base, task, indices) of N, N_k or an aggregate N_[a-b,c%t]; ValueError when malformed."""
+    match = JOB_ID.fullmatch(text)
     if match is None:
         raise ValueError(f"job id {text!r}")
-    return int(match[1]), None if match[2] is None else int(match[2]), sorted(indices) if match[3] else None
+    task = None if match[2] is None else int(match[2])
+    return int(match[1]), task, None if match[3] is None else _indices(match[3])
 
 
 def gpus(tres: str) -> int:
@@ -61,287 +162,532 @@ def gpus(tres: str) -> int:
     return max(generic, typed)
 
 
-def _spec_count(text: str):
-    try:
-        found = json.loads(text)["resources"]["array"]
-        return 1 if found is None else int(found["count"])
-    except (ValueError, KeyError, TypeError):
-        return None
+@dataclass(frozen=True)
+class Row:
+    """One squeue or sacct line of a shk job."""
+    key: tuple[bool, str, int]  # (from sacct, JobID, Restarts): one row per task and restart
+    base: int  # the base job id (the array id for array tasks)
+    tasks: tuple[int, ...]  # task indices covered; an aggregate covers several
+    from_acct: bool
+    explicit: bool  # N or N_k; False for an aggregate N_[...], which never ran
+    array: bool
+    state: str
+    partition: str
+    restart: int
+    cpu_seconds: int
+    gpu_seconds: int
+    exit_code: str  # sacct only ("" for squeue rows)
+    submitted: str  # sacct only, UTC
 
 
-def parse_read(stdout: str, tools) -> dict:
-    """query.sh output; complete only with SHK_END and rc 0 from every tool (else exit 1)."""
-    lines, facts = {"SHK_Q": [], "SHK_A": [], "SHK_O": [], "SHK_S": [], "SHK_SPEC": []}, {}
-    for line in stdout.splitlines():
-        head, sep, rest = line.partition("|")
-        if sep and head in lines:
-            lines[head].append(rest)
-        elif line.startswith("SHK_"):
-            key, _, value = line.rpartition(" ")
-            facts[key or value] = value
-    rcs = {tool: facts.get(f"SHK_RC {tool}") for tool in tools}
-    if "SHK_END" not in facts or any(rc != "0" for rc in rcs.values()):
-        raise ShkError(EXIT_LOCAL, "malformed_read", f"query incomplete: end={'SHK_END' in facts}, rc={rcs}",
-                       hint="retry once after 60 s; shk doctor --remote checks the remote tools")
-    occupancy, specs = {}, {}
-    for partition, _, row in (row.partition("|") for row in lines["SHK_O"]):
-        occupancy.setdefault(partition, []).append(row)
-    for name, _, rest in (row.partition("|") for row in lines["SHK_SPEC"]):
-        job, _, text = rest.partition("|")
-        specs[name] = (int(job) if job.isdecimal() else 0, _spec_count(text))
-    files = {name: int(n) for name, _, n in (row.partition("|") for row in lines["SHK_S"]) if n.isdecimal()}
-    return {"user": facts.get("SHK_USER"), "host": facts.get("SHK_HOST"), "q": lines["SHK_Q"], "a": lines["SHK_A"],
-            "o": occupancy, "spec": specs, "spec_files": files}
+def _row(fields: dict[str, str]) -> Row:
+    base, task, indices = job_id(fields["JobID"])
+    words = fields["State"].split()  # "CANCELLED by 1234", "COMPLETED+"
+    if not words:
+        raise ValueError(f"row without a state: {fields}")
+    elapsed, cpus, restart = (int(fields.get(key, "0"))
+                              for key in ("ElapsedRaw", "AllocCPUS", "Restarts"))
+    explicit = indices is None
+    return Row(
+        key=("Restarts" in fields, fields["JobID"], restart),
+        base=base,
+        tasks=tuple(indices) if indices is not None else (task or 0,),
+        from_acct="Restarts" in fields,
+        explicit=explicit,
+        array="_" in fields["JobID"],
+        state=words[0].rstrip("+"),
+        partition=fields["Partition"],
+        restart=restart,
+        cpu_seconds=elapsed * cpus if explicit else 0,
+        gpu_seconds=elapsed * gpus(fields.get("AllocTRES", "")) if explicit else 0,
+        exit_code=fields.get("ExitCode", ""),
+        submitted=fields.get("Submit", ""),
+    )
 
 
-def _row(item: dict) -> dict:
-    base, task, indices = job_id(item["JobID"])
-    state = (item["State"].split() or [""])[0].rstrip("+")
-    elapsed, cpus, restart = (int(item.get(key, "0")) for key in ("ElapsedRaw", "AllocCPUS", "Restarts"))
-    if not state or min(elapsed, cpus, restart) < 0:
-        raise ValueError(f"row {item}")
-    ran, acct = indices is None, "Restarts" in item  # an aggregate never ran
-    return {"key": (acct, item["JobID"], restart), "base": base, "tasks": indices or [task or 0], "acct": acct,
-            "explicit": ran, "array": "_" in item["JobID"], "state": state, "partition": item["Partition"],
-            "restart": restart, "cpu": elapsed * cpus * ran, "gpu": elapsed * gpus(item.get("AllocTRES", "")) * ran,
-            "exit": item.get("ExitCode"), "submit": item.get("Submit")}
+@dataclass(frozen=True)
+class Rows:
+    by_name: dict[str, list[Row]]
+    malformed: Counter[str | None]  # malformed lines per name; None when no name was readable
+    truncated: bool  # sacct printed more than MAX_ROWS rows
 
 
-def parse_rows(queue, acct, keep) -> tuple:
-    """({name: rows}, Counter of malformed rows by name (None: unattributable), truncated) for keep(name)."""
-    rows, malformed = {}, Counter()
-    for fields, lines in ((QUEUE, queue), (ACCT, acct[:MAX_ROWS])):
+def parse_rows(queue: list[str], acct: list[str], keep: Callable[[str], bool]) -> Rows:
+    """Rows of the job names keep() accepts; at most MAX_ROWS sacct rows are read."""
+    by_name: dict[str, list[Row]] = {}
+    malformed: Counter[str | None] = Counter()
+    for fields, lines in ((QUEUE_FIELDS, queue), (ACCT_FIELDS, acct[:MAX_ROWS])):
         for line in lines:
-            values = line.split("|", len(fields) - 1)  # JobName is last, so it may contain "|"
-            name = values[-1] if len(values) == len(fields) else None
-            if name is None:
+            values = line.split("|", len(fields) - 1)  # JobName is last and may contain "|"
+            if len(values) != len(fields):
                 malformed[None] += 1
-            elif keep(name):
-                try:
-                    rows.setdefault(name, []).append(_row(dict(zip(fields, values))))
-                except ValueError:
-                    malformed[name] += 1
-    return rows, malformed, len(acct) > MAX_ROWS
+                continue
+            name = values[-1]
+            if not keep(name):
+                continue
+            try:
+                by_name.setdefault(name, []).append(_row(dict(zip(fields, values))))
+            except ValueError:
+                malformed[name] += 1
+    return Rows(by_name, malformed, truncated=len(acct) > MAX_ROWS)
 
+
+# ---------------------------------------------------------------- resolution (pure)
 
 def _kind(state: str) -> str:
-    return ("completed" if state == "COMPLETED" else "failed" if state in TERMINAL else
-            "running" if state in RUNNING else "pending")
+    if state == "COMPLETED":
+        return "completed"
+    if state in TERMINAL:
+        return "failed"
+    if state in RUNNING:
+        return "running"
+    return "pending"  # PENDING, REQUEUED, REQUEUE_HOLD, ...: not running yet
 
 
-def _job(rows, known) -> dict:
-    """One base job: squeue beats sacct per task, then the highest restart, then an explicit row."""
-    top, acct_top, seen = {}, {}, {}
-    for row in sorted(rows, key=lambda r: (not r["acct"], r["restart"], r["explicit"])):
-        for index in row["tasks"]:
-            top[index] = row
-            if row["acct"]:
-                acct_top[index] = row
-                seen.setdefault(index, set()).add(row["restart"])
-    kinds, single, width = Counter(_kind(r["state"]) for r in top.values()), not any(r["array"] for r in rows), max(top) + 1
-    count = 1 if single else max(known or 0, width)
-    tasks = {"count": count, **{kind: kinds[kind] for kind in ("completed", "failed", "running", "pending")},
-             "missing": count - len(top), "by_state": dict(sorted(Counter(r["state"] for r in top.values()).items())),
-             "incomplete_history": [i for i, s in sorted(seen.items()) if s != set(range(max(s) + 1))][:20]}
-    state = "live" if kinds["running"] or kinds["pending"] else "done" if kinds["completed"] == count else "failed"
-    submitted = min((r["submit"] for r in rows if r["acct"] and "T" in r["submit"]), default=None)
-    return {"state": state, "submitted": submitted and f"{submitted}Z", "job_id": str(rows[0]["base"]),
-            "partition": rows[0]["partition"], "array": None if single else {"count": count, "count_known": (known or 0) >= width},
-            "tasks": tasks, "exit_codes": dict(sorted(Counter(r["exit"] for r in acct_top.values() if r["state"] in TERMINAL).items())),
-            "max_restart": max(r["restart"] for r in rows), "preempted": any(r["state"] in ("PREEMPTED", "REQUEUED") for r in rows),
-            "cost": {"cpu_seconds": sum(r["cpu"] for r in rows), "gpu_seconds": sum(r["gpu"] for r in rows),
-                     "final": state != "live" and tasks["missing"] == 0}}
+@dataclass(frozen=True)
+class Job:
+    """One base job id under a name."""
+    job_id: str
+    state: str  # live | done | failed
+    submitted: str | None
+    partition: str
+    array: dict[str, Any] | None
+    tasks: dict[str, Any]
+    exit_codes: dict[str, int]
+    max_restart: int
+    preempted: bool
+    cost: dict[str, Any]
+
+    def current(self, anomalies: list[str]) -> dict[str, Any]:
+        return {"job_id": self.job_id, "partition": self.partition, "array": self.array,
+                "tasks": self.tasks, "exit_codes": self.exit_codes,
+                "max_restart": self.max_restart, "cost": self.cost, "anomalies": anomalies}
+
+    def history(self) -> dict[str, Any]:
+        return {"job_id": self.job_id, "state": self.state, "submitted": self.submitted}
 
 
-def resolve_name(rows, spec_files: int = 0, spec_job=None, malformed: int = 0) -> dict:
-    """Pure: one name's rows -> {state, current, history, spec_files}; the largest base id is current."""
-    jobs = {}
-    for row in {r["key"]: r for r in rows}.values():
-        jobs.setdefault(row["base"], []).append(row)
+def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dict[int, set[int]]]:
+    """Per task: the row that decides its state (squeue over sacct, then the highest restart,
+    then an explicit row over an aggregate), its newest sacct row and the sacct restarts seen."""
+    deciding: dict[int, Row] = {}
+    accounted: dict[int, Row] = {}
+    restarts: dict[int, set[int]] = {}
+    for row in sorted(rows, key=lambda r: (not r.from_acct, r.restart, r.explicit)):
+        for index in row.tasks:
+            deciding[index] = row
+            if row.from_acct:
+                accounted[index] = row
+                restarts.setdefault(index, set()).add(row.restart)
+    return deciding, accounted, restarts
+
+
+def _task_summary(deciding: dict[int, Row], restarts: dict[int, set[int]],
+                  count: int) -> dict[str, Any]:
+    kinds = Counter(_kind(row.state) for row in deciding.values())
+    gaps = [index for index, seen in sorted(restarts.items()) if seen != set(range(max(seen) + 1))]
+    return {
+        "count": count,
+        "completed": kinds["completed"],
+        "failed": kinds["failed"],
+        "running": kinds["running"],
+        "pending": kinds["pending"],
+        "missing": count - len(deciding),
+        "by_state": dict(sorted(Counter(row.state for row in deciding.values()).items())),
+        "incomplete_history": gaps[:20],
+    }
+
+
+def _job(rows: list[Row], known_count: int | None) -> Job:
+    """Summary of one base job; known_count is the task count from its spec file, if any."""
+    deciding, accounted, restarts = _deciding_rows(rows)
+    single = not any(row.array for row in rows)
+    width = max(deciding) + 1
+    count = 1 if single else max(known_count or 0, width)
+    tasks = _task_summary(deciding, restarts, count)
+    if tasks["running"] or tasks["pending"]:
+        state = "live"
+    elif tasks["completed"] == count:
+        state = "done"
+    else:
+        state = "failed"
+    exits = Counter(row.exit_code for row in accounted.values() if row.state in TERMINAL)
+    submits = [row.submitted for row in rows if row.from_acct and "T" in row.submitted]
+    return Job(
+        job_id=str(rows[0].base),
+        state=state,
+        submitted=f"{min(submits)}Z" if submits else None,  # sacct prints UTC (TZ=UTC)
+        partition=rows[0].partition,
+        array=None if single else {"count": count, "count_known": (known_count or 0) >= width},
+        tasks=tasks,
+        exit_codes=dict(sorted(exits.items())),
+        max_restart=max(row.restart for row in rows),
+        preempted=any(row.state in ("PREEMPTED", "REQUEUED") for row in rows),
+        cost={"cpu_seconds": sum(row.cpu_seconds for row in rows),
+              "gpu_seconds": sum(row.gpu_seconds for row in rows),
+              "final": state != "live" and tasks["missing"] == 0},
+    )
+
+
+def _anomalies(job: Job, live_jobs: int, malformed: int) -> list[str]:
+    profile = partitions.profiles().get(job.partition)
+    found = []
+    if live_jobs > 1:
+        found.append("duplicate_live")
+    if malformed:
+        found.append("malformed_rows")
+    if profile is None:
+        found.append("unknown_partition")
+    elif not profile.preemptible and (job.preempted or job.max_restart > 0):
+        found.append("unexpected_preemption")
+    return sorted(found)
+
+
+def resolve_name(rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | None = None,
+                 malformed: int = 0) -> dict[str, Any]:
+    """Pure: one name's rows -> {state, current, history, spec_files}; the largest base id is
+    the current attempt, and any live job makes the name live."""
+    jobs: dict[int, list[Row]] = {}
+    for row in {row.key: row for row in rows}.values():
+        jobs.setdefault(row.base, []).append(row)
     if not jobs:
-        return {"state": "stale" if spec_files else "new", "current": None, "history": [], "spec_files": spec_files}
-    summary = {base: _job(found, spec_job[1] if spec_job and spec_job[0] == base else None)
-               for base, found in sorted(jobs.items())}
-    newest, live = max(summary), [base for base, job in summary.items() if job["state"] == "live"]
-    job, profile = summary[newest], partitions.profiles().get(summary[newest]["partition"])
-    flags = {"duplicate_live": len(live) > 1, "malformed_rows": malformed > 0, "unknown_partition": profile is None,
-             "unexpected_preemption": bool(profile and not profile.preemptible and (job["preempted"] or job["max_restart"]))}
-    current = {key: value for key, value in job.items() if key not in ("state", "submitted", "preempted")}
-    return {"state": "live" if live else job["state"],
-            "current": {**current, "anomalies": sorted(flag for flag, on in flags.items() if on)},
-            "history": [{"job_id": str(b), "state": j["state"], "submitted": j["submitted"]} for b, j in summary.items() if b != newest],
-            "spec_files": spec_files}
+        state = "stale" if spec_files else "new"
+        return {"state": state, "current": None, "history": [], "spec_files": spec_files}
+    summaries = {}
+    for base, found in sorted(jobs.items()):
+        known = newest_spec.task_count if newest_spec and newest_spec.job_id == base else None
+        summaries[base] = _job(found, known)
+    newest = summaries[max(summaries)]
+    live = [job for job in summaries.values() if job.state == "live"]
+    return {
+        "state": "live" if live else newest.state,
+        "current": newest.current(_anomalies(newest, len(live), malformed)),
+        "history": [job.history() for job in summaries.values() if job is not newest],
+        "spec_files": spec_files,
+    }
 
 
-def occupancy_summary(rows) -> tuple:
-    """({user: counts}, totals) of running (with GPUs) and pending jobs from fixed-width squeue -O rows."""
-    users, totals = {}, {"running_jobs": 0, "running_gpus": 0, "pending_jobs": 0}
+def _resolve(read: Read, rows: Rows, name: str) -> dict[str, Any]:
+    malformed = rows.malformed[name] + rows.malformed[None]
+    return resolve_name(rows.by_name.get(name, []), read.spec_files.get(name, 0),
+                        read.specs.get(name), malformed)
+
+
+# ---------------------------------------------------------------- occupancy
+
+def _counts() -> dict[str, int]:
+    return {"running_jobs": 0, "running_gpus": 0, "pending_jobs": 0}
+
+
+def _columns(line: str) -> dict[str, str]:
+    columns, offset = {}, 0
+    for name, width in OCCUPANCY_COLUMNS:
+        columns[name] = line[offset:offset + width].strip()
+        offset += width
+    return columns
+
+
+def occupancy_summary(rows: list[str]) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
+    """({user: counts}, totals) of running jobs (with GPUs) and pending jobs; the rows are
+    fixed-width because tres-alloc is empty for pending jobs."""
+    users: dict[str, dict[str, int]] = {}
+    totals = _counts()
     for line in rows:
-        offsets = [sum(width for _, width in OCCUPANCY[:i]) for i in range(len(OCCUPANCY) + 1)]
-        user, state, tres = (line[offsets[i]:offsets[i + 1]].strip() for i in range(len(OCCUPANCY)))
-        if state not in ("RUNNING", "COMPLETING", "PENDING"):
+        columns = _columns(line)
+        if columns["State"] in ("RUNNING", "COMPLETING"):
+            try:
+                delta = {"running_jobs": 1, "running_gpus": gpus(columns["tres-alloc"])}
+            except ValueError as exc:
+                raise ShkError(EXIT_LOCAL, "malformed_read", f"occupancy row: {exc}") from None
+        elif columns["State"] == "PENDING":
+            delta = {"pending_jobs": 1}
+        else:
             continue
-        try:
-            delta = {"running_jobs": int(state != "PENDING"), "running_gpus": gpus(tres) if state != "PENDING" else 0,
-                     "pending_jobs": int(state == "PENDING")}
-        except ValueError as exc:
-            raise ShkError(EXIT_LOCAL, "malformed_read", f"occupancy row: {exc}") from None
-        for target in (users.setdefault(user, dict.fromkeys(totals, 0)), totals):
+        for counts in (users.setdefault(columns["UserName"], _counts()), totals):
             for key, value in delta.items():
-                target[key] += value
+                counts[key] += value
     return users, totals
 
 
-def register(subparsers) -> None:
-    submit_p = subparsers.add_parser("submit", help="submit one logical task (refuses live; done/failed need --resubmit)")
-    for flag, options in (("--task", {"required": True}), ("--campaign", {"default": "default"}),
-                          ("--script", {"required": True}), ("--partition", {"required": True}),
-                          ("--cpus", {"type": int, "required": True}), ("--mem", {"required": True, "help": "16G or 16000M"}),
-                          ("--time", {"required": True, "help": "2h, 90m or H:MM:SS"}), ("--gpus", {"type": int, "default": 0}),
-                          ("--tasks", {"type": int, "default": 1}), ("--array", {"metavar": "N[%M]"}), ("--constraint", {}),
-                          ("--signal", {}), ("--after-ok", {"nargs": "+", "default": [], "metavar": "JOBID"}), ("--run-dir", {}),
-                          ("--courtesy-ack", {"action": "store_true"}), ("--resubmit", {"metavar": "REASON"}),
-                          ("--dry-run", {"action": "store_true", "help": "offline: print the spec and sbatch argv"})):
-        submit_p.add_argument(flag, **options)
-    requeue = submit_p.add_mutually_exclusive_group()
-    requeue.add_argument("--requeue", action="store_true")
+# ---------------------------------------------------------------- command line
+
+def _register_submit(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "submit", help="submit one logical task (refuses live; done or failed need --resubmit)")
+    parser.add_argument("--task", required=True)
+    parser.add_argument("--campaign", default="default")
+    parser.add_argument("--script", required=True, help="job script, at most 1 MiB")
+    parser.add_argument("--partition", required=True)
+    parser.add_argument("--cpus", type=int, required=True, help="CPUs per task")
+    parser.add_argument("--mem", required=True, help="16G or 16000M")
+    parser.add_argument("--time", required=True, help="2h, 90m or H:MM:SS")
+    parser.add_argument("--gpus", type=int, default=0)
+    parser.add_argument("--tasks", type=int, default=1)
+    parser.add_argument("--array", metavar="N[%M]", help="N tasks (2-1000), at most M at once")
+    parser.add_argument("--constraint")
+    parser.add_argument("--signal", help="for example B:USR1@60")
+    parser.add_argument("--after-ok", nargs="+", default=[], metavar="JOBID")
+    parser.add_argument("--run-dir", help="default <remote_root>/runs/<name>")
+    parser.add_argument("--courtesy-ack", action="store_true",
+                        help="required on borrowed partitions, after shk occupancy")
+    parser.add_argument("--resubmit", metavar="REASON", help="required after done or failed")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="offline: print the spec and sbatch argv")
+    requeue = parser.add_mutually_exclusive_group()
+    requeue.add_argument("--requeue", action="store_true", help="default: the partition profile")
     requeue.add_argument("--no-requeue", dest="requeue", action="store_false")
-    submit_p.set_defaults(handler=submit, requeue=None)
-    status_p = subparsers.add_parser("status", help="state of logical tasks from one squeue and one sacct call")
-    which = status_p.add_mutually_exclusive_group(required=True)
-    which.add_argument("--task", action="append")
-    which.add_argument("--name", action="append")
-    which.add_argument("--all", action="store_true")
-    status_p.add_argument("--campaign", default="default")
-    status_p.add_argument("--run-dir", action="append", help="once per --task (default <remote_root>/runs/<name>)")
-    status_p.add_argument("--since", type=int, metavar="DAYS", help="sacct window (default 30, 7 with --all)")
-    status_p.set_defaults(handler=status)
-    cancel_p = subparsers.add_parser("cancel", help="scancel the live jobs of one logical task (only when asked)")
-    which = cancel_p.add_mutually_exclusive_group(required=True)
+    parser.set_defaults(handler=submit, requeue=None)
+
+
+def _register_status(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "status", help="state of logical tasks from one squeue and one sacct call")
+    which = parser.add_mutually_exclusive_group(required=True)
+    which.add_argument("--task", action="append", help="repeatable")
+    which.add_argument("--name", action="append", help="repeatable")
+    which.add_argument("--all", action="store_true", help="every shk job of this project")
+    parser.add_argument("--campaign", default="default")
+    parser.add_argument("--run-dir", action="append",
+                        help="once per --task (default <remote_root>/runs/<name>)")
+    parser.add_argument("--since", type=int, metavar="DAYS",
+                        help=f"sacct window (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)")
+    parser.set_defaults(handler=status)
+
+
+def _register_cancel(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "cancel", help="scancel the live jobs of one logical task (only when asked)")
+    which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--task")
     which.add_argument("--name")
-    cancel_p.add_argument("--campaign", default="default")
-    cancel_p.set_defaults(handler=cancel)
-    occupancy_p = subparsers.add_parser("occupancy", help="running and pending jobs per user on listed partitions")
-    occupancy_p.add_argument("--partition", action="append", required=True)
-    occupancy_p.set_defaults(handler=occupancy)
+    parser.add_argument("--campaign", default="default")
+    parser.set_defaults(handler=cancel)
 
 
-def _iso(moment) -> str:
+def _register_occupancy(subparsers: Any) -> None:
+    parser = subparsers.add_parser(
+        "occupancy", help="running and pending jobs per user on listed partitions")
+    parser.add_argument("--partition", action="append", required=True, help="repeatable")
+    parser.set_defaults(handler=occupancy)
+
+
+def register(subparsers: Any) -> None:
+    _register_submit(subparsers)
+    _register_status(subparsers)
+    _register_cancel(subparsers)
+    _register_occupancy(subparsers)
+
+
+# ---------------------------------------------------------------- remote calls
+
+def _iso(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _read(ctx, args, tools) -> tuple:
-    result = executors.check(executors.run_program(ctx.executor(), "query", args), "query")
-    read, now = parse_read(result.stdout, tools), ctx.clock()
-    return read, {"executor": ctx.executor().kind, "user": read["user"], "host": read["host"],
-                  "queried_at": _iso(now), "next_check_after": _iso(now + CADENCE)}
+def _cadence(ctx: Context) -> dict[str, str]:
+    now = ctx.clock()
+    return {"queried_at": _iso(now), "next_check_after": _iso(now + CADENCE)}
 
 
-def _mutate(ctx, program, args, done, stdin=None) -> tuple:
-    """(marker, value, lines); marker "unknown" when the reply is lost or has no single known marker."""
+def _read(ctx: Context, query: list[str], tools: tuple[str, ...]) -> tuple[Read, dict[str, Any]]:
+    """Run query.sh once: the parsed reply and the fields every read prints."""
+    result = executors.check(executors.run_program(ctx.executor(), "query", query), "query")
+    read = parse_read(result.stdout, tools)
+    meta = {"executor": ctx.executor().kind, "user": read.user, "host": read.host, **_cadence(ctx)}
+    return read, meta
+
+
+@dataclass(frozen=True)
+class Reply:
+    marker: str  # the one terminal marker, or "unknown"
+    value: str  # the marker's argument, or why the outcome is unknown
+    lines: list[str]
+
+
+def _refusal(program: str, marker: str, value: str, lines: list[str]) -> ShkError:
+    refusal = REFUSALS[marker]
+    errors = " ".join(line.removeprefix("SHK_ERR|")
+                      for line in lines if line.startswith("SHK_ERR|"))
+    message = f"{program}: {marker} {value} {errors[-2000:]}".strip()
+    return ShkError(EXIT_REFUSED, refusal.token, message, refusal.hint)
+
+
+def _mutate(ctx: Context, program: str, args: list[str], done: tuple[str, ...],
+            stdin: bytes | None = None) -> Reply:
+    """Run one mutation program: refusals raise exit 3; a lost or ambiguous reply is unknown."""
     result = executors.run_program(ctx.executor(), program, args, stdin=stdin, mutation=True)
     if result.status == "unknown":
-        return "unknown", "no reply", []
+        return Reply("unknown", "no reply", [])
     lines = executors.check(result, program).stdout.splitlines()
-    marks = [line.partition(" ") for line in lines if line.partition(" ")[0] in (*REFUSALS, *done, "SHK_UNPARSED")]
-    mark, _, value = marks[0] if len(marks) == 1 else ("unknown", "", f"{len(marks)} terminal markers")
-    if mark in REFUSALS:
-        text = " ".join(line[8:] for line in lines if line.startswith("SHK_ERR|"))[-2000:]
-        raise ShkError(EXIT_REFUSED, REFUSALS[mark][0], f"{program}: {mark} {value} {text}".strip(), REFUSALS[mark][1])
-    return ("unknown", "unparsed sbatch reply", lines) if mark == "SHK_UNPARSED" else (mark, value, lines)
+    known = (*REFUSALS, *done, "SHK_UNPARSED")
+    markers = [line.partition(" ") for line in lines if line.partition(" ")[0] in known]
+    if len(markers) != 1:
+        return Reply("unknown", f"{len(markers)} terminal markers", lines)
+    marker, _, value = markers[0]
+    if marker in REFUSALS:
+        raise _refusal(program, marker, value, lines)
+    if marker == "SHK_UNPARSED":
+        return Reply("unknown", "unparsed sbatch reply", lines)
+    return Reply(marker, value, lines)
 
 
-def _unknown(ctx, name, select, detail) -> Outcome:
+def _unknown(ctx: Context, name: str, selector: str, detail: str) -> Outcome:
+    """Exit 5: the mutation may or may not have happened; only a later status can tell."""
+    later = _iso(ctx.clock() + CADENCE)
     return Outcome({"ok": False, "action": "unknown", "name": name, "detail": detail,
-                    "next": f"shk status {select} (not before {_iso(ctx.clock() + CADENCE)})"}, EXIT_UNKNOWN)
+                    "next": f"shk status {selector} (not before {later})"}, EXIT_UNKNOWN)
 
 
-def _task(ctx, campaign, task) -> tuple:
-    found = ctx.require("project")
-    name = spec.job_name(found.project, spec.checked_text("campaign", campaign), spec.checked_text("task", task))
-    return found, name, f"--task {shlex.quote(task)} --campaign {shlex.quote(campaign)}"
+# ---------------------------------------------------------------- handlers
+
+def _task_name(ctx: Context, campaign: str, task: str) -> str:
+    project = ctx.require("project").project
+    return spec.job_name(project, spec.checked_text("campaign", campaign),
+                         spec.checked_text("task", task))
 
 
-def _name(name) -> str:
+def _task_selector(task: str, campaign: str) -> str:
+    return f"--task {shlex.quote(task)} --campaign {shlex.quote(campaign)}"
+
+
+def _checked_name(name: str) -> str:
     if not spec.NAME.fullmatch(name):
         raise ShkError(EXIT_LOCAL, "spec_invalid", f"--name {name!r} is not a shk job name")
     return name
 
 
-def _courtesy(read, built) -> dict:
-    users, totals = occupancy_summary(read["o"].get(built.profile.name, []))
-    mine = users.get(read["user"], {})
-    busy = mine.get("running_jobs", 0) + mine.get("pending_jobs", 0)
-    others = any(user != read["user"] and counts["running_jobs"] for user, counts in users.items())
-    long = built.document["resources"]["minutes"] > 120
+def _refuse_existing(name: str, found: dict[str, Any], reason: str | None) -> None:
+    """live always refuses; done and failed refuse without --resubmit REASON."""
+    state = found["state"]
+    if state == "live":
+        hint = REFUSALS["SHK_LIVE"].hint
+    elif state in ("done", "failed") and not reason:
+        hint = "find the cause, then add --resubmit REASON"
+    else:
+        return
+    message = f"{name} is {state} (newest job {found['current']['job_id']})"
+    raise ShkError(EXIT_REFUSED, state, message, hint)
+
+
+def _courtesy(read: Read, built: spec.Spec) -> dict[str, Any]:
+    """Occupancy and courtesy text of a borrowed partition; the budget is only a warning."""
+    partition = built.profile.name
+    users, totals = occupancy_summary(read.occupancy.get(partition, []))
+    mine = users.get(read.user or "", _counts())
+    my_jobs = mine["running_jobs"] + mine["pending_jobs"]
+    others = any(user != read.user and counts["running_jobs"] for user, counts in users.items())
+    over = my_jobs >= BUDGET_JOBS or built.document["resources"]["minutes"] > BUDGET_MINUTES
+    warnings = []
+    if others and over:
+        warnings.append(f"others are running on {partition} and you have {my_jobs} jobs there; "
+                        f"while others are active the courtesy budget is about {BUDGET_JOBS} jobs "
+                        f"x {BUDGET_MINUTES // 60} h")
     return {"occupancy": {"users": users, "totals": totals}, "courtesy": built.profile.courtesy,
-            "warnings": [f"others are running on {built.profile.name} and you have {busy} jobs there; the courtesy "
-                         "budget is about 2 jobs x 2 h"] if others and (busy >= 2 or long) else []}
+            "warnings": warnings}
 
 
-def submit(args, ctx) -> Outcome:
+def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
     built = spec.build(args, ctx.require("project", "remote_root"), ctx.clock())
-    report = {"name": built.name, "run_dir": built.run_dir, "argv": built.argv, "script_sha256": built.sha256}
+    report = {"name": built.name, "run_dir": built.run_dir, "argv": built.argv,
+              "script_sha256": built.sha256}
     if args.dry_run:
         return Outcome({"action": "dry_run", **report, "spec": built.document})
     borrowed = built.profile.borrowed
-    read, meta = _read(ctx, ["names", "30", built.profile.name if borrowed else "-", built.name, built.run_dir],
-                       ("squeue", "sacct", "occupancy") if borrowed else ("squeue", "sacct"))
-    rows = parse_rows(read["q"], read["a"], {built.name}.__contains__)[0]
-    found = resolve_name(rows.get(built.name, []), read["spec_files"].get(built.name, 0), read["spec"].get(built.name))
-    if found["state"] == "live" or (found["state"] in ("done", "failed") and not args.resubmit):
-        hint = REFUSALS["SHK_LIVE"][1] if found["state"] == "live" else "find the cause, then add --resubmit REASON"
-        raise ShkError(EXIT_REFUSED, found["state"], f"{built.name} is {found['state']} "
-                       f"(newest job {found['current']['job_id']})", hint)
-    report.update(_courtesy(read, built) if borrowed else {})
+    query = ["names", str(SINCE_DAYS), built.profile.name if borrowed else "-", built.name,
+             built.run_dir]
+    tools = ("squeue", "sacct", "occupancy") if borrowed else ("squeue", "sacct")
+    read, meta = _read(ctx, query, tools)
+    found = _resolve(read, parse_rows(read.queue, read.acct, lambda name: name == built.name),
+                     built.name)
+    _refuse_existing(built.name, found, args.resubmit)
+    if borrowed:
+        report.update(_courtesy(read, built))
     stamp = f"{ctx.clock():%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
-    mark, value, _ = _mutate(ctx, "submit", [built.name, built.run_dir, stamp, built.sha256, built.text, "--",
-                                             *built.argv], ("SHK_SUBMITTED",), stdin=built.script)
-    if mark == "unknown":
-        select = _task(ctx, args.campaign, args.task)[2] + (f" --run-dir {built.run_dir}" if args.run_dir else "")
-        return _unknown(ctx, built.name, select, value)
-    return Outcome({"action": "submitted", "job_id": value, "state_before": found["state"], **report, **meta})
+    remote = [built.name, built.run_dir, stamp, built.sha256, built.text, "--", *built.argv]
+    reply = _mutate(ctx, "submit", remote, ("SHK_SUBMITTED",), stdin=built.script)
+    if reply.marker == "unknown":
+        selector = _task_selector(args.task, args.campaign)
+        if args.run_dir:
+            selector += f" --run-dir {built.run_dir}"
+        return _unknown(ctx, built.name, selector, reply.value)
+    return Outcome({"action": "submitted", "job_id": reply.value, "state_before": found["state"],
+                    **report, **meta})
 
 
-def status(args, ctx) -> Outcome:
-    since = (7 if args.all else 30) if args.since is None else args.since
-    if not 1 <= since <= 3650:
-        raise ShkError(EXIT_LOCAL, "spec_invalid", "--since must be 1-3650 days")
-    selected, runs = [(_name(name), None, {}) for name in args.name or ()], args.run_dir or [None] * len(args.task or ())
-    if args.task and len(runs) != len(args.task):
+@dataclass(frozen=True)
+class Selected:
+    name: str
+    run_dir: str | None = None
+    labels: dict[str, str] = field(default_factory=dict)  # campaign and task, with --task
+
+
+def _selection(args: argparse.Namespace, ctx: Context) -> list[Selected]:
+    selected = [Selected(_checked_name(name)) for name in args.name or ()]
+    tasks = args.task or []
+    run_dirs = args.run_dir or [None] * len(tasks)
+    if len(run_dirs) != len(tasks):
         raise ShkError(EXIT_LOCAL, "spec_invalid", "give --run-dir once per --task, or not at all")
-    for task, run in zip(args.task or (), runs):
-        found, name, _ = _task(ctx, args.campaign, task)
-        run = spec.run_directory(run, found, name) if run or found.remote_root else None
-        selected.append((name, run, {"campaign": args.campaign, "task": task}))
-    project = getattr(ctx.config, "project", None) if args.all else None
-    keep = (lambda n: n.startswith(f"shk.{project}." if project else "shk.")) if args.all else {s[0] for s in selected}.__contains__
-    read, meta = _read(ctx, ["all" if args.all else "names", str(since), "-",
-                             *(part for name, run, _ in selected for part in (name, run or "-"))], ("squeue", "sacct"))
-    rows, malformed, truncated = parse_rows(read["q"], read["a"], keep)
-    names = [{"name": name, **extra, **resolve_name(rows.get(name, []), read["spec_files"].get(name, 0),
-                                                    read["spec"].get(name), malformed[name] + malformed[None])}
-             for name, _, extra in (selected or [(name, None, {}) for name in sorted(rows)])]
-    code = EXIT_ANOMALY if any(entry["current"] and entry["current"]["anomalies"] for entry in names) else EXIT_OK
-    return Outcome({**meta, "names": names, "truncated": truncated}, code)
+    for task, run_dir in zip(tasks, run_dirs):
+        config, name = ctx.require("project"), _task_name(ctx, args.campaign, task)
+        if run_dir or config.remote_root:
+            run_dir = spec.run_directory(run_dir, config, name)
+        selected.append(Selected(name, run_dir, {"campaign": args.campaign, "task": task}))
+    return selected
 
 
-def cancel(args, ctx) -> Outcome:
-    _, name, select = _task(ctx, args.campaign, args.task) if args.task else (None, _name(args.name), f"--name {args.name}")
-    mark, value, lines = _mutate(ctx, "cancel", [name], ("SHK_CANCELLED", "SHK_NONE"))
-    if mark == "unknown":
-        return _unknown(ctx, name, select, value)
-    return Outcome({"action": "cancelled" if mark == "SHK_CANCELLED" else "nothing_live", "name": name,
-                    "jobs": [line[8:] for line in lines if line.startswith("SHK_JOB|")],
-                    "executor": ctx.executor().kind, "next_check_after": _iso(ctx.clock() + CADENCE)})
+def _since(args: argparse.Namespace) -> int:
+    if args.since is None:
+        return SINCE_DAYS_ALL if args.all else SINCE_DAYS
+    if args.since < 1:
+        raise ShkError(EXIT_LOCAL, "spec_invalid", "--since must be at least 1 day")
+    return args.since
 
 
-def occupancy(args, ctx) -> Outcome:
+def _all_names(ctx: Context) -> Callable[[str], bool]:
+    """--all keeps shk.<project>. names, or every shk. name without a project config."""
+    project = ctx.config.project if ctx.config else None
+    prefix = f"shk.{project}." if project else "shk."
+    return lambda name: name.startswith(prefix)
+
+
+def status(args: argparse.Namespace, ctx: Context) -> Outcome:
+    since, selected = _since(args), _selection(args, ctx)
+    query = ["all" if args.all else "names", str(since), "-"]
+    for item in selected:
+        query += [item.name, item.run_dir or "-"]
+    read, meta = _read(ctx, query, ("squeue", "sacct"))
+    wanted = {item.name for item in selected}
+    rows = parse_rows(read.queue, read.acct,
+                      _all_names(ctx) if args.all else lambda name: name in wanted)
+    listed = selected or [Selected(name) for name in sorted(rows.by_name)]
+    names = [{"name": item.name, **item.labels, **_resolve(read, rows, item.name)}
+             for item in listed]
+    anomalous = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
+    return Outcome({**meta, "names": names, "truncated": rows.truncated},
+                   EXIT_ANOMALY if anomalous else EXIT_OK)
+
+
+def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
+    if args.task:
+        name = _task_name(ctx, args.campaign, args.task)
+        selector = _task_selector(args.task, args.campaign)
+    else:
+        name = _checked_name(args.name)
+        selector = f"--name {name}"
+    reply = _mutate(ctx, "cancel", [name], ("SHK_CANCELLED", "SHK_NONE"))
+    if reply.marker == "unknown":
+        return _unknown(ctx, name, selector, reply.value)
+    jobs = [line.removeprefix("SHK_JOB|") for line in reply.lines if line.startswith("SHK_JOB|")]
+    action = "cancelled" if reply.marker == "SHK_CANCELLED" else "nothing_live"
+    return Outcome({"action": action, "name": name, "jobs": jobs,
+                    "executor": ctx.executor().kind, **_cadence(ctx)})
+
+
+def occupancy(args: argparse.Namespace, ctx: Context) -> Outcome:
     profiles = {name: partitions.profile(name) for name in args.partition}
     read, meta = _read(ctx, ["occupancy", "-", "-", *profiles], ("occupancy",))
     report = {}
     for name, profile in profiles.items():
-        users, totals = occupancy_summary(read["o"].get(name, []))
+        users, totals = occupancy_summary(read.occupancy.get(name, []))
         report[name] = {"profile": asdict(profile), "users": users, "totals": totals}
     return Outcome({**meta, "partitions": report})
