@@ -15,7 +15,7 @@ These rules apply when an agent here operates Stanford's Sherlock cluster over S
 - Wait at least 60 s between status checks; one `shk status` over many tasks (`--all`) instead of a loop per task; no `watch` or polling loops; prefer `--after-ok` dependencies. Jobs do at least 10 minutes of useful work, ideally 30: batch short tasks, never pad with `sleep`.
 - Exit 6: status worked but the newest job has an anomaly (for example an unexpected preemption): stop and report it. `shk cancel` only when the user asks.
 - GPU jobs on `owners` must checkpoint periodically (a requeue gives no usable SIGTERM window). Never submit GPU work while developing or testing sherlock-kit itself.
-- `shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or `sherlock-kit.toml`) at or above the working directory and stops at a directory you do not own; otherwise pass `--project-dir DIR`.
+- `shk` reads `[tool.sherlock-kit]` from the nearest `pyproject.toml` (or `sherlock-kit.toml`) at or above the working directory; from elsewhere pass `--project-dir DIR`.
 
 ### Data
 - Move data with `shk push` and `shk pull` through the DTN (Globus for very large or cross-site data); never run commands on a DTN. `shk pull` needs a `SHA256SUMS` written by the job (`shk manifest DIR`), verifies every file, runs the project's validator with `--validate NAME`, then moves the copy into the project-local destination.

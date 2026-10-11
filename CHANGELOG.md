@@ -19,7 +19,8 @@ runs as fixed POSIX `sh` programs over the existing OpenSSH control masters, and
   0.3.0 names (`shk-<hex>`) cannot collide with 0.4.0 names; 0.4.0 never reads
   the old registry.
 - New: `[tool.sherlock-kit]` project configuration in `pyproject.toml` (or
-  `sherlock-kit.toml`), discovered upward until a directory you do not own;
+  `sherlock-kit.toml`), found in the nearest directory at or above the working
+  directory;
   `shk submit` with `--task`, `--resubmit REASON` and `--dry-run`; `shk status`
   by task, name or `--all` with `next_check_after`; `shk cancel` for one name;
   `shk push` and `shk pull` with a `SHA256SUMS` manifest (`shk manifest DIR`), an

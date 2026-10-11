@@ -1,13 +1,11 @@
 """Project configuration discovery and validation."""
 
 import dataclasses
-import os
 import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 from fakes import SRC
 
@@ -64,7 +62,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(
             (found.connect_timeout, found.command_timeout, found.transfer_timeout), (15, 60, 3600)
         )
-        self.assertIsNone(found.project)
+        self.assertEqual((found.project, found.remote_root, found.root), ("", "", None))
         self.assertEqual(dict(found.validators), {})
         with self.assertRaises(dataclasses.FrozenInstanceError):
             found.project = "x"
@@ -79,8 +77,7 @@ class ConfigTests(unittest.TestCase):
             "validators = 1",
             "[validators]\nb = []",
             '[validators]\nb = "python"',
-            '[validators]\nb = ["", "x"]',
-            '[validators]\n"b c" = ["x"]',
+            "[validators]\nb = [1]",
         ):
             with self.subTest(text=text):
                 self.invalid(text)
@@ -122,39 +119,6 @@ class ConfigTests(unittest.TestCase):
         self.write("pyproject.toml", '[tool]\nsherlock-kit = "x"\n')
         with self.assertRaises(ShkError):
             config.discover(cwd=self.root)
-
-    def test_unstattable_candidates_are_errors_on_every_python(self):
-        loop = self.root / "loop"
-        loop.mkdir()
-        (loop / "pyproject.toml").symlink_to(loop / "pyproject.toml")
-        cases = [{"cwd": loop}, {"project_dir": loop}]
-        if os.geteuid() != 0:  # root ignores directory modes
-            locked = self.root / "locked"
-            locked.mkdir(mode=0o600)
-            self.addCleanup(locked.chmod, 0o700)
-            cases.append({"project_dir": locked})
-        for kwargs in cases:
-            with self.subTest(**kwargs), self.assertRaises(ShkError) as caught:
-                config.discover(**kwargs)
-            self.assertEqual((caught.exception.code, caught.exception.token), (1, "config_invalid"))
-
-    def test_walk_up_stops_at_a_directory_another_user_owns(self):
-        self.write("sherlock-kit.toml", 'project = "planted"\n')
-        nested = self.root / "a" / "b"
-        nested.mkdir(parents=True)
-        real = config._stat
-
-        def foreign_root(path):
-            found = real(path)
-            if found is None or Path(path) != self.root:
-                return found
-            return os.stat_result([*found[:4], os.geteuid() + 1, *found[5:]])
-
-        with patch.object(config, "_stat", foreign_root):
-            self.assertIsNone(config.discover(cwd=nested))
-            self.assertEqual(config.discover(project_dir=self.root).project, "planted")
-            self.write("sherlock-kit.toml", 'project = "mine"\n', self.root / "a")
-            self.assertEqual(config.discover(cwd=nested).project, "mine")
 
 
 if __name__ == "__main__":

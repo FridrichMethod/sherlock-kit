@@ -106,7 +106,7 @@ shk manifest DIR
 
 `[tool.sherlock-kit]` in `pyproject.toml`, else the top level of
 `sherlock-kit.toml`, found with `--project-dir DIR` (exactly that directory) or
-by walking up from the working directory until a directory you do not own.
+in the nearest directory at or above the working directory that has one.
 Unknown keys are errors; nothing secret belongs here.
 
 | Key | Default | Used by |

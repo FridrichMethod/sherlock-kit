@@ -46,12 +46,11 @@ empty). The facts live where they already are:
 ## Configuration
 
 `--project-dir DIR` reads exactly DIR. Otherwise discovery walks up from the
-working directory and stops below the first directory not owned by the
-effective user (as Git's `safe.directory`), so a foreign tree can never inject a
-configuration. In each directory `pyproject.toml` with `[tool.sherlock-kit]`
-wins over `sherlock-kit.toml`. Unknown keys and any stat error other than
-"missing" are `config_invalid`. Remote paths are absolute and contain no `..`;
-the remote user comes from `id -un` inside each remote program.
+working directory to the first directory with a configuration; in each directory
+`pyproject.toml` with `[tool.sherlock-kit]` wins over `sherlock-kit.toml`.
+Unknown keys, bad values and unreadable files are `config_invalid`. Remote paths
+are absolute and contain no `..`; the remote user comes from `id -un` inside each
+remote program.
 
 ## Executors and the master preflight
 

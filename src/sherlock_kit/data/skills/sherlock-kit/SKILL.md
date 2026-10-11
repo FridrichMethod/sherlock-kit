@@ -28,7 +28,7 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 
 ## Configuration
 
-`shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or top-level keys in `sherlock-kit.toml`) at or above the working directory, stopping at a directory you do not own; otherwise pass `--project-dir DIR`. Keys: `project` (required to submit), `remote_root` (absolute Sherlock path, required to submit, push and pull), optional `control_host`, `data_host`, timeouts and `[tool.sherlock-kit.validators]`. Unknown keys are errors. Never put secrets there.
+`shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or top-level keys in `sherlock-kit.toml`) in the nearest directory at or above the working directory that has one; from elsewhere pass `--project-dir DIR`. Keys: `project` (required to submit), `remote_root` (absolute Sherlock path, required to submit, push and pull), optional `control_host`, `data_host`, timeouts and `[tool.sherlock-kit.validators]`. Unknown keys are errors. Never put secrets there.
 
 ## Submit
 
