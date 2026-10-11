@@ -21,6 +21,7 @@ import sherlock_kit  # noqa: E402
 from sherlock_kit import cli  # noqa: E402
 from sherlock_kit.errors import Outcome, ShkError  # noqa: E402
 
+CHECK = ["-O", "check", "-oBatchMode=yes"]
 VERSION = r"sherlock-kit 0\.4\.0 \((git [0-9a-f]+|editable .+|submodule .+|source .+|unknown)\)\n\Z"
 
 
@@ -173,15 +174,29 @@ class DoctorTests(TempCase):
         return code, json.loads(out)
 
     def test_local_doctor_only_queries_master_sockets(self):
-        code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="none",
-                                   SHERLOCK_KIT_STATE_ROOT="/old")
-        self.assertEqual(code, 0)
-        self.assertEqual(report["masters"], {"control": "none", "data": "none"})
+        checks = [[*CHECK, "sherlock-plain"], [*CHECK, "sherlock-dtn"]]
+        code, report = self.doctor("--executor", "ssh", "doctor", SHERLOCK_KIT_STATE_ROOT="/old")
+        self.assertEqual((code, report["ok"], report["problems"]), (0, True, []))
+        self.assertEqual(report["masters"], {"control": "running", "data": "running"})
+        self.assertEqual(self.fake.calls(), checks)
         self.assertTrue(any("SHERLOCK_KIT_STATE_ROOT" in w for w in report["warnings"]))
-        self.assertTrue(any("ssh sherlock-plain" in w for w in report["warnings"]))
-        calls = self.fake.calls()
-        self.assertEqual([c[:2] for c in calls], [["-O", "check"], ["-O", "check"]])
         self.assertRegex(report["version"] + "\n", VERSION)
+        code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="none")
+        self.assertEqual((code, report["ok"]), (4, False))
+        self.assertEqual(report["masters"], {"control": "none", "data": "none"})
+        self.assertTrue(any("ssh sherlock-plain" in p for p in report["problems"]))
+        self.assertTrue(any("ssh -fN sherlock-dtn" in w for w in report["warnings"]))
+        self.assertEqual(self.fake.calls(), checks)
+
+    def test_doctor_master_states(self):
+        code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="none",
+                                   FAKE_SSH_MASTER_HOSTS="sherlock-dtn")
+        self.assertEqual((code, report["masters"]), (0, {"control": "running", "data": "none"}))
+        self.assertTrue(any("ssh -fN sherlock-dtn" in w for w in report["warnings"]))
+        code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="unconfigured")
+        self.assertEqual((code, report["masters"]["control"]), (4, "not_configured"))
+        self.assertTrue(any("No ControlPath specified" in p and "ControlPath ~/.ssh/%C for sherlock-plain in "
+                            "~/.ssh/config" in p for p in report["problems"]))
 
     def test_remote_doctor(self):
         code, report = self.doctor("--executor", "ssh", "doctor", "--remote")

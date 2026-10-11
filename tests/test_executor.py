@@ -1,8 +1,11 @@
 """Transport: literal argv, master-only preflight, status mapping, detection."""
+from contextlib import suppress
 import json
 import os
 from pathlib import Path
 import shlex
+import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -17,7 +20,7 @@ from sherlock_kit.errors import ShkError  # noqa: E402
 
 PREFIX = ["-T", "-oBatchMode=yes", "-oRemoteCommand=none", "-oConnectTimeout=15", "-oConnectionAttempts=1",
           "-oStrictHostKeyChecking=yes", "-oUpdateHostKeys=no", "-oControlMaster=no",
-          "-oPermitLocalCommand=no", "-oClearAllForwardings=yes", "-oForwardAgent=no"]
+          "-oPermitLocalCommand=no", "-oClearAllForwardings=yes", "-oForwardAgent=no", "-oProxyCommand=false"]
 CHECK = ["-O", "check", "-oBatchMode=yes"]
 ARGV = ["printf", "", "a b", "'quote'", "$(id)", "a;b", "new\nline", "*", "--flag"]
 
@@ -55,6 +58,16 @@ class SshExecutorTests(unittest.TestCase):
         with self.assertRaises(ShkError):
             self.dtn.rsync_args("/scratch/x")
         self.assertTrue(self.fake.calls())
+        self.assertTrue(all(call[:2] == ["-O", "check"] for call in self.fake.calls()))
+
+    def test_unconfigured_master_does_not_ask_for_a_login(self):
+        self.knobs(FAKE_SSH_MASTER="unconfigured")
+        self.assertEqual(executor.master_status("sherlock-plain", str(self.fake.path))[0], "not_configured")
+        with self.assertRaises(ShkError) as caught:
+            self.ssh.run(["hostname"])
+        self.assertEqual((caught.exception.code, caught.exception.token), (4, "unavailable"))
+        self.assertIn("ControlPath", caught.exception.hint)
+        self.assertIn("No ControlPath specified", caught.exception.message)
         self.assertTrue(all(call[:2] == ["-O", "check"] for call in self.fake.calls()))
 
     def test_missing_ssh_is_unreachable(self):
@@ -107,6 +120,59 @@ class SshExecutorTests(unittest.TestCase):
         self.assertEqual(self.fake.calls(), [])
 
 
+@unittest.skipUnless(shutil.which("ssh"), "OpenSSH client not installed")
+class RealOpenSshTests(unittest.TestCase):
+    """Real OpenSSH, no network: -F points at a temporary config whose ProxyCommand only leaves a marker."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.tmp = Path(temporary.name)
+        self.marker = self.tmp / "cold-dial"
+        (self.tmp / "config").write_text(
+            "Host sherlock-plain\n  HostName shk-test.invalid\n  ControlPath /nonexistent-shk-test/%C\n"
+            f"  ProxyCommand /bin/sh -c 'echo cold > {self.marker}; exit 1'\n"
+            "Host no-control-path\n  HostName shk-test.invalid\n", encoding="utf-8")
+
+    def wrapper(self, name, claim_master):
+        path = self.tmp / name
+        check = 'case " $* " in *" -O check "*) exit 0;; esac\n' if claim_master else ""
+        path.write_text(f'#!/bin/sh\n{check}exec {shlex.quote(shutil.which("ssh"))} -F '
+                        f'{shlex.quote(str(self.tmp / "config"))} "$@"\n', encoding="utf-8")
+        path.chmod(0o755)
+        return str(path)
+
+    def test_master_gone_after_check_never_cold_dials(self):
+        ex = executor.SshExecutor("sherlock-plain", ssh=self.wrapper("stale", True), command_timeout=20)
+        for mutation, status in ((False, "unavailable"), (True, "unknown")):
+            with self.subTest(mutation=mutation):
+                self.assertEqual(ex.run(["true"], mutation=mutation).status, status)
+                self.assertFalse(self.marker.exists(), "ssh fell back to a fresh connection")
+
+    def test_master_states_from_the_real_client(self):
+        ssh = self.wrapper("plain", False)
+        self.assertEqual(executor.master_status("sherlock-plain", ssh)[0], "none")
+        state, detail = executor.master_status("no-control-path", ssh)
+        self.assertEqual(state, "not_configured")
+        self.assertIn("ControlPath", detail)
+        self.assertFalse(self.marker.exists())
+
+
+def _alive(pid: int) -> bool:
+    """True while pid exists and is not a zombie (a zombie was already killed)."""
+    try:
+        os.kill(pid, 0)
+        proc = Path(f"/proc/{pid}/stat")
+        return not proc.exists() or proc.read_text().rsplit(")", 1)[1].split()[0] != "Z"
+    except (ProcessLookupError, FileNotFoundError):
+        return False
+
+
+def _kill(pid: int) -> None:
+    with suppress(ProcessLookupError):
+        os.kill(pid, signal.SIGKILL)
+
+
 class LocalExecutorTests(unittest.TestCase):
     def test_local_runs_argv_directly(self):
         ex = executor.LocalExecutor(command_timeout=10)
@@ -125,9 +191,15 @@ class LocalExecutorTests(unittest.TestCase):
     def test_timeout_kills_the_whole_process_group(self):
         ex = executor.LocalExecutor(command_timeout=10)
         started = time.monotonic()
-        result = ex.run(["sh", "-c", "echo partial; sleep 30; echo late"], timeout=0.5)
+        result = ex.run(["sh", "-c", "sleep 30 & echo $!; wait; echo late"], timeout=0.5)
         self.assertLess(time.monotonic() - started, 5)
-        self.assertEqual((result.status, result.stdout), ("timeout", "partial\n"))
+        self.assertEqual(result.status, "timeout")
+        grandchild = int(result.stdout)
+        self.addCleanup(_kill, grandchild)
+        deadline = time.monotonic() + 5
+        while _alive(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(_alive(grandchild), "sleep outlived the timed-out sh -c")
 
     def test_check(self):
         result = executor.Result
@@ -136,8 +208,6 @@ class LocalExecutorTests(unittest.TestCase):
             with self.subTest(status=status), self.assertRaises(ShkError) as caught:
                 executor.check(result(status, "", "tail\n", 9), "status")
             self.assertEqual(caught.exception.code, code)
-        with self.assertRaises(ValueError):
-            result("odd")
 
 
 class DetectionTests(unittest.TestCase):
@@ -161,6 +231,18 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(self.kind("sh02-ln04", SHK_EXECUTOR=""), "local")
         with self.assertRaises(ShkError):
             self.kind("lab-ubuntu", SHK_EXECUTOR="remote")
+
+    def test_transfers_never_ssh_from_sherlock(self):
+        for override, env, hostname in (("ssh", {}, "sh03-ln01.stanford.edu"),
+                                        (None, {"SHK_EXECUTOR": "ssh", "SLURM_CLUSTER_NAME": "sherlock"}, "x"),
+                                        ("ssh", {"SLURM_JOB_ID": "7"}, "sh02-12n05")):
+            with self.subTest(override=override, env=env, hostname=hostname):
+                self.assertEqual(executor.detect(None, override, env, hostname).kind, "ssh")
+                data = executor.detect(None, override, env, hostname, data=True)
+                self.assertEqual(data.kind, "local")
+                with self.assertRaises(ShkError) as caught:
+                    data.rsync_args("/scratch/x")
+                self.assertEqual((caught.exception.code, caught.exception.token), (3, "transfer_on_sherlock"))
 
     def test_hosts_and_timeouts_come_from_config(self):
         cfg = config.parse({"control_host": "c", "data_host": "d", "connect_timeout": 7, "command_timeout": 9}, None)

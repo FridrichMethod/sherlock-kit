@@ -1,11 +1,9 @@
-"""`shk doctor [--remote]`: read-only diagnostics.
+"""`shk doctor [--remote]`: read-only checks; without --remote nothing is dialled.
 
-Without --remote nothing is dialled: Python, ssh and rsync on PATH, config,
-executor detection, leftover SHERLOCK_KIT_* variables, and `ssh -O check` for the
-control and data hosts (local control-socket queries). --remote adds ONE bounded
-read-only program (data/remote/doctor.sh: uname -n, id -un, command -v for the
-Slurm tools and sha256sum, /etc/agents/AGENTS.md readable) on the control host or,
-on Sherlock, locally. Exit 0 healthy, 1 local or remote problem, 4 unreachable.
+Python, ssh/rsync, config, executor, leftover SHERLOCK_KIT_* variables and `ssh -O check`
+of both hosts; --remote adds data/remote/doctor.sh (uname -n, id -un, Slurm tools,
+sha256sum, /etc/agents/AGENTS.md). Exit 0 healthy, 1 problem, 4 unreachable (also: no
+usable control master with the ssh executor; a missing data master is a warning).
 """
 from __future__ import annotations
 
@@ -37,13 +35,14 @@ def _config(ctx, problems):
                    "remote_root": found.remote_root}
 
 
-def _masters(found, warnings) -> dict:
+def _masters(found, problems, warnings) -> dict:
     states = {}
-    for role, host, login in (("control", (found or DEFAULTS).control_host, "ssh {}"),
-                              ("data", (found or DEFAULTS).data_host, "ssh -fN {}")):
-        states[role] = executors.master_status(host)
+    for role, host, sink in (("control", (found or DEFAULTS).control_host, problems),
+                             ("data", (found or DEFAULTS).data_host, warnings)):
+        states[role], detail = executors.master_status(host)
         if states[role] != "running":
-            warnings.append(f"no SSH master for {host} ({role}); ask the user to run: {login.format(host)}")
+            hint = executors.master_hint(states[role], host, data=role == "data")
+            sink.append(f"no usable SSH master for {host} ({role}, {states[role]}: {detail}); ask the user to: {hint}")
     return states
 
 
@@ -80,12 +79,11 @@ def handle(args, ctx) -> Outcome:
     leftovers = sorted(name for name in ctx.env if name.startswith("SHERLOCK_KIT_"))
     if leftovers:
         warnings.append(f"obsolete 0.3 variables set: {', '.join(leftovers)}; remove them from profiles/launchers")
-    if report["executor"] == "ssh":
-        if report["tools"]["ssh"] is None:
-            problems.append("ssh is not on PATH")
-        report["masters"] = _masters(found, warnings)
-    code = EXIT_OK
+    if report["executor"] == "ssh":  # a missing ssh shows up as the ssh_missing master state
+        report["masters"] = _masters(found, problems, warnings)
+    code = EXIT_UNREACHABLE if report["masters"].get("control", "running") != "running" else EXIT_OK
     if args.remote and report["executor"]:
-        report["remote"], code = _remote(ctx, problems, warnings)
+        report["remote"], remote_code = _remote(ctx, problems, warnings)
+        code = code or remote_code
     code = code or (EXIT_LOCAL if problems else EXIT_OK)
     return Outcome({"ok": code == EXIT_OK, **report, "problems": problems, "warnings": warnings}, code)

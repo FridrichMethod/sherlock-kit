@@ -4,7 +4,9 @@
 Tests put a wrapper named ``ssh`` first on PATH (``fakes.install_fake_ssh``).
 Each invocation appends its argv[1:] as one JSON line to $FAKE_SSH_RECORD.
 ``-O check`` emulates the local control-socket query: a live master unless
-$FAKE_SSH_MASTER=none. Any other invocation is a dial: the first non-option
+$FAKE_SSH_MASTER is ``none`` (no socket) or ``unconfigured`` (no ControlPath),
+for every host or only those in $FAKE_SSH_MASTER_HOSTS (comma-separated).
+Any other invocation is a dial: the first non-option
 argument is the host and the rest, joined by spaces as real ssh does, is the
 remote command. $FAKE_SSH_MODE selects the dial behaviour:
 
@@ -40,8 +42,13 @@ def split(args):
 def control(args):
     if args[args.index("-O") + 1] != "check":
         return 0
-    if os.environ.get("FAKE_SSH_MASTER") == "none":
+    hosts = os.environ.get("FAKE_SSH_MASTER_HOSTS")
+    state = os.environ.get("FAKE_SSH_MASTER") if not hosts or args[-1] in hosts.split(",") else None
+    if state == "none":
         print("Control socket connect(/synthetic/socket): No such file or directory", file=sys.stderr)
+        return 255
+    if state == "unconfigured":
+        print('No ControlPath specified for "-O" command', file=sys.stderr)
         return 255
     print("Master running (pid=4242)", file=sys.stderr)
     return 0
