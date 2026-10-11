@@ -1,11 +1,9 @@
 """sherlock-kit: submit and track Slurm jobs and move data on Sherlock (stdlib only).
 
-__version__ is the version of the imported code: a source tree's pyproject.toml
-(checkout, submodule, bin/shk, PYTHONPATH=src, editable install) wins over
-importlib.metadata, so another sherlock-kit in the active environment cannot
-mislabel it; else "0+unknown". version_line() is `shk --version`:
-"sherlock-kit <version> (git <commit> | editable <path> | submodule <path> |
-source <path> | unknown)". Only files are read: no subprocess, nothing written.
+__version__ comes from a source tree's pyproject.toml (checkout, submodule, bin/shk,
+editable), which wins over importlib.metadata so another installed copy cannot mislabel
+it, else "0+unknown". version_line() is `shk --version`: "sherlock-kit <version> (git
+<commit> | editable <path> | submodule <path> | source <path> | unknown)". Reads files only.
 """
 from __future__ import annotations
 

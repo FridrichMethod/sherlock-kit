@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# Global shk (contract C4): stdlib only, follows symlink chains, puts <repo>/src first
-# on sys.path and writes no bytecode, so a dotfiles submodule stays clean. Keep this
-# file parseable by old Pythons so the version check below can report itself.
+# Global shk (contract C4): stdlib only, follows symlinks, <repo>/src first on sys.path, no
+# bytecode (a dotfiles submodule stays clean). Keep it parseable by old Pythons for the check.
 import os
 import sys
 

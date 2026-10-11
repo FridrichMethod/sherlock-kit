@@ -1,12 +1,12 @@
 """Packaged partition profiles: data/partitions.json, schema_version 1 (frozen 0.4.0).
 
-A profile is exactly preemptible, requeue, borrowed, gpus_allowed (booleans) and
-courtesy (one line, may be empty). Being listed is the authorization fact. No caps
-and no clock gate: the possu window and btrippe budget are courtesy text.
+A profile is exactly preemptible, requeue, borrowed, gpus_allowed (booleans) and a
+one-line courtesy text (may be empty). Listing is the authorization fact; no caps and no
+clock gate (the possu window and btrippe budget are courtesy text only).
 profiles() -> read-only {name: Profile} in table order; profile(name) raises
-ShkError(3, "unknown_partition") when unlisted (profiles().get(name) does not);
-parse(text) raises ShkError(1, "partitions_invalid"); markdown() is the
-"### Partition profiles" block pasted byte-identically into both rules files.
+ShkError(3, "unknown_partition") when unlisted (profiles().get does not); parse(text)
+raises ShkError(1, "partitions_invalid"); markdown() is the "### Partition profiles"
+block pasted byte-identically into both rules files.
 """
 from __future__ import annotations
 
