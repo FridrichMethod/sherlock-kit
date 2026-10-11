@@ -144,7 +144,30 @@ class InstallSkillTests(InstallCase):
         self.assertEqual(self.skill("--client", "codex")[1]["notices"], [])
         self.assertEqual(inventory(self.home), before)
 
-    def test_refuses_home_missing_projects_and_symlinked_targets(self):
+    def test_codex_gets_a_hint_instead_of_a_claude_rules_file(self):
+        code, report = self.skill("--client", "codex", "--rules", "cluster")
+        self.assertEqual((code, list(report["files"])), (0, [COPIES["codex"]]))
+        self.assertFalse((self.project / RULES_COPY).exists())
+        hints = [n for n in report["notices"] if "AGENTS.md" in n]
+        self.assertEqual(len(hints), 1)
+        self.assertIn("shk rules cluster", hints[0])
+        code, report = self.skill("--rules", "cluster")
+        self.assertEqual((code, report["files"][RULES_COPY]), (0, "written"))
+        self.assertEqual(len([n for n in report["notices"] if "AGENTS.md" in n]), 1)
+        self.assertEqual(self.skill("--client", "claude", "--rules", "cluster")[1]["notices"], [])
+        self.assertEqual(self.skill("--client", "codex")[1]["notices"], [])
+
+    def test_links_inside_the_project_are_followed(self):
+        (self.project / ".claude/skills").mkdir(parents=True)
+        (self.project / ".agents").mkdir()
+        (self.project / ".agents/skills").symlink_to("../.claude/skills", target_is_directory=True)
+        code, report = self.skill()
+        self.assertEqual((code, report["files"]), (0, {rel: "written" for rel in COPIES.values()}))
+        self.assertTrue((self.project / ".agents/skills").is_symlink())
+        self.assertIn(MARKER, (self.project / COPIES["claude"]).read_text(encoding="utf-8"))
+        self.assertEqual(self.skill("--check")[0], 0)
+
+    def test_refuses_home_missing_projects_and_targets_outside_the_project(self):
         for project in (self.home, self.tmp / "absent"):
             with self.subTest(project=project):
                 code, report = self.shk("install-skill", "--project", str(project))
@@ -153,8 +176,11 @@ class InstallSkillTests(InstallCase):
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
         (self.project / ".claude").symlink_to(elsewhere, target_is_directory=True)
-        code, report = self.skill("--client", "claude")
-        self.assertEqual((code, report["error"]), (1, "symlinked_target"))
+        for extra in ((), ("--check",)):
+            with self.subTest(extra=extra):
+                code, report = self.skill("--client", "claude", *extra)
+                self.assertEqual((code, report["error"]), (1, "target_outside_project"))
+                self.assertIn(str(elsewhere), report["message"])
         self.assertEqual(list(elsewhere.iterdir()), [])
 
 
