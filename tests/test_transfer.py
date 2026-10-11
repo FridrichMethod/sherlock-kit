@@ -137,6 +137,10 @@ class PullTests(TransferCase):
                          [".keep", ".run1.shk-lock", ".run1.shk-receipt.json", "run1"])
         self.assertEqual(self.shk("pull", str(self.remote), str(self.dest))[1]["action"], "already_present")
         self.assertEqual(self.fake.calls()[0], DTN_CHECK)
+        dials = [call[call.index("-oProxyCommand=false") + 1:] for call in self.fake.calls() if "-O" not in call]
+        self.assertEqual([(dial[0], dial[1].split()[0]) for dial in dials],  # manifest.sh, rsync, re-read, rerun
+                         [("sherlock-plain", "sh"), ("sherlock-dtn", "rsync"), ("sherlock-plain", "sh"),
+                          ("sherlock-plain", "sh")])
 
     def test_unusable_extra_or_missing_remote_files_are_refused(self):
         for remote, error in ((self.root / "absent", "no directory"), (self.root, "no manifest")):

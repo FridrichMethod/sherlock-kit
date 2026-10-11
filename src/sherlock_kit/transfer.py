@@ -3,7 +3,8 @@
 push: rsync -rlt LOCAL/ to data_host:REMOTE/ (below remote_root unless --anywhere), never deleting. pull (flock
 .NAME.shk-lock): SHA256SUMS via manifest.sh (it must list every regular file), rsync into the resumable 0700 stage
 .NAME.shk-stage, verify, re-read, validators[NAME] + [stage] (cwd project root, exit 0), rename onto LOCAL (--replace
-keeps the old one as .NAME.shk-old-*), .NAME.shk-receipt.json. Add no rsync options: the DTN refuses some forms.
+keeps the old one as .NAME.shk-old-*), .NAME.shk-receipt.json. The DTN refuses rsync forms that change its remote
+command line: add no options (--files-from=- sends the same command as 0.3.0's DTN-proven list file).
 """
 from __future__ import annotations
 
@@ -20,10 +21,9 @@ from sherlock_kit import __version__, executor
 from sherlock_kit.config import DEFAULTS
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNREACHABLE, Outcome, ShkError
 
-LINE = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
-MAX_FILES, MAX_BYTES = 10_000, 4 << 20
+LINE, MAX_FILES, MAX_BYTES = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)"), 10_000, 4 << 20
 PUSH = ("rsync", "-rlt", "--protect-args", "--partial")
-PULL = ("rsync", "-r", "--protect-args", "--checksum", "--partial", "--from0", "--files-from=-")  # DTN-proven
+PULL = ("rsync", "-r", "--protect-args", "--checksum", "--partial", "--from0", "--files-from=-")
 _fail = partial(ShkError, EXIT_LOCAL)  # _fail(token, message, hint=None)
 
 
@@ -65,9 +65,8 @@ def _walk(root: Path, prune: bool, rel: str = ""):
 
 
 def _verify(stage: Path, entries: dict) -> int:
-    files, other = set(), set()
-    for path, entry in _walk(stage, False):
-        (files if entry.is_file(follow_symlinks=False) else other).add(path)
+    walked = [(path, entry.is_file(follow_symlinks=False)) for path, entry in _walk(stage, False)]
+    files, other = {path for path, regular in walked if regular}, {path for path, regular in walked if not regular}
     odd = sorted(entries.keys() ^ files) + sorted(other - _parents(entries))
     odd = odd or [name for name, digest in entries.items() if _digest(stage / name) != digest]
     if odd:
@@ -109,10 +108,11 @@ def push(args, ctx) -> Outcome:
 def _read_manifest(control, remote: str) -> tuple[str, int]:
     lines = executor.check(executor.run_program(control, "manifest", [remote]), "read SHA256SUMS").stdout.split("\n")
     fields = dict(line.split(" ", 1) for line in lines if re.match(r"SHK_[A-Z]+ ", line))
-    if "SHK_ERROR" in fields or "SHK_END" not in lines or not fields.get("SHK_COUNT", "").isdigit():
-        raise _fail("manifest_unavailable" if "SHK_ERROR" in fields else "malformed_reply", f"{remote}/SHA256SUMS: "
-                    f"{fields.get('SHK_ERROR', 'incomplete reply').replace('_', ' ')}", "write it last in the job: "
-                    "shk manifest DIR (or the sha256sum one-liner)")
+    error = fields.get("SHK_ERROR")
+    if error or "SHK_END" not in lines or not fields.get("SHK_COUNT", "").isdigit():
+        raise _fail("manifest_unavailable" if error else "malformed_reply", f"{remote}/SHA256SUMS: "
+                    f"{(error or 'incomplete reply').replace('_', ' ')}", "write it last in the job: shk manifest DIR "
+                    "(or the sha256sum one-liner)" if error else "run shk doctor --remote")
     return "".join(line[6:] + "\n" for line in lines if line.startswith("SHK_M|")), int(fields["SHK_COUNT"])
 
 
