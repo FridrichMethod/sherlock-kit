@@ -4,6 +4,7 @@ import io
 import json
 import os
 import pwd
+import shlex
 import shutil
 import subprocess
 import sys
@@ -162,7 +163,11 @@ class SubmitFlows(Flow):
         self.knobs(FAKE_SBATCH_UNPARSED="1")
         code, out = self.submit(task="c")
         self.assertEqual((code, out["action"], out["ok"]), (5, "unknown", False))
-        self.assertEqual(out["next"], f"shk status --task c --campaign default (not before {NEXT})")
+        self.assertEqual(
+            out["next"],
+            f"shk --project-dir {self.tmp} --executor local status "
+            f"--task c --campaign default (not before {NEXT})",
+        )
         self.assertEqual((self.entry("c")["state"], self.entry("c")["spec_files"]), ("live", 1))
         self.config(command_timeout=3)
         self.knobs(FAKE_SBATCH_UNPARSED="", FAKE_SBATCH_HANG="30", FAKE_SBATCH_CLUSTER="sherlock")
@@ -172,6 +177,67 @@ class SubmitFlows(Flow):
         self.knobs(FAKE_SBATCH_HANG="")
         self.assertEqual(self.entry("slow task")["state"], "live")
         self.assertEqual(self.submit(task="cluster")[1]["job_id"], "1003")
+
+    def test_unknown_recovery_keeps_project_and_executor_outside_the_project(self):
+        project = self.tmp / "project with spaces"
+        project.mkdir()
+        (self.tmp / "sherlock-kit.toml").replace(project / "sherlock-kit.toml")
+        other = self.tmp / "other"
+        other.mkdir()
+        (other / "sherlock-kit.toml").write_text('project = "other"\n')
+        fake = install_fake_ssh(self.tmp)
+        self.knobs(**fake.env(FAKE_SSH_MASTER="none"), FAKE_SBATCH_UNPARSED="1")
+        env = {**os.environ, "PYTHONPATH": str(SRC), "SHK_EXECUTOR": "ssh"}
+        command = [sys.executable, "-B", "-m", "sherlock_kit"]
+        run_dir = str(self.remote / "custom")
+        submitted = subprocess.run(
+            [
+                *command,
+                "--project-dir",
+                str(project),
+                "--executor",
+                "local",
+                "submit",
+                "--task",
+                "slow task",
+                "--campaign",
+                "recovery check",
+                "--script",
+                str(self.tmp / "job.sh"),
+                "--partition",
+                "normal",
+                "--cpus",
+                "1",
+                "--mem",
+                "2G",
+                "--time",
+                "20m",
+                "--run-dir",
+                run_dir,
+            ],
+            env=env,
+            cwd=other,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(submitted.returncode, 5, submitted.stderr)
+        unknown = json.loads(submitted.stdout)
+        argv = shlex.split(unknown["next"].rsplit(" (not before ", 1)[0])
+        recovered = subprocess.run(
+            [*command, *argv[1:]],
+            env=env,
+            cwd=other,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(recovered.returncode, 0, recovered.stdout + recovered.stderr)
+        report = json.loads(recovered.stdout)
+        entry = report["names"][0]
+        self.assertEqual((report["executor"], entry["name"]), ("local", unknown["name"]))
+        self.assertEqual((entry["state"], entry["spec_files"]), ("live", 1))
+        self.assertEqual(fake.calls(), [])
 
     def test_remote_guards_refuse_before_sbatch(self):
         run, live = self.tmp / "run", self.slurm.add("shk.demo.t.0123456789", "RUNNING")
@@ -389,7 +455,8 @@ class CannedReplyFlows(Flow):
                     "action": "unknown",
                     "name": spec.job_name("demo", "default", "train-a"),
                     "detail": "0 terminal markers",
-                    "next": f"shk status --task train-a --campaign default (not before {NEXT})",
+                    "next": f"shk --project-dir {self.tmp} --executor local status "
+                    f"--task train-a --campaign default (not before {NEXT})",
                 },
             ),
         )

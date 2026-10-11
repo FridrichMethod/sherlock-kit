@@ -20,6 +20,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
 from sherlock_kit import executor as executors
@@ -674,13 +675,24 @@ def _mutate(
 def _unknown(ctx: Context, name: str, selector: str, detail: str) -> Outcome:
     """Exit 5: the mutation may or may not have happened; only a later status can tell."""
     later = _iso(ctx.clock() + CADENCE)
+    project_dir = ctx.config.root if ctx.config else None
+    if project_dir is None:
+        project_dir = Path(ctx.project_dir or ctx.cwd or Path.cwd()).expanduser().resolve()
+    command = shlex.join([
+        "shk",
+        "--project-dir",
+        str(project_dir),
+        "--executor",
+        ctx.executor().kind,
+        "status",
+    ])
     return Outcome(
         {
             "ok": False,
             "action": "unknown",
             "name": name,
             "detail": detail,
-            "next": f"shk status {selector} (not before {later})",
+            "next": f"{command} {selector} (not before {later})",
         },
         EXIT_UNKNOWN,
     )
