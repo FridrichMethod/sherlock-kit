@@ -1,4 +1,5 @@
 """Transfer: SHA256SUMS manifests, push and pull with real rsync through fake_ssh exec mode."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 import hashlib
 import io
@@ -9,9 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import threading
 import time
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -23,7 +22,7 @@ from sherlock_kit.errors import ShkError  # noqa: E402
 
 H, G = "ab" * 32, "cd" * 32
 ONE_LINER = 'cd "$1" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS'
-VALIDATORS = {"ok": "import pathlib, sys; sys.exit(0 if (pathlib.Path(sys.argv[1]) / 'result.json').is_file() else 3)",
+VALIDATORS = {"ok": "import pathlib, sys; sys.exit(0 if pathlib.Path(sys.argv[1], 'result.json').is_file() else 3)",
               "bad": "import sys; print('science says no', file=sys.stderr); sys.exit(3)",
               "mutate": "import pathlib, sys; (pathlib.Path(sys.argv[1]) / 'extra').write_text('x')"}
 DTN_CHECK = ["-O", "check", "-oBatchMode=yes", "sherlock-dtn"]
@@ -51,11 +50,12 @@ class ManifestParseTests(unittest.TestCase):
                 transfer.parse_manifest(text)
             self.assertEqual((caught.exception.code, caught.exception.token), (1, "manifest_invalid"))
 
-    def test_stderr_tail_is_filtered_redacted_and_bounded(self):
-        secret = "/p/.run1.shk-files-x1"
-        raw = f"{executor.BANNER} first.\nrsync: failed to open files-from file {secret}: \x1b[31mgone\x00\n".encode()
-        self.assertEqual(transfer._tail(raw, (secret,)), "rsync: failed to open files-from file <files-from>: [31mgone")
-        self.assertEqual(transfer._tail(b"x" * 1000 + b"\x7f tail\n"), "x" * 495 + " tail")
+    def test_failure_tail_is_banner_free_printable_and_bounded(self):
+        script = f'echo "{executor.BANNER} x" >&2; printf %s {"0" * 1000} >&2; printf "\\033[31m\\001 tail\\n" >&2'
+        with self.assertRaises(ShkError) as caught:
+            transfer._run(["sh", "-c", script + "; exit 3"], 10)
+        self.assertEqual((caught.exception.code, caught.exception.token), (1, "transfer_failed"))
+        self.assertEqual(caught.exception.message, "rsync exit 3: " + "0" * 491 + "[31m tail")
 
 
 class TransferCase(unittest.TestCase):
@@ -69,7 +69,7 @@ class TransferCase(unittest.TestCase):
         self.addCleanup(environment.stop)
         self.root, self.project = self.tmp / "scratch", self.tmp / "project"
         self.remote = self.root / "run 1"
-        self.write(self.remote, {"result.json": '{"value": 42}\n', "nested/log.txt": "evidence\n", "with space": "s\n"})
+        self.write(self.remote, {"result.json": '{"value": 42}\n', "nested/log.txt": "log\n", "with space": "s\n"})
         self.sums()
         lines = [f"remote_root = {json.dumps(str(self.root))}", "[validators]"]
         lines += [f"{name} = {json.dumps([sys.executable, '-c', code])}" for name, code in VALIDATORS.items()]
@@ -85,11 +85,13 @@ class TransferCase(unittest.TestCase):
     def sums(self) -> None:
         subprocess.run(["sh", "-c", ONE_LINER, "sh", str(self.remote)], check=True)
 
-    def shk(self, *argv, hostname="lab-ubuntu", executor="ssh"):
-        context = cli.Context(project_dir=self.project, executor=executor, env={}, hostname=hostname)
+    def context(self, hostname="lab-ubuntu", executor="ssh"):
+        return cli.Context(project_dir=self.project, executor=executor, env={}, hostname=hostname)
+
+    def shk(self, *argv, **where):
         out = io.StringIO()
         with redirect_stdout(out):
-            code = cli.main(list(argv), modules=[transfer], context=context)
+            code = cli.main(list(argv), modules=[transfer], context=self.context(**where))
         return code, json.loads(out.getvalue())
 
     def pull(self, *extra):
@@ -106,7 +108,7 @@ class TransferCase(unittest.TestCase):
 class ManifestCommandTests(TransferCase):
     def test_round_trip_matches_sha256sum_and_is_deterministic(self):
         bundle = self.tmp / "bundle"
-        self.write(bundle, {"b.txt": "b\n", "a dir/x": "x\n", ".shk-lock": "", ".shk-stage/y": "y", "sub/SHA256SUMS": ""})
+        self.write(bundle, {"b.txt": "b\n", "a dir/x": "x\n", ".shk-lock": "", ".shk-x/y": "", "sub/SHA256SUMS": ""})
         (bundle / "link").symlink_to("b.txt")
         code, body = self.shk("manifest", str(bundle), hostname="sh02-ln04", executor="auto")
         self.assertEqual((code, body["files"], body["skipped"]), (0, 2, ["link"]), body)
@@ -124,19 +126,23 @@ class ManifestCommandTests(TransferCase):
 class PullTests(TransferCase):
     def test_exact_inventory_receipt_and_idempotent_rerun(self):
         code, body = self.pull()
-        self.assertEqual((code, body["action"], body["files"], body["bytes"]), (0, "pulled", 3, 25), body)
+        self.assertEqual((code, body["action"], body["files"], body["bytes"]), (0, "pulled", 3, 20), body)
         expected = tree(self.remote)
         del expected["SHA256SUMS"]
         self.assertEqual(tree(self.dest), expected)
         receipt = json.loads((self.dest.parent / ".run1.shk-receipt.json").read_text())
         digest = hashlib.sha256((self.remote / "SHA256SUMS").read_bytes()).hexdigest()
-        self.assertEqual((receipt["manifest_sha256"], receipt["remote"], receipt["files"]), (digest, str(self.remote), 3))
+        self.assertEqual((receipt["manifest_sha256"], receipt["remote"]), (digest, str(self.remote)))
         self.assertEqual(sorted(p.name for p in self.dest.parent.iterdir()),
                          [".keep", ".run1.shk-lock", ".run1.shk-receipt.json", "run1"])
         self.assertEqual(self.shk("pull", str(self.remote), str(self.dest))[1]["action"], "already_present")
         self.assertEqual(self.fake.calls()[0], DTN_CHECK)
 
-    def test_extra_or_missing_remote_files_are_refused(self):
+    def test_unusable_extra_or_missing_remote_files_are_refused(self):
+        for remote, error in ((self.root / "absent", "no directory"), (self.root, "no manifest")):
+            result = self.shk("pull", str(remote), str(self.dest))
+            self.assert_refused(result, 1, "manifest_unavailable")
+            self.assertTrue(result[1]["message"].endswith(error), result[1])
         (self.remote / "extra").write_text("x")
         self.assert_refused(self.pull(), 1, "manifest_incomplete")
         (self.remote / "nested" / "log.txt").unlink()
@@ -145,24 +151,20 @@ class PullTests(TransferCase):
         self.assertIn("No such file", result[1]["message"])
         self.assertNotIn("Automated tools", result[1]["message"])
 
-    def test_hash_mismatch_never_promotes_and_rerun_resumes(self):
+    def test_hash_mismatch_or_stale_stage_never_promotes_and_the_stage_stays_private(self):
         (self.remote / "result.json").write_text('{"value": 13}\n')
         self.assert_refused(self.pull(), 1, "verify_failed")
         self.assertEqual(self.stage.stat().st_mode & 0o777, 0o700)
         (self.remote / "result.json").write_text('{"value": 42}\n')
-        self.assertEqual(self.pull()[0], 0)
-        self.assertFalse(self.stage.exists())
-
-    def test_stale_stage_entries_are_refused(self):
         self.write(self.stage, {"stale": "x"})
-        self.stage.chmod(0o700)
+        self.stage.chmod(0o755)
         result = self.pull()
         self.assert_refused(result, 1, "verify_failed")
         self.assertIn("rm -r", result[1]["hint"])
-        shutil.rmtree(self.stage)
-        self.stage.mkdir()
-        self.stage.chmod(0o755)
-        self.assert_refused(self.pull(), 1, "stage_invalid")
+        self.assertEqual(self.stage.stat().st_mode & 0o777, 0o700)
+        (self.stage / "stale").unlink()
+        self.assertEqual(self.pull()[0], 0)  # resumes the stage
+        self.assertFalse(self.stage.exists())
 
     def test_validator_gates_promotion(self):
         self.assert_refused(self.pull("--validate", "nope"), 1, "validator_unknown")
@@ -176,12 +178,12 @@ class PullTests(TransferCase):
         self.assertEqual(json.loads((self.dest.parent / ".run1.shk-receipt.json").read_text())["validator"], "ok")
 
     def test_manifest_changed_mid_transfer_never_promotes(self):
-        sums, original = self.remote / "SHA256SUMS", transfer._rsync
+        sums, original = self.remote / "SHA256SUMS", transfer._run
 
         def rsync_then_rewrite(*args, **kwargs):
             original(*args, **kwargs)
             sums.write_text(sums.read_text().replace("  ", " *"))
-        with patch.object(transfer, "_rsync", rsync_then_rewrite):
+        with patch.object(transfer, "_run", rsync_then_rewrite):
             self.assert_refused(self.pull(), 1, "manifest_changed")
         self.assertEqual(self.pull()[0], 0)
 
@@ -205,51 +207,43 @@ class PullTests(TransferCase):
         self.assertEqual((Path(body["replaced"]) / "result.json").read_text(), '{"value": 42}\n')
 
     def test_concurrent_pulls_promote_once(self):
-        args, actions, original = SimpleNamespace(remote=str(self.remote), local=str(self.dest), validate=None,
-                                                  replace=False), [], transfer._rsync
+        args = cli.build_parser([transfer]).parse_args(["pull", str(self.remote), str(self.dest)])
+        original = transfer._run
 
         def slow(*a, **k):
-            time.sleep(0.3)
+            time.sleep(0.3)  # hold the lock while the other pull starts
             original(*a, **k)
-
-        def worker():
-            context = cli.Context(project_dir=self.project, executor="ssh", env={}, hostname="lab-ubuntu")
-            actions.append(transfer.pull(args, context).payload["action"])
-        with patch.object(transfer, "_rsync", slow):
-            threads = [threading.Thread(target=worker) for _ in range(2)]
-            for thread in threads:
-                thread.start()
-            for thread in threads:
-                thread.join(60)
+        with patch.object(transfer, "_run", slow), ThreadPoolExecutor(2) as pool:
+            actions = list(pool.map(lambda _: transfer.pull(args, self.context()).payload["action"], range(2)))
         self.assertEqual(sorted(actions), ["already_present", "pulled"])
 
-    def test_rsync_failure_is_redacted_and_cleans_its_file_list(self):
-        real = executor._spawn
+    def test_rsync_gets_the_list_on_stdin_and_failures_map_to_exit_codes(self):
+        real, lists = executor._spawn, []
 
         def failing(argv, data, timeout):
             if argv[0] != "rsync":
                 return real(argv, data, timeout)
+            lists.append(set(data.split(b"\0")))
             if timeout == 7:
                 raise subprocess.TimeoutExpired(argv, timeout)
-            listed = next(a.split("=", 1)[1] for a in argv if a.startswith("--files-from="))
-            return 12, b"", f"{executor.BANNER}.\nrsync: cannot read {listed}\n".encode()
+            return 12, b"", f"{executor.BANNER}.\nrsync: connection unexpectedly closed\n".encode()
         with patch.object(executor, "_spawn", failing):
             result = self.pull()
             self.assert_refused(result, 4, "transfer_failed")
-            self.assertEqual(result[1]["message"], "rsync exit 12: rsync: cannot read <files-from>")
+            self.assertEqual(result[1]["message"], "rsync exit 12: rsync: connection unexpectedly closed")
             config = self.project / "sherlock-kit.toml"
             config.write_text(config.read_text().replace("[validators]", "transfer_timeout = 7\n[validators]"))
             result = self.pull()
         self.assert_refused(result, 1, "transfer_failed")
-        self.assertIn("transfer_timeout (7 s)", result[1]["message"])
-        self.assertFalse((self.dest.parent / ".run1.shk-files").exists())
+        self.assertEqual(result[1]["message"], "rsync timed out after 7 s")
+        self.assertEqual(lists, [{b"nested/log.txt", b"result.json", b"with space", b""}] * 2)
 
 
 class RefusalAndPushTests(TransferCase):
     def test_refused_on_the_local_executor_and_without_a_master(self):
         argvs = (["pull", str(self.remote), str(self.dest)], ["push", str(self.remote), str(self.root / "copy")])
         for argv in argvs:
-            self.assertEqual(self.shk(*argv, hostname="sh02-ln04", executor="auto")[1]["error"], "transfer_on_sherlock")
+            self.assert_error(self.shk(*argv, hostname="sh02-ln04", executor="auto"), 3, "transfer_on_sherlock")
         self.assertEqual(self.fake.calls(), [])
         os.environ["FAKE_SSH_MASTER"] = "none"
         for argv in argvs:
