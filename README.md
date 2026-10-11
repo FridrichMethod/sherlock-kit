@@ -97,7 +97,9 @@ shk manifest DIR
   exit 5, and the reply's `next` names the `shk status` command and when to run
   it. Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`,
   `--array N%M` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
-  several job ids. `--dry-run` is offline.
+  several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
+  writes the `--dependency` string itself, so a `,` or `?` list is refused.
+  `--dry-run` is offline.
 - The script's leading `#SBATCH` lines may set anything except what `shk` owns
   (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
   `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,

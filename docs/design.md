@@ -107,8 +107,10 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
    `--courtesy-ack`. The denylist follows sbatch's getopt parsing: abbreviated
    long options (`--part`) and short flags bundled after value-less ones
-   (`-Hp`) count. `--constraint`, `--signal` and `--after-ok` (repeatable) go
-   to sbatch unchanged, which checks them itself. Build the sbatch argv
+   (`-Hp`) count. `--constraint` and `--signal` go to sbatch unchanged, which
+   checks them itself; each `--after-ok` value (repeatable) must be one job id,
+   `N` or `N_TASK`, because `shk` joins them into its own `--dependency`
+   string, where a `,` or `?` would add clauses. Build the sbatch argv
    (explicit name, partition, CPUs, memory, minutes, run directory, log paths,
    `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs) and the frozen
    spec. `--dry-run` stops here, with no network at all.

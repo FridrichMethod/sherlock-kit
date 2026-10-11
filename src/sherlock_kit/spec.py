@@ -3,8 +3,10 @@
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
 partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
 the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
-script_unreadable) for bad memory, time or array grammar, an unreadable script or one over
-1 MiB. Values Slurm checks itself (--constraint, --signal, --after-ok) go to sbatch unchanged.
+script_unreadable) for bad memory, time, array or --after-ok grammar, an unreadable script or
+one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm checks them); each
+--after-ok value must be one job id, since shk joins them into its own --dependency string, where
+a ',' or '?' would add clauses.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ MEMORY = re.compile(r"([1-9][0-9]*)([MG])", re.IGNORECASE)
 DURATION = re.compile(r"([1-9][0-9]*)([hm])")
 CLOCK_TIME = re.compile(r"([0-9]+):([0-5][0-9]):([0-5][0-9])")
 ARRAY = re.compile(r"([0-9]+)(?:%([0-9]+))?")
+JOB_ID = re.compile(r"[1-9][0-9]*(?:_[0-9]+)?")  # one --after-ok value: N or N_TASK
 # #SBATCH options that shk sets on the command line or that would bypass the profile.
 DENIED_LONG = (
     "account",
@@ -222,6 +225,17 @@ def read_script(path: str) -> bytes:
     return data
 
 
+def after_ok(values: list[str]) -> tuple[str, ...]:
+    """--after-ok job ids, each one N or N_TASK; shk joins them into afterok:A:B itself."""
+    for value in values:
+        if not JOB_ID.fullmatch(value):
+            raise _invalid(
+                f"--after-ok {value!r}: give one job id (N or N_TASK) per value; "
+                "repeat --after-ok or list several ids after it"
+            )
+    return tuple(values)
+
+
 def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resources:
     """Checked resources; GPUs and requeue follow the profile (requeue defaults to it)."""
     if args.cpus < 1 or args.tasks < 1 or args.gpus < 0:
@@ -246,7 +260,7 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
         array=None if args.array is None else array(args.array),
         constraint=args.constraint,
         signal=args.signal,
-        after_ok=tuple(args.after_ok),
+        after_ok=after_ok(args.after_ok),
     )
 
 
