@@ -108,8 +108,9 @@ class DirectiveTests(Case):
     DENIED = ("-p normal", "--partition=gpu", "--partition gpu", "-pgpu", "-A grp", "--account=grp",
               "-x sh01", "--exclude=sh01", "-G 1", "--gpus=1", "--gpus-per-node=2", "--gres=gpu:1",
               "-a 0-3", "--array=0-3", "-d afterok:1", "--dependency=singleton",
-              "--begin=now+1hour", "-J other", "--job-name=other", "--part=gpu", "-c 2 -p gpu",
-              "-Hp gpu", "'--partition=gpu'", "--comment='unbalanced -p gpu")
+              "--begin=now+1hour", "-b now+1hour", "-bnow", "-Hb now", "-J other",
+              "--job-name=other", "--part=gpu", "-c 2 -p gpu", "-Hp gpu", "'--partition=gpu'",
+              "--comment='unbalanced -p gpu", "hetjob", "packjob")
     ALLOWED = ("#SBATCH --mail-type=END", "#SBATCH -c 2 --mem=8G  # -p gpu is a comment",
                "  #SBATCH -p gpu", "# SBATCH -p gpu", "#SBATCH --gres-flags=enforce-binding",
                "#SBATCH -o out.log", "#SBATCH --comment='x y'", "#SBATCH --exclusive")

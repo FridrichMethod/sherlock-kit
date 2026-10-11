@@ -1,8 +1,8 @@
 """Offline submit checks, the job name, the sbatch argv and the frozen job spec.
 
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
-partition, GPUs or requeue its profile forbids, a denylisted option in the leading #SBATCH
-block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
+partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
+the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
 script_unreadable) for bad grammar, an unreadable script or one over 1 MiB.
 """
 from __future__ import annotations
@@ -40,8 +40,9 @@ OPTION_GRAMMAR = {
 DENIED_LONG = (
     "account", "exclude", "gres", "gpus", "partition", "array", "dependency", "begin", "job-name",
 )
-DENIED_SHORT = "AxGpadJ"
+DENIED_SHORT = "AxGpadbJ"  # -b is --begin
 FLAGS_WITHOUT_VALUE = "HhOQsuvVW"  # sbatch short flags that may be bundled before another one
+HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: one name, many jobs
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,10 @@ def directives(script: bytes) -> list[str]:
 
 
 def denied(word: str) -> bool:
-    """Whether one #SBATCH word sets a denylisted option (-pgpu, -Hp, --part=gpu, --gpus=1)."""
+    """Whether one #SBATCH word sets a denylisted option (-pgpu, -Hp, --part=gpu, --gpus=1) or
+    starts a heterogeneous job component."""
+    if word in HETJOB_SEPARATORS:
+        return True
     if word.startswith("--"):  # getopt_long also accepts unambiguous prefixes such as --part
         option = word[2:].partition("=")[0]
         if not option:
@@ -194,8 +198,9 @@ def read_script(path: str) -> bytes:
     refused = [word for word in directives(data) if denied(word)]
     if refused:
         raise ShkError(EXIT_REFUSED, "sbatch_directive",
-                       f"{path}: #SBATCH {' '.join(refused)} is set by shk",
-                       hint="remove it from the script and use the shk submit command line instead")
+                       f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
+                       hint="remove it from the script and use the shk submit command line instead "
+                       "(heterogeneous jobs are not supported)")
     return data
 
 
