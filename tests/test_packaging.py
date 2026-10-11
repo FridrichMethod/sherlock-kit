@@ -23,8 +23,10 @@ VERSION = "sherlock-kit 0.4.0 "
 
 
 def in_git() -> bool:
-    return shutil.which("git") is not None and subprocess.run(
-        ["git", "-C", str(ROOT), "rev-parse", "--is-inside-work-tree"], capture_output=True).returncode == 0
+    """True when ROOT itself is the top of a git checkout (not, say, an sdist unpacked inside one)."""
+    top = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         check=False) if shutil.which("git") else None
+    return top is not None and top.returncode == 0 and Path(top.stdout.strip()).resolve() == ROOT.resolve()
 
 
 class HeadCase(unittest.TestCase):
