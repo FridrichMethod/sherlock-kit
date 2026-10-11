@@ -18,7 +18,7 @@ These rules apply when an agent here operates Stanford's Sherlock cluster over S
 - `shk` reads `[tool.sherlock-kit]` from the nearest `pyproject.toml` (or `sherlock-kit.toml`) at or above the working directory; from elsewhere pass `--project-dir DIR`.
 
 ### Data
-- Move data with `shk push` and `shk pull` through the DTN (Globus for very large or cross-site data); never run commands on a DTN. `shk pull` needs a `SHA256SUMS` written by the job (`shk manifest DIR`), verifies every file, runs the project's validator with `--validate NAME`, then moves the copy into the project-local destination.
+- Move data with `shk push` and `shk pull` through the DTN (Globus for very large or cross-site data); never run commands on a DTN. `shk pull` needs a `SHA256SUMS` that the job writes over its own output subdirectory (`shk manifest DIR`), verifies every file, runs the project's validator with `--validate NAME`, then moves the copy into the project-local destination. `shk push` keeps local modification times, so inputs that are old here can be purge-eligible on scratch soon after the push: push them shortly before the jobs that read them.
 - Never extend `$SCRATCH` or `$GROUP_SCRATCH` lifetime (touching, rewriting, copy-over, refresh helpers), not even once and whoever asks: the site sanction is termination of the account on the first occurrence. Keep durable copies on `$GROUP_HOME`, Oak or this workstation.
 - Low and Moderate Risk data only; stop and ask when the classification is unclear. Work only with your own or explicitly shared directories and jobs; scheduler visibility is never authorization.
 

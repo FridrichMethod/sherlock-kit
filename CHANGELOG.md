@@ -20,13 +20,13 @@ runs as fixed POSIX `sh` programs over the existing OpenSSH control masters, and
   the old registry.
 - New: `[tool.sherlock-kit]` project configuration in `pyproject.toml` (or
   `sherlock-kit.toml`), found in the nearest directory at or above the working
-  directory;
-  `shk submit` with `--task`, `--resubmit REASON` and `--dry-run`; `shk status`
-  by task, name or `--all` with `next_check_after`; `shk cancel` for one name;
-  `shk push` and `shk pull` with a `SHA256SUMS` manifest (`shk manifest DIR`), an
-  optional project validator and a receipt beside the destination;
-  `shk rules {workstation,cluster}`; `shk install-skill`; `bin/shk` (mode
-  100755), a stdlib-only entry point that dotfiles links from its submodule.
+  directory; `shk submit` with `--task`, `--resubmit REASON` and `--dry-run`;
+  `shk status` by task, name or `--all` with `next_check_after`; `shk cancel`
+  for one name; `shk push` and `shk pull` with a `SHA256SUMS` manifest
+  (`shk manifest DIR`), an optional project validator and a receipt beside the
+  destination; `shk rules {workstation,cluster}`; `shk install-skill`; `bin/shk`
+  (mode 100755), a stdlib-only entry point that dotfiles links from its
+  submodule.
 - Transport: `ssh -O check` before every dial; without a usable master, exit 4
   `auth_required` (open the master) or `unavailable` (fix `~/.ssh/config`, or
   install OpenSSH). Dials are mux-only with `-oProxyCommand=false`; a transport
@@ -36,13 +36,17 @@ runs as fixed POSIX `sh` programs over the existing OpenSSH control masters, and
   borrowed partitions need `--courtesy-ack`, and the possu window and btrippe
   budget are courtesy text. `#SBATCH` lines may set anything except the
   directives `shk` owns (account, exclude, GPUs, partition, array, dependency,
-  begin, job name).
+  begin, job name) or start a heterogeneous job.
 - Rules and skill: `src/sherlock_kit/data/rules/workstation.md` and `cluster.md`,
   rewritten from the Sherlock site files read on 2026-10-10 (purge evasion is
   account termination on the first occurrence; no agent module is named), and
   one `sherlock-kit` skill for Claude Code and Codex.
 - Documentation: `docs/design.md`, `docs/sherlock-policy.md` and
   `docs/validation/observed-slurm.md` replace the 0.3.0 guides.
+- Development: ruff (lint and format), mypy and pre-commit, run in CI; the
+  version is the literal `sherlock_kit.__version__`, read by `pyproject.toml` as
+  its dynamic version (build with `setuptools>=80`); `pip install -e '.[dev]'`
+  installs the tools.
 
 | 0.3.0 | 0.4.0 |
 |---|---|

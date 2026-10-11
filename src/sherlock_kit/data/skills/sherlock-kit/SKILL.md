@@ -42,8 +42,8 @@ shk submit --task train-a --script job.sh --partition normal --cpus 4 --mem 16G 
 - A done or failed task is refused unless `--resubmit "<reason>"` names why it runs again; find the cause of a failure first.
 - Deduplication reads only `squeue` and the last 30 days of `sacct`. A task whose jobs are older than that submits again as new, without `--resubmit`, even when its run directory still exists: check before rerunning old work.
 - Partition, CPUs, memory and walltime are explicit. GPUs only with `--gpus N` on a partition that allows them; `--constraint` instead of excluding nodes. Requeue only on `owners`, whose scripts must checkpoint periodically.
-- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns: account, exclude, GPUs or gres, partition, array, dependency, begin or job name.
-- Chain stages with `--after-ok JOBID` instead of polling. Inside a job script never call `shk submit` or start an agent.
+- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns, in long or short form (`-p`, `-b`, ...): account, exclude, GPUs or gres, partition, array, dependency, begin or job name; heterogeneous jobs (`hetjob`, `packjob`) are refused.
+- Chain stages with `--after-ok JOBID` (repeatable, several ids allowed) instead of polling. Inside a job script never call `shk submit` or start an agent.
 
 ## Arrays
 
@@ -56,7 +56,8 @@ shk status --task train-a
 shk status --all
 ```
 
-- At least 60 s between checks; respect `next_check_after` in every reply. One `shk status --all` (or several `--task` in one call) instead of a loop per task. Never `watch` or poll in a loop.
+- At least 60 s between checks; respect `next_check_after` in every submit, status, cancel and occupancy reply. One `shk status --all` (or several `--task` in one call) instead of a loop per task. Never `watch` or poll in a loop.
+- `--since DAYS` sets the `sacct` window (default 30, 7 with `--all`). With several `--task`, give `--campaign` once for all of them or once per `--task`.
 - States: `new` (no job), `live` (pending, running or completing; throttle-held array tasks count as pending), `done` (all tasks completed), `failed` (finished, at least one task not completed), `stale` (provenance files but no Slurm rows in the window; treated as `new`).
 - `current` describes the newest job of the name (tasks, exit codes, restarts, cost); older jobs are in `history`. An anomaly such as `unexpected_preemption` or `duplicate_live` gives exit 6: stop and report.
 
@@ -67,19 +68,20 @@ shk push data/inputs /scratch/users/USER/project/inputs
 shk pull /scratch/users/USER/project/runs/NAME/out results/NAME --validate bundle
 ```
 
-- `shk push LOCAL REMOTE` copies into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes.
-- `shk pull REMOTE LOCAL` needs `REMOTE/SHA256SUMS`, copies exactly those files into a private stage beside LOCAL, verifies every hash, runs the validator named by `--validate`, then renames the stage onto LOCAL and writes a receipt. An existing LOCAL is kept unless `--replace`; a rerun resumes.
+- `shk push LOCAL REMOTE` copies into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. Pushed files keep their local modification times, so inputs that are old locally can be purge-eligible on scratch soon after the push: push them shortly before the jobs that read them.
+- `shk pull REMOTE LOCAL` needs `REMOTE/SHA256SUMS`, copies exactly those files into a private stage beside LOCAL (`.NAME.shk-stage` for LOCAL `.../NAME`, with `.NAME.shk-lock`), verifies every hash, runs the validator named by `--validate`, then renames the stage onto LOCAL and writes `.NAME.shk-receipt.json`. An existing LOCAL is kept unless `--replace` (the old copy stays as `.NAME.shk-old-<UTC>`); a rerun resumes the stage.
+- The validator is the project's argv from `[tool.sherlock-kit.validators]`; it runs from the project root with the stage directory as its last argument, exit 0 passes, and it must treat the stage as read-only (what it writes is promoted).
 - The job writes the manifest as its last step: `shk manifest DIR` when shk is available there, else `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`. DIR is the job's output directory (for example `out/` under the run directory), never the run directory itself, which holds `.shk/` and the Slurm logs still being written.
 - Never touch or rewrite scratch files to keep them from the 90-day purge; copy what must last to `$GROUP_HOME`, Oak or the workstation.
 
 ## Occupancy and borrowed partitions
 
-- `shk occupancy --partition btrippe` shows who uses a partition now. Run it before every submission to a borrowed partition (`borrowed=yes` in the rules' partition profiles), read the courtesy text, then submit with `--courtesy-ack`.
+- `shk occupancy --partition btrippe` shows who uses a partition now. Run it before every submission to a borrowed partition (`borrowed=yes` in the rules' partition profiles), read the courtesy text, then submit with `--courtesy-ack`. The submit reply repeats the occupancy and courtesy text and warns, without refusing, when others are running there and you already have 2 jobs there or ask for more than 2 h.
 - `btrippe`: about 2 jobs x 2 h while others are active. `possu`: submit only between 00:00 and 07:00 Pacific, a few short jobs. Unlisted partitions are refused; scheduler visibility is never authorization.
 
 ## Cancel
 
-`shk cancel --task train-a` (or `--name NAME`) cancels only the jobs of that one name. Cancel only when the user asks.
+`shk cancel --task train-a` (or `--name NAME`) cancels only the live jobs of that one name and reports their ids and `next_check_after`. Cancel only when the user asks.
 
 ## On Sherlock
 

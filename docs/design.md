@@ -99,28 +99,38 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 
 1. **Offline checks.** The partition is listed in `partitions.json`; GPUs only
    where the profile allows them; requeue only where the profile allows it
-   (today `owners`), else `--no-requeue`; numeric grammar; a script of at most
-   1 MiB whose `#SBATCH` lines do not set a directive `shk` owns (`--account`,
-   `--exclude`, GPUs or `--gres`, `--partition`, `--array`, `--dependency`,
-   `--begin`, `--job-name`); a borrowed partition needs `--courtesy-ack`. Build
-   the sbatch argv (explicit name, partition, CPUs, memory, minutes, run
-   directory, log paths, `--export=ALL,SHK_NAME=<name>`, `singleton` for single
-   jobs) and the frozen spec. `--dry-run` stops here, with no network at all.
+   (today `owners`), else `--no-requeue`; the `--mem`, `--time` and `--array`
+   grammar, at least one CPU and task; a script of at most 1 MiB whose leading
+   `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
+   `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
+   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`) or
+   start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
+   `--courtesy-ack`. `--constraint`, `--signal` and `--after-ok` (repeatable)
+   go to sbatch unchanged, which checks them itself. Build the sbatch argv
+   (explicit name, partition, CPUs, memory, minutes, run directory, log paths,
+   `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs) and the frozen
+   spec. `--dry-run` stops here, with no network at all.
 2. **Read call** (`query.sh`, shared with `status`): one `squeue -t all` and one
    `sacct --duplicates` over the last 30 days for the user and name, plus the
-   newest spec file. Only `SHK_`-prefixed lines count, and the read is complete
-   only with `SHK_END` and both tools returning 0. Every remote program first
-   unsets `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*` (except `SLURM_CONF`).
+   newest spec file; for a borrowed partition also its occupancy. Only
+   `SHK_`-prefixed lines count, and the read is complete only with `SHK_END`
+   and every tool returning 0 (else exit 1 `malformed_read`). Every remote
+   program first unsets `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*` (except
+   `SLURM_CONF`).
 3. **Local decision** (pure): `new` (no rows) submits; `live` (any task pending,
    running, suspended or completing, including throttle-held array tasks that
    `squeue` reports only as an aggregate) is refused even with `--resubmit`;
    `done` and `failed` are refused unless `--resubmit REASON`; `stale` (spec files
-   but no Slurm rows) is informational and treated as `new`.
+   but no Slurm rows) is informational and treated as `new`. On a borrowed
+   partition (`btrippe`, `possu`) the reply carries the occupancy and the
+   courtesy text, and a warning when others are running there and you already
+   have 2 jobs there or ask for more than 2 h; it never refuses.
 4. **Mutation call** (`submit.sh`, the script on stdin): a live guard, staging of
    the script and spec under `<run-dir>/.shk/`, a digest check, `sbatch` on the
    staged script, then exactly one terminal marker: `SHK_SUBMITTED <jobid>`
-   (exit 0), `SHK_LIVE` or `SHK_REJECTED <rc>` with stderr (exit 3), or
-   `SHK_UNPARSED` (exit 5). A transport failure after dispatch or a missing or
+   (exit 0), `SHK_LIVE`, `SHK_REJECTED <rc>` with stderr or `SHK_REFUSED <why>`
+   (nothing ran; exit 3), or `SHK_UNPARSED` (exit 5). A transport failure after
+   dispatch or a missing or
    duplicate marker is exit 5: the reply's `next` names the `shk status` command
    and the time before which not to run it. Running the same `shk submit` again
    is safe: it sees `live`, `done` or `failed`, or `new` if nothing reached
@@ -137,21 +147,40 @@ that is not preemptible), `duplicate_live`, `unknown_partition`,
 `malformed_rows`; any of them gives exit 6. Nothing is acknowledged or stored,
 so nothing needs closing: a deliberate `--resubmit` makes a new current job.
 
-`cancel` resolves one name and cancels only its jobs (`scancel` scoped by user
-and name). `occupancy` reads the partition's current use with the fixed-width
-`squeue -O` layout confirmed live in 0.2.0.
+`cancel` resolves one name and cancels only its live jobs (`scancel` scoped by
+user and name), reporting the job ids and `next_check_after`; a lost reply is
+exit 5 with a `next` like submit's. `occupancy` reads the partition's current use
+with the fixed-width `squeue -O` layout confirmed live in 0.2.0.
 
 ## Transfer
 
 `push` checks the DTN master, then runs `rsync -rlt --protect-args --partial`
 into an absolute REMOTE under `remote_root` (unless `--anywhere`) and never
-deletes. `pull` reads `REMOTE/SHA256SUMS` (GNU `sha256sum` format) through the
-control host, refuses unsafe entries (absolute paths, `..`, `.shk` components,
-duplicates), rsyncs exactly those files into a private stage beside LOCAL,
-verifies the inventory and every hash, re-reads the manifest, runs the optional
-validator from the configuration on the stage, then renames the stage onto LOCAL
-and writes a receipt beside it. An existing LOCAL is kept unless `--replace`
-(which renames it aside, never deletes); a rerun resumes the stage. `manifest DIR` writes `DIR/SHA256SUMS` inside jobs.
+deletes. `-t` keeps the local modification times: a re-push compares size and
+time and skips unchanged files, where rewriting them would refresh their purge
+clock on scratch, which looks like purge evasion. The cost is stated plainly:
+pushed files keep their local modification times, so inputs that are old
+locally can be purge-eligible soon after a push.
+
+`pull` reads `REMOTE/SHA256SUMS` (GNU `sha256sum` format) through the control
+host and needs it to list every regular file under REMOTE except `SHA256SUMS`
+and `.shk*` entries, so the job writes it over its own output subdirectory, not
+the run directory with its `.shk/` and logs. It refuses unsafe entries
+(absolute paths, empty, `.` or `..` components, `.shk` components, duplicates).
+With NAME the last component of LOCAL, it takes a lock on `.NAME.shk-lock`,
+rsyncs exactly the listed files into the private stage `.NAME.shk-stage` beside
+LOCAL (pruning anything the manifest does not list, so a rerun resumes it),
+verifies the inventory and every hash, re-reads the manifest, then runs the
+validator named by `--validate`, if any: its argv from
+`[tool.sherlock-kit.validators]` plus the stage directory as the last argument,
+from the project root (the directory of the configuration file); exit 0 passes,
+and the validator treats the stage as read-only because whatever it writes is
+promoted. Then it renames the stage onto LOCAL and writes
+`.NAME.shk-receipt.json`. An existing LOCAL with a receipt for the same manifest
+is `already_present`; any other existing LOCAL is kept unless `--replace`,
+which renames it to `.NAME.shk-old-<UTC>` (never deletes). `manifest DIR`
+writes `DIR/SHA256SUMS` inside jobs; the skill's `sha256sum` one-liner writes
+the same.
 
 ## Weaker guarantees, accepted
 
