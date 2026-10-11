@@ -171,6 +171,18 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual((explicit["tasks"]["by_state"], explicit["cost"]["cpu_seconds"]),
                          ({"CANCELLED": 1, "COMPLETED": 1}, 120))
 
+    def test_cost_is_final_only_once_sacct_holds_the_deciding_terminal_state(self):
+        lagging = current([q("100", "COMPLETED")], [a("100", "RUNNING", elapsed=30)])
+        self.assertEqual(lagging["cost"], {"cpu_seconds": 60, "gpu_seconds": 0, "final": False})
+        self.assertFalse(current([q("100", "COMPLETED")])["cost"]["final"])
+        requeued = current([q("500", "COMPLETED", partition="owners")],
+                           [a("500", "PREEMPTED", elapsed=30, partition="owners")])
+        self.assertFalse(requeued["cost"]["final"])
+        array = current([q("300_0", "COMPLETED"), q("300_1", "COMPLETED")], [a("300_0")])
+        self.assertFalse(array["cost"]["final"])
+        self.assertTrue(current([q("100", "COMPLETED")], [a("100")])["cost"]["final"])
+        self.assertTrue(current(acct=[a("100", "FAILED", exit_code="1:0")])["cost"]["final"])
+
     def test_restarts_cost_and_anomalies(self):
         owners = resolve(acct=[a("500", "PREEMPTED", elapsed=30, partition="owners"),
                                a("500", restart=1, partition="owners")])

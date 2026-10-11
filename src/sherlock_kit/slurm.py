@@ -298,6 +298,13 @@ def _task_summary(deciding: dict[int, Row], restarts: dict[int, set[int]],
     }
 
 
+def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> bool:
+    """Cost is final once sacct holds every task in the terminal state that decides it (squeue
+    can show the end before slurmdbd has the row)."""
+    return all(index in accounted and accounted[index].state in TERMINAL
+               and accounted[index].state == deciding[index].state for index in range(count))
+
+
 def _job(rows: list[Row], known_count: int | None) -> Job:
     """Summary of one base job; known_count is the task count from its spec file, if any."""
     deciding, accounted, restarts = _deciding_rows(rows)
@@ -325,7 +332,7 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
         preempted=any(row.state in ("PREEMPTED", "REQUEUED") for row in rows),
         cost={"cpu_seconds": sum(row.cpu_seconds for row in rows),
               "gpu_seconds": sum(row.gpu_seconds for row in rows),
-              "final": state != "live" and tasks["missing"] == 0},
+              "final": _final(deciding, accounted, count)},
     )
 
 
