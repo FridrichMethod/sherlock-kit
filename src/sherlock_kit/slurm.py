@@ -8,26 +8,36 @@ rows grouped by base job id give new | live | done | failed | stale. live refuse
 like new. Remote calls print next_check_after (now + 60 s); a lost mutation reply is
 action "unknown" (exit 5); exit 6 when the newest job of a listed name has an anomaly.
 """
+
 from __future__ import annotations
 
 import argparse
-from collections import Counter
-from collections.abc import Callable, Iterable
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
 import json
 import re
 import secrets
 import shlex
-from typing import TYPE_CHECKING, Any
+from collections import Counter
+from collections.abc import Callable, Iterable
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any, TypeAlias
 
-from sherlock_kit import executor as executors, partitions, spec
+from sherlock_kit import executor as executors
+from sherlock_kit import partitions, spec
 from sherlock_kit.errors import (
-    EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, EXIT_REFUSED, EXIT_UNKNOWN, Outcome, ShkError,
+    EXIT_ANOMALY,
+    EXIT_LOCAL,
+    EXIT_OK,
+    EXIT_REFUSED,
+    EXIT_UNKNOWN,
+    Outcome,
+    ShkError,
 )
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
+
+Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"
 
 JOB_ID = re.compile(
     r"([1-9][0-9]*)"  # base job id
@@ -35,13 +45,41 @@ JOB_ID = re.compile(
     r"|\[([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)(?:%[0-9]+)?\]))?"  # N_[a-b,c%t]: aggregate
 )
 QUEUE_FIELDS = ("JobID", "State", "Partition", "JobName")  # query.sh squeue -o
-ACCT_FIELDS = ("JobID", "State", "Partition", "ElapsedRaw", "AllocCPUS", "AllocTRES", "Submit",
-               "Restarts", "ExitCode", "JobName")  # query.sh sacct --format; JobName stays last
+ACCT_FIELDS = (
+    "JobID",
+    "State",
+    "Partition",
+    "ElapsedRaw",
+    "AllocCPUS",
+    "AllocTRES",
+    "Submit",
+    "Restarts",
+    "ExitCode",
+    "JobName",
+)  # query.sh sacct --format; JobName stays last
 OCCUPANCY_COLUMNS = (("UserName", 64), ("State", 24), ("tres-alloc", 128))  # squeue -O, live layout
-TERMINAL = frozenset({"COMPLETED", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY",
-                      "BOOT_FAIL", "DEADLINE", "PREEMPTED", "REVOKED"})
-RUNNING = frozenset({"RUNNING", "COMPLETING", "SUSPENDED", "CONFIGURING", "STAGE_OUT",
-                     "SIGNALING", "RESIZING", "STOPPED"})
+TERMINAL = frozenset({
+    "COMPLETED",
+    "FAILED",
+    "CANCELLED",
+    "TIMEOUT",
+    "NODE_FAIL",
+    "OUT_OF_MEMORY",
+    "BOOT_FAIL",
+    "DEADLINE",
+    "PREEMPTED",
+    "REVOKED",
+})
+RUNNING = frozenset({
+    "RUNNING",
+    "COMPLETING",
+    "SUSPENDED",
+    "CONFIGURING",
+    "STAGE_OUT",
+    "SIGNALING",
+    "RESIZING",
+    "STOPPED",
+})
 MAX_ROWS = 50_000
 CADENCE = timedelta(seconds=60)
 SINCE_DAYS, SINCE_DAYS_ALL = 30, 7
@@ -50,23 +88,28 @@ BUDGET_JOBS, BUDGET_MINUTES = 2, 120  # "about 2 jobs x 2 h while others are act
 
 @dataclass(frozen=True)
 class Refusal:
+    """The error token and hint of a remote marker that means nothing happened."""
+
     token: str
     hint: str
 
 
 REFUSALS = {  # remote markers that mean nothing was submitted or cancelled (exit 3)
     "SHK_LIVE": Refusal("live", "wait; check shk status at most once per 60 s"),
-    "SHK_REJECTED": Refusal("slurm_rejected",
-                            "read the message; shk status shows whether anything was queued"),
+    "SHK_REJECTED": Refusal(
+        "slurm_rejected", "read the message; shk status shows whether anything was queued"
+    ),
     "SHK_REFUSED": Refusal("remote_refused", "nothing ran; fix the cause, then retry once"),
 }
 
 
 # ---------------------------------------------------------------- parsing the read
 
+
 @dataclass(frozen=True)
 class SpecFile:
     """The newest <name>.<jobid>.json in a run directory (SHK_SPEC)."""
+
     job_id: int
     task_count: int | None  # 1 for a single job; None when the file cannot be read
 
@@ -74,6 +117,7 @@ class SpecFile:
 @dataclass(frozen=True)
 class Read:
     """One complete query.sh reply."""
+
     user: str | None
     host: str | None
     queue: list[str]  # squeue rows (SHK_Q)
@@ -101,8 +145,13 @@ def _grouped(records: list[str]) -> dict[str, list[str]]:
 
 def parse_read(stdout: str, tools: Iterable[str]) -> Read:
     """A query.sh reply; complete only with SHK_END and SHK_RC 0 from every tool (else exit 1)."""
-    records: dict[str, list[str]] = {"SHK_Q": [], "SHK_A": [], "SHK_O": [], "SHK_S": [],
-                                     "SHK_SPEC": []}
+    records: dict[str, list[str]] = {
+        "SHK_Q": [],
+        "SHK_A": [],
+        "SHK_O": [],
+        "SHK_S": [],
+        "SHK_SPEC": [],
+    }
     facts: dict[str, str] = {}
     for line in stdout.splitlines():
         kind, separator, rest = line.partition("|")
@@ -113,28 +162,36 @@ def parse_read(stdout: str, tools: Iterable[str]) -> Read:
             facts[key or value] = value
     codes = {tool: facts.get(f"SHK_RC {tool}") for tool in tools}
     if "SHK_END" not in facts or any(code != "0" for code in codes.values()):
-        raise ShkError(EXIT_LOCAL, "malformed_read",
-                       f"query incomplete: end={'SHK_END' in facts}, rc={codes}",
-                       hint="retry once after 60 s; shk doctor --remote checks the remote tools")
+        raise ShkError(
+            EXIT_LOCAL,
+            "malformed_read",
+            f"query incomplete: end={'SHK_END' in facts}, rc={codes}",
+            hint="retry once after 60 s; shk doctor --remote checks the remote tools",
+        )
     specs = {}
     for name, found in _grouped(records["SHK_SPEC"]).items():
         job, _, text = found[-1].partition("|")
         specs[name] = SpecFile(int(job), _task_count(text))
     counts = {name: int(found[-1]) for name, found in _grouped(records["SHK_S"]).items()}
-    return Read(user=facts.get("SHK_USER"), host=facts.get("SHK_HOST"), queue=records["SHK_Q"],
-                acct=records["SHK_A"], occupancy=_grouped(records["SHK_O"]), specs=specs,
-                spec_files=counts)
+    return Read(
+        user=facts.get("SHK_USER"),
+        host=facts.get("SHK_HOST"),
+        queue=records["SHK_Q"],
+        acct=records["SHK_A"],
+        occupancy=_grouped(records["SHK_O"]),
+        specs=specs,
+        spec_files=counts,
+    )
 
 
 # ---------------------------------------------------------------- squeue and sacct rows
+
 
 def _indices(aggregate: str) -> list[int]:
     indices: set[int] = set()
     for part in aggregate.split(","):
         first, _, last = part.partition("-")
         low, high = int(first), int(last or first)
-        if not low <= high < spec.ARRAY_MAX_TASKS:
-            raise ValueError(f"array range {part!r}")
         indices.update(range(low, high + 1))
     return sorted(indices)
 
@@ -165,6 +222,7 @@ def gpus(tres: str) -> int:
 @dataclass(frozen=True)
 class Row:
     """One squeue or sacct line of a shk job."""
+
     key: tuple[bool, str, int]  # (from sacct, JobID, Restarts): one row per task and restart
     base: int  # the base job id (the array id for array tasks)
     tasks: tuple[int, ...]  # task indices covered; an aggregate covers several
@@ -185,8 +243,9 @@ def _row(fields: dict[str, str]) -> Row:
     words = fields["State"].split()  # "CANCELLED by 1234", "COMPLETED+"
     if not words:
         raise ValueError(f"row without a state: {fields}")
-    elapsed, cpus, restart = (int(fields.get(key, "0"))
-                              for key in ("ElapsedRaw", "AllocCPUS", "Restarts"))
+    elapsed, cpus, restart = (
+        int(fields.get(key, "0")) for key in ("ElapsedRaw", "AllocCPUS", "Restarts")
+    )
     explicit = indices is None
     return Row(
         key=("Restarts" in fields, fields["JobID"], restart),
@@ -207,6 +266,8 @@ def _row(fields: dict[str, str]) -> Row:
 
 @dataclass(frozen=True)
 class Rows:
+    """Parsed rows by job name, malformed line counts and whether sacct was cut off."""
+
     by_name: dict[str, list[Row]]
     malformed: Counter[str | None]  # malformed lines per name; None when no name was readable
     truncated: bool  # sacct printed more than MAX_ROWS rows
@@ -235,6 +296,7 @@ def parse_rows(queue: list[str], acct: list[str], keep: Callable[[str], bool]) -
 
 # ---------------------------------------------------------------- resolution (pure)
 
+
 def _kind(state: str) -> str:
     if state == "COMPLETED":
         return "completed"
@@ -248,6 +310,7 @@ def _kind(state: str) -> str:
 @dataclass(frozen=True)
 class Job:
     """One base job id under a name."""
+
     job_id: str
     state: str  # live | done | failed
     submitted: str | None
@@ -260,17 +323,28 @@ class Job:
     cost: dict[str, Any]
 
     def current(self, anomalies: list[str]) -> dict[str, Any]:
-        return {"job_id": self.job_id, "partition": self.partition, "array": self.array,
-                "tasks": self.tasks, "exit_codes": self.exit_codes,
-                "max_restart": self.max_restart, "cost": self.cost, "anomalies": anomalies}
+        """The status entry of the newest job of a name."""
+        return {
+            "job_id": self.job_id,
+            "partition": self.partition,
+            "array": self.array,
+            "tasks": self.tasks,
+            "exit_codes": self.exit_codes,
+            "max_restart": self.max_restart,
+            "cost": self.cost,
+            "anomalies": anomalies,
+        }
 
     def history(self) -> dict[str, Any]:
+        """The status entry of an older job of a name."""
         return {"job_id": self.job_id, "state": self.state, "submitted": self.submitted}
 
 
 def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dict[int, set[int]]]:
-    """Per task: the row that decides its state (squeue over sacct, then the highest restart,
-    then an explicit row over an aggregate), its newest sacct row and the sacct restarts seen."""
+    """Per task: the row that decides its state, its newest sacct row and the restarts seen.
+
+    squeue wins over sacct, then the highest restart, then an explicit row over an aggregate.
+    """
     deciding: dict[int, Row] = {}
     accounted: dict[int, Row] = {}
     restarts: dict[int, set[int]] = {}
@@ -283,8 +357,9 @@ def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dic
     return deciding, accounted, restarts
 
 
-def _task_summary(deciding: dict[int, Row], restarts: dict[int, set[int]],
-                  count: int) -> dict[str, Any]:
+def _task_summary(
+    deciding: dict[int, Row], restarts: dict[int, set[int]], count: int
+) -> dict[str, Any]:
     kinds = Counter(_kind(row.state) for row in deciding.values())
     gaps = [index for index, seen in sorted(restarts.items()) if seen != set(range(max(seen) + 1))]
     return {
@@ -300,10 +375,16 @@ def _task_summary(deciding: dict[int, Row], restarts: dict[int, set[int]],
 
 
 def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> bool:
-    """Cost is final once sacct holds every task in the terminal state that decides it (squeue
-    can show the end before slurmdbd has the row)."""
-    return all(index in accounted and accounted[index].state in TERMINAL
-               and accounted[index].state == deciding[index].state for index in range(count))
+    """Whether sacct holds every task in the terminal state that decides it.
+
+    Only then is the cost final: squeue can show the end before slurmdbd has the row.
+    """
+    return all(
+        index in accounted
+        and accounted[index].state in TERMINAL
+        and accounted[index].state == deciding[index].state
+        for index in range(count)
+    )
 
 
 def _job(rows: list[Row], known_count: int | None) -> Job:
@@ -331,9 +412,11 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
         exit_codes=dict(sorted(exits.items())),
         max_restart=max(row.restart for row in rows),
         preempted=any(row.state in ("PREEMPTED", "REQUEUED") for row in rows),
-        cost={"cpu_seconds": sum(row.cpu_seconds for row in rows),
-              "gpu_seconds": sum(row.gpu_seconds for row in rows),
-              "final": _final(deciding, accounted, count)},
+        cost={
+            "cpu_seconds": sum(row.cpu_seconds for row in rows),
+            "gpu_seconds": sum(row.gpu_seconds for row in rows),
+            "final": _final(deciding, accounted, count),
+        },
     )
 
 
@@ -351,10 +434,13 @@ def _anomalies(job: Job, live_jobs: int, malformed: int) -> list[str]:
     return sorted(found)
 
 
-def resolve_name(rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | None = None,
-                 malformed: int = 0) -> dict[str, Any]:
-    """Pure: one name's rows -> {state, current, history, spec_files}; the largest base id is
-    the current attempt, and any live job makes the name live."""
+def resolve_name(
+    rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | None = None, malformed: int = 0
+) -> dict[str, Any]:
+    """Pure: one name's rows give {state, current, history, spec_files}.
+
+    The largest base id is the current attempt, and any live job makes the name live.
+    """
     jobs: dict[int, list[Row]] = {}
     for row in {row.key: row for row in rows}.values():
         jobs.setdefault(row.base, []).append(row)
@@ -376,19 +462,25 @@ def resolve_name(rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | N
 
 
 def _resolve(read: Read, rows: Rows, name: str) -> dict[str, Any]:
-    """resolve_name() for one listed name; exit 1 when Slurm has rows of it but none parse, since
-    the name is then neither new nor anything shk can show (for example hetjob ids N+k)."""
+    """resolve_name() for one listed name, or exit 1 when Slurm has rows of it but none parse.
+
+    Such a name is neither new nor anything shk can show (for example hetjob ids N+k).
+    """
     found = rows.by_name.get(name, [])
     if rows.malformed[name] and not found:
-        raise ShkError(EXIT_LOCAL, "malformed_read",
-                       f"{name}: none of its {rows.malformed[name]} Slurm rows could be read",
-                       hint="shk cannot tell whether it is new, live or finished; "
-                       "look once with sacct --name and report it")
+        raise ShkError(
+            EXIT_LOCAL,
+            "malformed_read",
+            f"{name}: none of its {rows.malformed[name]} Slurm rows could be read",
+            hint="shk cannot tell whether it is new, live or finished; "
+            "look once with sacct --name and report it",
+        )
     malformed = rows.malformed[name] + rows.malformed[None]
     return resolve_name(found, read.spec_files.get(name, 0), read.specs.get(name), malformed)
 
 
 # ---------------------------------------------------------------- occupancy
+
 
 def _counts() -> dict[str, int]:
     return {"running_jobs": 0, "running_gpus": 0, "pending_jobs": 0}
@@ -397,14 +489,16 @@ def _counts() -> dict[str, int]:
 def _columns(line: str) -> dict[str, str]:
     columns, offset = {}, 0
     for name, width in OCCUPANCY_COLUMNS:
-        columns[name] = line[offset:offset + width].strip()
+        columns[name] = line[offset : offset + width].strip()
         offset += width
     return columns
 
 
 def occupancy_summary(rows: list[str]) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
-    """({user: counts}, totals) of running jobs (with GPUs) and pending jobs; the rows are
-    fixed-width because tres-alloc is empty for pending jobs."""
+    """({user: counts}, totals) of running jobs (with their GPUs) and pending jobs.
+
+    The rows are fixed-width because tres-alloc is empty for pending jobs.
+    """
     users: dict[str, dict[str, int]] = {}
     totals = _counts()
     for line in rows:
@@ -426,9 +520,11 @@ def occupancy_summary(rows: list[str]) -> tuple[dict[str, dict[str, int]], dict[
 
 # ---------------------------------------------------------------- command line
 
-def _register_submit(subparsers: Any) -> None:
+
+def _register_submit(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
-        "submit", help="submit one logical task (refuses live; done or failed need --resubmit)")
+        "submit", help="submit one logical task (refuses live; done or failed need --resubmit)"
+    )
     parser.add_argument("--task", required=True)
     parser.add_argument("--campaign", default="default")
     parser.add_argument("--script", required=True, help="job script, at most 1 MiB")
@@ -441,39 +537,59 @@ def _register_submit(subparsers: Any) -> None:
     parser.add_argument("--array", metavar="N[%M]", help="N tasks (2-1000), at most M at once")
     parser.add_argument("--constraint")
     parser.add_argument("--signal", help="for example B:USR1@60")
-    parser.add_argument("--after-ok", action="extend", nargs="+", default=[], metavar="JOBID",
-                        help="start after these jobs complete; repeatable")
+    parser.add_argument(
+        "--after-ok",
+        action="extend",
+        nargs="+",
+        default=[],
+        metavar="JOBID",
+        help="start after these jobs complete; repeatable",
+    )
     parser.add_argument("--run-dir", help="default <remote_root>/runs/<name>")
-    parser.add_argument("--courtesy-ack", action="store_true",
-                        help="required on borrowed partitions, after shk occupancy")
+    parser.add_argument(
+        "--courtesy-ack",
+        action="store_true",
+        help="required on borrowed partitions, after shk occupancy",
+    )
     parser.add_argument("--resubmit", metavar="REASON", help="required after done or failed")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="offline: print the spec and sbatch argv")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="offline: print the spec and sbatch argv"
+    )
     requeue = parser.add_mutually_exclusive_group()
     requeue.add_argument("--requeue", action="store_true", help="default: the partition profile")
     requeue.add_argument("--no-requeue", dest="requeue", action="store_false")
     parser.set_defaults(handler=submit, requeue=None)
 
 
-def _register_status(subparsers: Any) -> None:
+def _register_status(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
-        "status", help="state of logical tasks from one squeue and one sacct call")
+        "status", help="state of logical tasks from one squeue and one sacct call"
+    )
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--task", action="append", help="repeatable")
     which.add_argument("--name", action="append", help="repeatable")
     which.add_argument("--all", action="store_true", help="every shk job of this project")
-    parser.add_argument("--campaign", action="append",
-                        help="once for every --task, or once per --task (default: default)")
-    parser.add_argument("--run-dir", action="append",
-                        help="once per --task (default <remote_root>/runs/<name>)")
-    parser.add_argument("--since", type=int, metavar="DAYS",
-                        help=f"sacct window (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)")
+    parser.add_argument(
+        "--campaign",
+        action="append",
+        help="once for every --task, or once per --task (default: default)",
+    )
+    parser.add_argument(
+        "--run-dir", action="append", help="once per --task (default <remote_root>/runs/<name>)"
+    )
+    parser.add_argument(
+        "--since",
+        type=int,
+        metavar="DAYS",
+        help=f"sacct window (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)",
+    )
     parser.set_defaults(handler=status)
 
 
-def _register_cancel(subparsers: Any) -> None:
+def _register_cancel(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
-        "cancel", help="scancel the live jobs of one logical task (only when asked)")
+        "cancel", help="scancel the live jobs of one logical task (only when asked)"
+    )
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--task")
     which.add_argument("--name")
@@ -481,14 +597,16 @@ def _register_cancel(subparsers: Any) -> None:
     parser.set_defaults(handler=cancel)
 
 
-def _register_occupancy(subparsers: Any) -> None:
+def _register_occupancy(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
-        "occupancy", help="running and pending jobs per user on listed partitions")
+        "occupancy", help="running and pending jobs per user on listed partitions"
+    )
     parser.add_argument("--partition", action="append", required=True, help="repeatable")
     parser.set_defaults(handler=occupancy)
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
+    """Add the submit, status, cancel and occupancy commands."""
     _register_submit(subparsers)
     _register_status(subparsers)
     _register_cancel(subparsers)
@@ -496,6 +614,7 @@ def register(subparsers: Any) -> None:
 
 
 # ---------------------------------------------------------------- remote calls
+
 
 def _iso(moment: datetime) -> str:
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -516,6 +635,8 @@ def _read(ctx: Context, query: list[str], tools: tuple[str, ...]) -> tuple[Read,
 
 @dataclass(frozen=True)
 class Reply:
+    """The terminal marker of a mutation program and the lines it printed."""
+
     marker: str  # the one terminal marker, or "unknown"
     value: str  # the marker's argument, or why the outcome is unknown
     lines: list[str]
@@ -523,14 +644,16 @@ class Reply:
 
 def _refusal(program: str, marker: str, value: str, lines: list[str]) -> ShkError:
     refusal = REFUSALS[marker]
-    errors = " ".join(line.removeprefix("SHK_ERR|")
-                      for line in lines if line.startswith("SHK_ERR|"))
+    errors = " ".join(
+        line.removeprefix("SHK_ERR|") for line in lines if line.startswith("SHK_ERR|")
+    )
     message = f"{program}: {marker} {value} {errors[-2000:]}".strip()
     return ShkError(EXIT_REFUSED, refusal.token, message, refusal.hint)
 
 
-def _mutate(ctx: Context, program: str, args: list[str], done: tuple[str, ...],
-            stdin: bytes | None = None) -> Reply:
+def _mutate(
+    ctx: Context, program: str, args: list[str], done: tuple[str, ...], stdin: bytes | None = None
+) -> Reply:
     """Run one mutation program: refusals raise exit 3; a lost or ambiguous reply is unknown."""
     result = executors.run_program(ctx.executor(), program, args, stdin=stdin, mutation=True)
     if result.status == "unknown":
@@ -551,16 +674,26 @@ def _mutate(ctx: Context, program: str, args: list[str], done: tuple[str, ...],
 def _unknown(ctx: Context, name: str, selector: str, detail: str) -> Outcome:
     """Exit 5: the mutation may or may not have happened; only a later status can tell."""
     later = _iso(ctx.clock() + CADENCE)
-    return Outcome({"ok": False, "action": "unknown", "name": name, "detail": detail,
-                    "next": f"shk status {selector} (not before {later})"}, EXIT_UNKNOWN)
+    return Outcome(
+        {
+            "ok": False,
+            "action": "unknown",
+            "name": name,
+            "detail": detail,
+            "next": f"shk status {selector} (not before {later})",
+        },
+        EXIT_UNKNOWN,
+    )
 
 
 # ---------------------------------------------------------------- handlers
 
+
 def _task_name(ctx: Context, campaign: str, task: str) -> str:
     project = ctx.require("project").project
-    return spec.job_name(project, spec.checked_text("campaign", campaign),
-                         spec.checked_text("task", task))
+    return spec.job_name(
+        project, spec.checked_text("campaign", campaign), spec.checked_text("task", task)
+    )
 
 
 def _task_selector(task: str, campaign: str) -> str:
@@ -574,7 +707,7 @@ def _checked_name(name: str) -> str:
 
 
 def _refuse_existing(name: str, found: dict[str, Any], reason: str | None) -> None:
-    """live always refuses; done and failed refuse without --resubmit REASON."""
+    """Live always refuses; done and failed refuse without --resubmit REASON."""
     state = found["state"]
     if state == "live":
         hint = REFUSALS["SHK_LIVE"].hint
@@ -596,26 +729,42 @@ def _courtesy(read: Read, built: spec.Spec) -> dict[str, Any]:
     over = my_jobs >= BUDGET_JOBS or built.document["resources"]["minutes"] > BUDGET_MINUTES
     warnings = []
     if others and over:
-        warnings.append(f"others are running on {partition} and you have {my_jobs} jobs there; "
-                        f"while others are active the courtesy budget is about {BUDGET_JOBS} jobs "
-                        f"x {BUDGET_MINUTES // 60} h")
-    return {"occupancy": {"users": users, "totals": totals}, "courtesy": built.profile.courtesy,
-            "warnings": warnings}
+        warnings.append(
+            f"others are running on {partition} and you have {my_jobs} jobs there; "
+            f"while others are active the courtesy budget is about {BUDGET_JOBS} jobs "
+            f"x {BUDGET_MINUTES // 60} h"
+        )
+    return {
+        "occupancy": {"users": users, "totals": totals},
+        "courtesy": built.profile.courtesy,
+        "warnings": warnings,
+    }
 
 
 def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk submit`: offline checks, one read, the local decision, then one mutation."""
     built = spec.build(args, ctx.require("project", "remote_root"), ctx.clock())
-    report = {"name": built.name, "run_dir": built.run_dir, "argv": built.argv,
-              "script_sha256": built.sha256}
+    report = {
+        "name": built.name,
+        "run_dir": built.run_dir,
+        "argv": built.argv,
+        "script_sha256": built.sha256,
+    }
     if args.dry_run:
         return Outcome({"action": "dry_run", **report, "spec": built.document})
     borrowed = built.profile.borrowed
-    query = ["names", str(SINCE_DAYS), built.profile.name if borrowed else "-", built.name,
-             built.run_dir]
+    query = [
+        "names",
+        str(SINCE_DAYS),
+        built.profile.name if borrowed else "-",
+        built.name,
+        built.run_dir,
+    ]
     tools = ("squeue", "sacct", "occupancy") if borrowed else ("squeue", "sacct")
     read, meta = _read(ctx, query, tools)
-    found = _resolve(read, parse_rows(read.queue, read.acct, lambda name: name == built.name),
-                     built.name)
+    found = _resolve(
+        read, parse_rows(read.queue, read.acct, lambda name: name == built.name), built.name
+    )
     _refuse_existing(built.name, found, args.resubmit)
     if borrowed:
         report.update(_courtesy(read, built))
@@ -627,12 +776,19 @@ def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
         if args.run_dir:
             selector += f" --run-dir {built.run_dir}"
         return _unknown(ctx, built.name, selector, reply.value)
-    return Outcome({"action": "submitted", "job_id": reply.value, "state_before": found["state"],
-                    **report, **meta})
+    return Outcome({
+        "action": "submitted",
+        "job_id": reply.value,
+        "state_before": found["state"],
+        **report,
+        **meta,
+    })
 
 
 @dataclass(frozen=True)
 class Selected:
+    """One job name that status reports, with its run directory and --task labels."""
+
     name: str
     run_dir: str | None = None
     labels: dict[str, str] = field(default_factory=dict)  # campaign and task, with --task
@@ -646,8 +802,11 @@ def _selection(args: argparse.Namespace, ctx: Context) -> list[Selected]:
         campaigns = campaigns * len(tasks)
     run_dirs = args.run_dir or [None] * len(tasks)
     if len(campaigns) != len(tasks) or len(run_dirs) != len(tasks):
-        raise ShkError(EXIT_LOCAL, "spec_invalid", "give --campaign once or once per --task, "
-                       "and --run-dir once per --task or not at all")
+        raise ShkError(
+            EXIT_LOCAL,
+            "spec_invalid",
+            "give --campaign once or once per --task, and --run-dir once per --task or not at all",
+        )
     for task, campaign, given in zip(tasks, campaigns, run_dirs, strict=True):
         config, name = ctx.require("project"), _task_name(ctx, campaign, task)
         run_dir = spec.run_directory(given, config, name) if given or config.remote_root else None
@@ -672,23 +831,29 @@ def _all_names(ctx: Context) -> Callable[[str], bool]:
 
 
 def status(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk status`: one read for every selected name; exit 6 on an anomaly."""
     since, selected = _since(args), _selection(args, ctx)
     query = ["all" if args.all else "names", str(since), "-"]
     for item in selected:
         query += [item.name, item.run_dir or "-"]
     read, meta = _read(ctx, query, ("squeue", "sacct"))
     wanted = {item.name for item in selected}
-    rows = parse_rows(read.queue, read.acct,
-                      _all_names(ctx) if args.all else lambda name: name in wanted)
+    rows = parse_rows(
+        read.queue, read.acct, _all_names(ctx) if args.all else lambda name: name in wanted
+    )
     listed = selected or [Selected(name) for name in sorted(rows.by_name)]
-    names = [{"name": item.name, **item.labels, **_resolve(read, rows, item.name)}
-             for item in listed]
+    names = [
+        {"name": item.name, **item.labels, **_resolve(read, rows, item.name)} for item in listed
+    ]
     anomalous = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
-    return Outcome({**meta, "names": names, "truncated": rows.truncated},
-                   EXIT_ANOMALY if anomalous else EXIT_OK)
+    return Outcome(
+        {**meta, "names": names, "truncated": rows.truncated},
+        EXIT_ANOMALY if anomalous else EXIT_OK,
+    )
 
 
 def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk cancel`: scancel the live jobs of one name (one mutation)."""
     if args.task:
         name = _task_name(ctx, args.campaign, args.task)
         selector = _task_selector(args.task, args.campaign)
@@ -700,11 +865,17 @@ def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
         return _unknown(ctx, name, selector, reply.value)
     jobs = [line.removeprefix("SHK_JOB|") for line in reply.lines if line.startswith("SHK_JOB|")]
     action = "cancelled" if reply.marker == "SHK_CANCELLED" else "nothing_live"
-    return Outcome({"action": action, "name": name, "jobs": jobs,
-                    "executor": ctx.executor().kind, **_cadence(ctx)})
+    return Outcome({
+        "action": action,
+        "name": name,
+        "jobs": jobs,
+        "executor": ctx.executor().kind,
+        **_cadence(ctx),
+    })
 
 
 def occupancy(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk occupancy`: running and pending jobs per user on listed partitions."""
     profiles = {name: partitions.profile(name) for name in args.partition}
     read, meta = _read(ctx, ["occupancy", "-", "-", *profiles], ("occupancy",))
     report = {}

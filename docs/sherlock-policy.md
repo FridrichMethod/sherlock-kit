@@ -60,7 +60,7 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,
-  partition, array, dependency, begin, job name).
+  partition, array, dependency, begin, job name) or start a heterogeneous job.
 - A live job name is never submitted twice; a finished one only with
   `--resubmit REASON`.
 - `shk cancel` is scoped to one job name and used only when the user asks.

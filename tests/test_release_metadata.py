@@ -1,9 +1,8 @@
 """Release metadata: contract paths C1-C4, one version, rules format, mentioned CLI, removed terms, HOME."""
+
 import hashlib
-import importlib.util
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import shutil
@@ -12,48 +11,68 @@ import sys
 import tempfile
 import tomllib
 import unittest
+from pathlib import Path
+from typing import ClassVar
 
 from fakes import ROOT, SRC, install_fake_ssh
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import cli, partitions  # noqa: E402
+import sherlock_kit
+from sherlock_kit import cli, partitions
 
-CONTRACT = {"C1": "src/sherlock_kit/data/rules/workstation.md", "C2": "src/sherlock_kit/data/rules/cluster.md",
-            "C3": "src/sherlock_kit/data/skills/sherlock-kit/SKILL.md", "C4": "bin/shk"}
+CONTRACT = {
+    "C1": "src/sherlock_kit/data/rules/workstation.md",
+    "C2": "src/sherlock_kit/data/rules/cluster.md",
+    "C3": "src/sherlock_kit/data/skills/sherlock-kit/SKILL.md",
+    "C4": "bin/shk",
+}
 RULES = (ROOT / CONTRACT["C1"], ROOT / CONTRACT["C2"])
 MENTIONING = (*RULES, ROOT / CONTRACT["C3"], ROOT / "README.md")
-REMOVED = ("policy --identity", "reconcile", "--attempt", "SHERLOCK_KIT_STATE_ROOT", ".local/share/sherlock-kit",
-           "registry_root", "SHERLOCK.md")
-# Commands registered by modules another package writes; until the lead merges them their
-# checks skip as integration-only, and run_suite fails those skips under SHK_REQUIRE_ALL.
-OWNER = {"submit": "slurm", "status": "slurm", "cancel": "slurm", "occupancy": "slurm",
-         "push": "transfer", "pull": "transfer", "manifest": "transfer"}
+REMOVED = (
+    "policy --identity",
+    "reconcile",
+    "--attempt",
+    "SHERLOCK_KIT_STATE_ROOT",
+    ".local/share/sherlock-kit",
+    "registry_root",
+    "SHERLOCK.md",
+)
 GLOBAL_VALUE = ("--project-dir", "--executor")
 FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.M | re.S)
 SPAN = re.compile(r"`([^`\n]+)`")
 
 
 def git(*args) -> str:
-    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=True).stdout
+    return subprocess.run(
+        ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=True
+    ).stdout
 
 
 def in_git() -> bool:
     """True when ROOT itself is the top of a git checkout (not, say, an sdist unpacked inside one)."""
-    top = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
-                         check=False) if shutil.which("git") else None
-    return top is not None and top.returncode == 0 and Path(top.stdout.strip()).resolve() == ROOT.resolve()
-
-
-def absent(module: str) -> bool:
-    return importlib.util.find_spec(f"sherlock_kit.{module}") is None
+    top = (
+        subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if shutil.which("git")
+        else None
+    )
+    return (
+        top is not None
+        and top.returncode == 0
+        and Path(top.stdout.strip()).resolve() == ROOT.resolve()
+    )
 
 
 def snippets(text: str) -> list[str]:
     """Shell-like snippets: fenced lines (indented lines continue the previous one) and inline code spans."""
     found = []
     for block in FENCE.findall(text):
-        for line in block.splitlines():
-            line = re.sub(r"\s#\s.*$", "", line).rstrip().removesuffix("\\")
+        for raw in block.splitlines():
+            line = re.sub(r"\s#\s.*$", "", raw).rstrip().removesuffix("\\")
             if found and line[:1].isspace():
                 found[-1] += " " + line.strip()
             elif line:
@@ -84,7 +103,7 @@ def mentions(text: str) -> list[tuple[str, list[str]]]:
         tokens = [t for t in (t.strip("[](),;.") for t in snippet.split()) if t]
         for start, token in enumerate(tokens):
             if token == "shk" or token.endswith("/shk"):
-                found.extend(invocation(tokens[start + 1:]))
+                found.extend(invocation(tokens[start + 1 :]))
     return found
 
 
@@ -103,15 +122,26 @@ class ContractTests(unittest.TestCase):
 
     @unittest.skipUnless(in_git(), "needs a git checkout")
     def test_no_absolute_symlinks(self):
-        links = [line.split() for line in git("ls-files", "-s").splitlines() if line.startswith("120000 ")]
+        links = [
+            line.split()
+            for line in git("ls-files", "-s").splitlines()
+            if line.startswith("120000 ")
+        ]
         for _, blob, _, path in links:
-            self.assertFalse(git("cat-file", "-p", blob).startswith("/"), f"{path} is an absolute symlink")
+            self.assertFalse(
+                git("cat-file", "-p", blob).startswith("/"), f"{path} is an absolute symlink"
+            )
 
     def test_one_version(self):
-        version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(project["project"]["dynamic"], ["version"])
+        self.assertEqual(
+            project["tool"]["setuptools"]["dynamic"]["version"],
+            {"attr": "sherlock_kit.__version__"},
+        )
         heading = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
         self.assertIsNotNone(heading, "CHANGELOG.md needs a '## VERSION' heading")
-        self.assertEqual(heading.group(1), version)
+        self.assertEqual(heading.group(1), sherlock_kit.__version__)
 
 
 class RulesFormatTests(unittest.TestCase):
@@ -120,7 +150,9 @@ class RulesFormatTests(unittest.TestCase):
         for path in RULES:
             with self.subTest(path=path.name):
                 text = path.read_text(encoding="utf-8")
-                self.assertEqual(text.count(block), 1, "paste the output of partitions.markdown() unchanged")
+                self.assertEqual(
+                    text.count(block), 1, "paste the output of partitions.markdown() unchanged"
+                )
                 self.assertTrue(text.endswith(block), "the partition block closes the file")
 
     def test_rules_format(self):
@@ -129,7 +161,9 @@ class RulesFormatTests(unittest.TestCase):
                 raw = path.read_bytes()
                 text = raw.decode("ascii")
                 self.assertLessEqual(len(raw), 7 * 1024)
-                self.assertTrue(text.startswith("## Sherlock"), "starts with an H2, no front matter")
+                self.assertTrue(
+                    text.startswith("## Sherlock"), "starts with an H2, no front matter"
+                )
                 self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"))
                 self.assertNotIn("<!--", text)
                 self.assertNotIn("@", text)
@@ -137,9 +171,17 @@ class RulesFormatTests(unittest.TestCase):
                 self.assertIn("Reviewed 2026-10-10", text)
 
     def test_rules_headings(self):
-        expected = {"workstation.md": ["Connection", "Jobs", "Data", "Partition profiles"],
-                    "cluster.md": ["Where you are", "Filesystems", "Login nodes", "Software", "Slurm",
-                                   "Partition profiles"]}
+        expected = {
+            "workstation.md": ["Connection", "Jobs", "Data", "Partition profiles"],
+            "cluster.md": [
+                "Where you are",
+                "Filesystems",
+                "Login nodes",
+                "Software",
+                "Slurm",
+                "Partition profiles",
+            ],
+        }
         for path in RULES:
             with self.subTest(path=path.name):
                 headings = re.findall(r"^### (.+)$", path.read_text(encoding="utf-8"), re.M)
@@ -156,8 +198,8 @@ class RulesFormatTests(unittest.TestCase):
                     continue
                 checked += 1
                 with self.subTest(path=path.name, snippet=snippet):
-                    self.assertIn("-oBatchMode=yes", tokens[:hosts[0]])
-                    self.assertIn("-oProxyCommand=false", tokens[:hosts[0]])
+                    self.assertIn("-oBatchMode=yes", tokens[: hosts[0]])
+                    self.assertIn("-oProxyCommand=false", tokens[: hosts[0]])
         self.assertGreater(checked, 0)
 
     def test_skill_front_matter(self):
@@ -171,42 +213,45 @@ class RulesFormatTests(unittest.TestCase):
 
 
 class MentionedCliTests(unittest.TestCase):
-    def check(self, owned_by):
-        parser = cli.build_parser(cli.load_modules())
+    def test_mentions_are_parsed(self):
+        self.assertEqual(
+            mentions(
+                "`shk --executor local status --all ...` and `shk rules <kind>`\n```\n"
+                "shk cancel (--task T | --name N)  # --x\n  [--a|--b=1] && shk doctor\n```\n"
+            ),
+            [
+                ("cancel", ["--task", "--name", "--a", "--b"]),
+                ("doctor", []),
+                ("status", ["--all"]),
+                ("rules", []),
+            ],
+        )
+
+    def test_every_mentioned_command_and_option_exists(self):
+        parser = cli.build_parser()
         commands = next(a for a in parser._actions if a.dest == "command").choices
         top = {s for a in parser._actions for s in a.option_strings}
-        checked = 0
+        mentioned = set()
         for path in MENTIONING:
             for command, options in mentions(path.read_text(encoding="utf-8")):
-                if OWNER.get(command) != owned_by:
-                    continue
-                checked += 1
+                mentioned.add(command)
                 self.assertTrue(command in commands, f"{path.name}: shk {command} does not exist")
                 known = top | {s for a in commands[command]._actions for s in a.option_strings}
                 for option in options:
                     self.assertTrue(option in known, f"{path.name}: shk {command} has no {option}")
-        self.assertGreater(checked, 0)
-
-    def test_core_and_install_commands_exist(self):
-        self.assertEqual(mentions("`shk --executor local status --all ...` and `shk rules <kind>`\n```\n"
-                                  "shk cancel (--task T | --name N)  # --x\n  [--a|--b=1] && shk doctor\n```\n"),
-                         [("cancel", ["--task", "--name", "--a", "--b"]), ("doctor", []), ("status", ["--all"]),
-                          ("rules", [])])
-        self.check(None)
-
-    @unittest.skipIf(absent("slurm"), "integration-only: slurm absent")
-    def test_slurm_commands_exist(self):
-        self.check("slurm")
-
-    @unittest.skipIf(absent("transfer"), "integration-only: transfer absent")
-    def test_transfer_commands_exist(self):
-        self.check("transfer")
+        self.assertEqual(mentioned, set(commands))
 
 
 class ManifestOneLinerTests(unittest.TestCase):
     """The skill's sha256sum fallback must write what `shk pull` accepts, like `shk manifest`."""
 
-    FILES = {"a.txt": b"a\n", "-b": b"b\n", "-c": b"c\n", "sub/d.bin": b"\0d", "slurm-1.out": b"log\n"}
+    FILES: ClassVar[dict[str, bytes]] = {
+        "a.txt": b"a\n",
+        "-b": b"b\n",
+        "-c": b"c\n",
+        "sub/d.bin": b"\0d",
+        "slurm-1.out": b"log\n",
+    }
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -237,23 +282,37 @@ class ManifestOneLinerTests(unittest.TestCase):
 
     def test_one_liner_lists_every_file_except_shk_entries(self):
         lines = self.written().splitlines()
-        self.assertEqual(sorted(lines), sorted(f"{digest}  {rel}" for rel, digest in self.expected().items()))
+        self.assertEqual(
+            sorted(lines), sorted(f"{digest}  {rel}" for rel, digest in self.expected().items())
+        )
 
-    @unittest.skipIf(absent("transfer"), "integration-only: transfer absent")
     def test_shk_pull_accepts_the_one_liner(self):
         from sherlock_kit import transfer
+
         self.assertEqual(transfer.parse_manifest(self.written()), self.expected())
         program = SRC / "sherlock_kit/data/remote/manifest.sh"
-        reply = subprocess.run(["sh", str(program), str(self.out)], capture_output=True, text=True, check=True,
-                               timeout=60).stdout
+        reply = subprocess.run(
+            ["sh", str(program), str(self.out)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
         self.assertIn(f"SHK_COUNT {len(self.FILES)}\n", reply)
 
 
 class RemovedTermTests(unittest.TestCase):
     def test_removed_terms_are_gone(self):
-        paths = [p for top in ("src", "docs", "bin") for p in (ROOT / top).rglob("*") if p.is_file()
-                 and not any(part == "__pycache__" or part.endswith(".egg-info") for part in p.parts)]
-        paths += [ROOT / name for name in ("README.md", "CONTRIBUTING.md", "AGENTS.md", "pyproject.toml")]
+        paths = [
+            p
+            for top in ("src", "docs", "bin")
+            for p in (ROOT / top).rglob("*")
+            if p.is_file()
+            and not any(part == "__pycache__" or part.endswith(".egg-info") for part in p.parts)
+        ]
+        paths += [
+            ROOT / name for name in ("README.md", "CONTRIBUTING.md", "AGENTS.md", "pyproject.toml")
+        ]
         for path in paths:
             text = path.read_text(encoding="utf-8")
             for term in REMOVED:
@@ -271,15 +330,37 @@ class NoHomeWriteTests(unittest.TestCase):
         self.home, self.project = self.tmp / "home", self.tmp / "project"
         self.home.mkdir()
         self.project.mkdir()
-        (self.project / "sherlock-kit.toml").write_text('project = "g9"\nremote_root = "/scratch/users/x/g9"\n')
+        (self.project / "sherlock-kit.toml").write_text(
+            'project = "g9"\nremote_root = "/scratch/users/x/g9"\n'
+        )
         (self.project / "job.sh").write_text("#!/bin/bash -l\necho ok\n")
         fake = install_fake_ssh(self.tmp / "tools")
-        keep = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "SHK_", "SHERLOCK_KIT_"))}
+        keep = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(("PYTHON", "SHK_", "SHERLOCK_KIT_"))
+        }
         self.env = {**keep, **fake.env(), "HOME": str(self.home), "PYTHONPATH": str(SRC)}
 
     def shk(self, *argv) -> subprocess.CompletedProcess:
-        command = [sys.executable, "-B", "-m", "sherlock_kit", "--project-dir", str(self.project), *argv]
-        done = subprocess.run(command, env=self.env, cwd=self.project, capture_output=True, text=True, timeout=60)
+        command = [
+            sys.executable,
+            "-B",
+            "-m",
+            "sherlock_kit",
+            "--project-dir",
+            str(self.project),
+            *argv,
+        ]
+        done = subprocess.run(
+            command,
+            env=self.env,
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
         self.assertEqual(list(self.home.rglob("*")), [], f"shk {' '.join(argv)} wrote under HOME")
         return done
 
@@ -291,10 +372,23 @@ class NoHomeWriteTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout)
         self.assertTrue(json.loads(done.stdout)["ok"])
 
-    @unittest.skipIf(absent("slurm"), "integration-only: slurm absent")
     def test_submit_dry_run(self):
-        done = self.shk("submit", "--task", "g9", "--script", "job.sh", "--partition", "normal", "--cpus", "1",
-                        "--mem", "2G", "--time", "20m", "--dry-run")
+        done = self.shk(
+            "submit",
+            "--task",
+            "g9",
+            "--script",
+            "job.sh",
+            "--partition",
+            "normal",
+            "--cpus",
+            "1",
+            "--mem",
+            "2G",
+            "--time",
+            "20m",
+            "--dry-run",
+        )
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
 
 

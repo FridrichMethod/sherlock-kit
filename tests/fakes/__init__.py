@@ -8,12 +8,13 @@ FAKE_SSH_HANG, for ``unittest.mock.patch.dict(os.environ, ...)``) and
 ``.calls()`` (every recorded argv[1:], in order). ``SRC`` is the package source
 root for tests that import ``sherlock_kit`` without installing it.
 """
-from dataclasses import dataclass
+
 import json
 import os
-from pathlib import Path
 import shlex
 import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"

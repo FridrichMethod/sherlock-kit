@@ -1,16 +1,38 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sherlock-kit"
-version = "0.4.0"
-description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
-readme = "README.md"
-requires-python = ">=3.11"
+dynamic = ["version"]
+authors = [{ name = "Zhaoyang Li", email = "zhaoyangli@stanford.edu" }]
 license = "MIT"
 license-files = ["LICENSE"]
+readme = "README.md"
+description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
+requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
+]
+
+[project.optional-dependencies]
+dev = [
+    # Same versions as the mirrors-mypy and ruff-pre-commit revs in .pre-commit-config.yaml,
+    # so a local `mypy` or `ruff check` agrees with the hooks and with CI.
+    "mypy==1.19.1",
+    "pre-commit",
+    "ruff==0.15.5",
+]
 
 [project.urls]
 Repository = "https://github.com/FridrichMethod/sherlock-kit"
@@ -20,9 +42,104 @@ Issues = "https://github.com/FridrichMethod/sherlock-kit/issues"
 [project.scripts]
 shk = "sherlock_kit.cli:main"
 
+[tool.setuptools.dynamic]
+version = { attr = "sherlock_kit.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
 
 [tool.setuptools.package-data]
-sherlock_kit = ["data/*.json", "data/remote/*.sh", "data/rules/*.md", "data/skills/*/SKILL.md"]
+sherlock_kit = [
+    "py.typed",
+    "data/*.json",
+    "data/remote/*.sh",
+    "data/rules/*.md",
+    "data/skills/*/SKILL.md",
+]
+
+[tool.ruff]
+target-version = "py311"
+preview = true
+src = ["src"]
+line-length = 100
+force-exclude = true
+extend-include = ["bin/shk"]
+extend-exclude = [
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Check https://docs.astral.sh/ruff/rules/ for the full list of rules
+select = [
+    "A",    # flake8-builtins
+    "ARG",  # flake8-unused-arguments
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "C90",  # mccabe
+    "E",    # pycodestyle
+    "F",    # Pyflakes
+    "I",    # isort
+    "PERF", # perflint
+    "PLE",  # pylint-error
+    "RUF",  # ruff
+    "SIM",  # flake8-simplify
+    "TID",  # flake8-tidy-imports
+    "UP",   # pyupgrade
+]
+extend-select = [
+    "D",   # pydocstyle
+    "W",   # pycodestyle
+    "PLW", # pylint-warning
+]
+ignore = ["B905", "E203", "E501", "E741", "UP037"]
+explicit-preview-rules = true
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+[tool.ruff.lint.isort]
+known-first-party = ["sherlock_kit"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+# bin/shk must still parse on old Pythons so that it can refuse them with a message.
+"bin/shk" = ["UP"]
+# Tests need no docstrings; handlers and fakes take arguments their protocol requires.
+"tests/**" = ["D", "ARG001", "ARG002", "ARG005"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", "bin/shk"]
+mypy_path = "src"
+pretty = true
+show_error_codes = true
+no_implicit_optional = true
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true
+warn_unused_ignores = true

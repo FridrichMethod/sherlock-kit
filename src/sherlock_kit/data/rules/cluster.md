@@ -28,7 +28,7 @@ The site banner requires reading `/etc/agents/AGENTS.md` first. It and its topic
 - At least 60 s between checks (`squeue --me`, `sacct -j ID -o JobID,State,Elapsed,MaxRSS,ExitCode`, `seff ID`); prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; never resubmit without finding the cause; jobs do at least 10 minutes of work. `shk` exit 5: run the `shk status` command in the reply's `next`, not before the time it names, never a blind resubmit; exit 6: stop and report.
 - Never schedule an agent to run later (`scrontab`, `--begin`, self-resubmitting jobs, a job script that calls `shk submit` or starts an agent).
 - Cancel only your own jobs, with `scancel ID` or `shk cancel`, and only when the user asks; never `scancel -u $USER`; never kill processes on compute nodes.
-- `shk doctor` is read-only. `shk` reads `[tool.sherlock-kit]` at or above the working directory and stops at a directory you do not own (group trees): pass `--project-dir DIR`.
+- `shk doctor` is read-only. `shk` reads `[tool.sherlock-kit]` from the nearest `pyproject.toml` (or `sherlock-kit.toml`) at or above the working directory; from elsewhere pass `--project-dir DIR`.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`.

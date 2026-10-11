@@ -1,32 +1,40 @@
 """`shk rules` and `shk install-skill`: packaged text verbatim, project copies, never HOME."""
-from contextlib import redirect_stderr, redirect_stdout
+
 import io
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from fakes import SRC
 
 sys.path.insert(0, str(SRC))
-import sherlock_kit  # noqa: E402
-from sherlock_kit import cli, install  # noqa: E402
+import sherlock_kit
+from sherlock_kit import cli, install
 
 DATA = SRC / "sherlock_kit/data"
 SKILL = DATA / "skills/sherlock-kit/SKILL.md"
-COPIES = {"claude": ".claude/skills/sherlock-kit/SKILL.md", "codex": ".agents/skills/sherlock-kit/SKILL.md"}
+COPIES = {
+    "claude": ".claude/skills/sherlock-kit/SKILL.md",
+    "codex": ".agents/skills/sherlock-kit/SKILL.md",
+}
 RULES_COPY = ".claude/rules/sherlock-kit.md"
-MARKER = (f"<!-- installed by sherlock-kit {sherlock_kit.__version__} via shk install-skill; "
-          "edits are overwritten -->\n")
+MARKER = (
+    f"<!-- installed by sherlock-kit {sherlock_kit.__version__} via shk install-skill; "
+    "edits are overwritten -->\n"
+)
 
 
 def inventory(root: Path) -> dict:
-    return {str(p.relative_to(root)): (p.is_symlink(), p.read_bytes() if p.is_file() else None)
-            for p in sorted(root.rglob("*"))}
+    return {
+        str(p.relative_to(root)): (p.is_symlink(), p.read_bytes() if p.is_file() else None)
+        for p in sorted(root.rglob("*"))
+    }
 
 
 class InstallCase(unittest.TestCase):
@@ -57,8 +65,13 @@ class RulesTests(InstallCase):
         env = {**os.environ, "PYTHONPATH": str(SRC), "HOME": str(self.home)}
         for kind in ("workstation", "cluster"):
             with self.subTest(kind=kind):
-                done = subprocess.run([sys.executable, "-B", "-m", "sherlock_kit", "rules", kind], env=env,
-                                      cwd=self.tmp, capture_output=True, check=True)
+                done = subprocess.run(
+                    [sys.executable, "-B", "-m", "sherlock_kit", "rules", kind],
+                    env=env,
+                    cwd=self.tmp,
+                    capture_output=True,
+                    check=True,
+                )
                 self.assertEqual(done.stdout, (DATA / f"rules/{kind}.md").read_bytes())
                 self.assertEqual(done.stderr, b"")
         self.assertEqual(inventory(self.home), {})
@@ -86,13 +99,17 @@ class InstallSkillTests(InstallCase):
     def test_one_client(self):
         for client, rel in COPIES.items():
             with self.subTest(client=client):
-                code, report = self.shk("install-skill", "--project", str(self.project), "--client", client)
+                code, report = self.shk(
+                    "install-skill", "--project", str(self.project), "--client", client
+                )
                 self.assertEqual((code, list(report["files"])), (0, [rel]))
         self.assertEqual(sorted(p.name for p in self.project.iterdir()), [".agents", ".claude"])
 
     def test_idempotent(self):
         self.skill("--rules", "workstation")
-        before = {rel: os.stat(self.project / rel).st_mtime_ns for rel in (*COPIES.values(), RULES_COPY)}
+        before = {
+            rel: os.stat(self.project / rel).st_mtime_ns for rel in (*COPIES.values(), RULES_COPY)
+        }
         code, report = self.skill("--rules", "workstation")
         self.assertEqual(code, 0)
         self.assertEqual(set(report["files"].values()), {"current"})
@@ -100,17 +117,25 @@ class InstallSkillTests(InstallCase):
 
     def test_check_reports_missing_and_stale_without_writing(self):
         code, report = self.skill("--check")
-        self.assertEqual((code, report["ok"], set(report["files"].values())), (1, False, {"missing"}))
+        self.assertEqual(
+            (code, report["ok"], set(report["files"].values())), (1, False, {"missing"})
+        )
         self.assertEqual(list(self.project.iterdir()), [])
         self.skill()
         self.assertEqual(self.skill("--check")[0], 0)
         stale = self.project / COPIES["codex"]
-        stale.write_text(stale.read_text(encoding="utf-8").replace(MARKER, MARKER.replace(
-            sherlock_kit.__version__, "0.3.9")), encoding="utf-8")
+        stale.write_text(
+            stale.read_text(encoding="utf-8").replace(
+                MARKER, MARKER.replace(sherlock_kit.__version__, "0.3.9")
+            ),
+            encoding="utf-8",
+        )
         snapshot = inventory(self.project)
         code, report = self.skill("--check")
-        self.assertEqual((code, report["files"][COPIES["codex"]], report["files"][COPIES["claude"]]),
-                         (1, "stale", "current"))
+        self.assertEqual(
+            (code, report["files"][COPIES["codex"]], report["files"][COPIES["claude"]]),
+            (1, "stale", "current"),
+        )
         self.assertEqual(inventory(self.project), snapshot)
         self.assertEqual(self.skill()[1]["files"][COPIES["codex"]], "written")
         self.assertEqual(self.skill("--check")[0], 0)
@@ -118,7 +143,9 @@ class InstallSkillTests(InstallCase):
     def test_rules_copy_and_global_link_skip(self):
         code, report = self.skill("--client", "claude", "--rules", "cluster")
         self.assertEqual((code, report["files"][RULES_COPY]), (0, "written"))
-        self.assertEqual((self.project / RULES_COPY).read_bytes(), (DATA / "rules/cluster.md").read_bytes())
+        self.assertEqual(
+            (self.project / RULES_COPY).read_bytes(), (DATA / "rules/cluster.md").read_bytes()
+        )
         (self.project / RULES_COPY).unlink()
         rules = self.home / ".claude/rules"
         rules.mkdir(parents=True)
@@ -128,7 +155,11 @@ class InstallSkillTests(InstallCase):
         self.assertEqual(code, 0)
         self.assertNotIn(RULES_COPY, report["files"])
         self.assertFalse((self.project / RULES_COPY).exists())
-        self.assertTrue(any("~/.claude/rules/sherlock-kit.md" in n and "--force" in n for n in report["notices"]))
+        self.assertTrue(
+            any(
+                "~/.claude/rules/sherlock-kit.md" in n and "--force" in n for n in report["notices"]
+            )
+        )
         code, report = self.skill("--client", "claude", "--rules", "cluster", "--force")
         self.assertEqual((code, report["files"][RULES_COPY]), (0, "written"))
         self.assertEqual(inventory(self.home), before)
@@ -136,7 +167,9 @@ class InstallSkillTests(InstallCase):
     def test_notice_when_a_personal_skill_shadows_the_project_copy(self):
         self.assertEqual(self.skill()[1]["notices"], [])
         (self.home / ".claude/skills").mkdir(parents=True)
-        (self.home / ".claude/skills/sherlock-kit").symlink_to(SKILL.parent, target_is_directory=True)
+        (self.home / ".claude/skills/sherlock-kit").symlink_to(
+            SKILL.parent, target_is_directory=True
+        )
         before = inventory(self.home)
         code, report = self.skill()
         self.assertEqual(code, 0)
@@ -162,7 +195,7 @@ class InstallSkillTests(InstallCase):
         (self.project / ".agents").mkdir()
         (self.project / ".agents/skills").symlink_to("../.claude/skills", target_is_directory=True)
         code, report = self.skill()
-        self.assertEqual((code, report["files"]), (0, {rel: "written" for rel in COPIES.values()}))
+        self.assertEqual((code, report["files"]), (0, dict.fromkeys(COPIES.values(), "written")))
         self.assertTrue((self.project / ".agents/skills").is_symlink())
         self.assertIn(MARKER, (self.project / COPIES["claude"]).read_text(encoding="utf-8"))
         self.assertEqual(self.skill("--check")[0], 0)

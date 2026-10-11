@@ -4,6 +4,7 @@ Read README.md, CONTRIBUTING.md and the relevant docs/ guide.
 The lead owns main, integration and publication. Each writer
 uses a separate branch and worktree; reviewers are read-only. Preserve user changes.
 Use Python 3.11+ and standard-library mechanisms where sufficient. Run
+`pre-commit run --all-files` (ruff, mypy, shellcheck, shfmt, mdformat),
 `python3 -B tests/run_suite.py` (or `python3 -m unittest discover -s tests -v`) and
 isolated installation checks.
 Never publish credentials, private configuration, research code/data, or runtime state.

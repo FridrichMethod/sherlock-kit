@@ -57,6 +57,7 @@ shk doctor                  # offline: Python, ssh, rsync, config, both ssh mast
 shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m --dry-run
 shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m
 shk status --task smoke     # at least 60 s apart; the reply says when (next_check_after)
+mkdir -p results            # pull creates LOCAL, never its parent
 shk pull /scratch/users/USER/demo/runs/NAME/out results/smoke --validate bundle
 ```
 
@@ -85,21 +86,51 @@ shk manifest DIR
 ```
 
 - Operational commands print one JSON document on stdout; `rules` and `--version`
-  print text. `shk <command> --help` is the authoritative flag list.
-- `submit`: the job name is `shk.<project>.<task slug>.<hash of project, campaign,
-  task>`. One read call decides `new`, `live`, `done`, `failed` or `stale`; a live
-  name is always refused, a finished one unless `--resubmit REASON`. Then one
-  mutation call stages the script under `<run-dir>/.shk/` and runs `sbatch`.
-  Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`, `--array
-  N%M` with 2 to 1000 tasks. `--dry-run` is offline.
+  print text. `shk <command> --help` is the authoritative flag list. `submit`,
+  `status`, `cancel` and `occupancy` report `next_check_after`, 60 s after they
+  ran.
+- `submit`: the job name is `shk.<project>.<task slug>.<hash>` of project,
+  campaign and task. One read call (`squeue` and the last 30 days of `sacct`)
+  decides `new`, `live`, `done`, `failed` or `stale` (spec files in the run
+  directory but no Slurm rows, submitted like `new`); a live name is always
+  refused, a finished one unless `--resubmit REASON`. Then one mutation call
+  stages the script under `<run-dir>/.shk/` and runs `sbatch`; a lost reply is
+  exit 5, and the reply's `next` names the `shk status` command and when to run
+  it. Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`,
+  `--array N%M` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
+  several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
+  writes the `--dependency` string itself, so a `,` or `?` list is refused.
+  `--dry-run` is offline.
+- The script's leading `#SBATCH` lines may set anything except what `shk` owns
+  (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
+  `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,
+  `-J`/`--job-name`) and a `hetjob` or `packjob` separator: heterogeneous jobs
+  are refused. Matching follows sbatch's own parsing, so abbreviated long
+  options (`--part=gpu`) and short flags bundled after value-less ones
+  (`-Hp gpu`) count too.
 - `status`: one `squeue` and one `sacct` for all selected names; `--since`
-  defaults to 30 days (7 with `--all`). `cancel` cancels the jobs of one name.
-- `push` rsyncs through the DTN into an absolute REMOTE under `remote_root`
-  (`--anywhere` lifts that) and never deletes. `pull` copies exactly the files
-  in `REMOTE/SHA256SUMS` into a private stage, verifies them, runs the optional
-  validator and renames the stage onto LOCAL with a receipt beside it.
-- `occupancy` lists current use of partitions; borrowed partitions need it and
-  `--courtesy-ack` before a submission.
+  defaults to 30 days (7 with `--all`). Give `--campaign` once for every
+  `--task` or once per `--task`, and `--run-dir` once per `--task` or not at
+  all. `cancel` cancels the live jobs of one name.
+- `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
+  `remote_root` (`--anywhere` lifts that) and never deletes. Pushed files keep
+  their local modification times (`rsync -t`, so a re-push skips unchanged
+  files instead of rewriting them); inputs that are old locally can therefore be
+  purge-eligible on scratch soon after a push.
+- `pull` copies exactly the files in `REMOTE/SHA256SUMS` into a private stage
+  beside LOCAL, verifies them, runs the optional validator and renames the stage
+  onto LOCAL. With NAME the last component of LOCAL, the stage is
+  `.NAME.shk-stage` (a rerun resumes it), `.NAME.shk-lock` serializes concurrent
+  pulls, the receipt is `.NAME.shk-receipt.json`, and `--replace` keeps the
+  previous copy as `.NAME.shk-old-<UTC>`; projects can gitignore `.*.shk-*`. The
+  validator runs from the project root (the directory of the configuration file)
+  with the stage directory as its last argument, passes with exit 0 and must
+  treat the stage as read-only: whatever it writes is promoted with the data.
+- `occupancy` lists current use of partitions. Borrowed partitions (`btrippe`,
+  `possu`) need it and `--courtesy-ack` before a submission, and such a
+  submission reports their occupancy and courtesy text, with a warning when
+  others are running there and you already have 2 jobs there or ask for more
+  than 2 h.
 - `install-skill` copies the agent skill into a project (`.claude/skills/` and
   `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/` (Codex
   gets a hint instead); `--check` exits 1 when a copy is missing or stale.
@@ -108,17 +139,17 @@ shk manifest DIR
 
 `[tool.sherlock-kit]` in `pyproject.toml`, else the top level of
 `sherlock-kit.toml`, found with `--project-dir DIR` (exactly that directory) or
-by walking up from the working directory until a directory you do not own.
+in the nearest directory at or above the working directory that has one.
 Unknown keys are errors; nothing secret belongs here.
 
 | Key | Default | Used by |
 |---|---|---|
-| `project` | none; `^[a-z0-9][a-z0-9-]{0,23}$` | `submit`, `status`, `cancel` |
-| `remote_root` | none; absolute, no `..` | `submit`, `push`, `pull` |
+| `project` | none; `^[a-z0-9][a-z0-9-]{0,23}$` | `submit`, `status --task`, `cancel --task`; `status --all` lists only this project's names |
+| `remote_root` | none; absolute, no `..` | `submit` (default run directories, also for `status`), `push` (unless `--anywhere`) |
 | `control_host` | `sherlock-plain` | every remote call |
 | `data_host` | `sherlock-dtn` | `push`, `pull` |
 | `connect_timeout`, `command_timeout`, `transfer_timeout` | 15, 60, 3600 s | ssh and rsync |
-| `[tool.sherlock-kit.validators]` | none; `NAME = ["argv", ...]` | `pull --validate NAME` (gets the stage directory) |
+| `[tool.sherlock-kit.validators]` | none; `NAME = ["argv", ...]` | `pull --validate NAME` runs argv plus the stage directory, only from a configuration file you own |
 
 `doctor`, `rules` and `occupancy` work without a configuration. On Sherlock
 (`sh<N>-ln<N>` login nodes, `SLURM_CLUSTER_NAME=sherlock`, a compute node inside a
@@ -152,12 +183,15 @@ Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
 ## Development
 
 ```sh
-python3 tests/run_suite.py
+python3 -m venv .venv && .venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/pre-commit install
+.venv/bin/pre-commit run --all-files    # ruff, mypy, shellcheck, shfmt, mdformat
+python3 -B tests/run_suite.py
 ```
 
 The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` and
 `dash`. A skipped test fails the run when `CI` or `SHK_REQUIRE_ALL` is set.
-`SHK_BUILD_PYTHON` (an interpreter with `setuptools>=77` and `wheel`) enables the
+`SHK_BUILD_PYTHON` (an interpreter with `setuptools>=80` and `wheel`) enables the
 sdist, wheel and editable-install checks, which build committed `HEAD`. See
 [CONTRIBUTING.md](CONTRIBUTING.md), [docs/design.md](docs/design.md),
 [docs/sherlock-policy.md](docs/sherlock-policy.md),

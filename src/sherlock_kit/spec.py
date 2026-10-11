@@ -3,19 +3,23 @@
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
 partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
 the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
-script_unreadable) for bad grammar, an unreadable script or one over 1 MiB.
+script_unreadable) for bad memory, time, array or --after-ok grammar, an unreadable script or
+one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm checks them); each
+--after-ok value must be one job id, since shk joins them into its own --dependency string, where
+a ',' or '?' would add clauses.
 """
+
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from datetime import datetime
 import hashlib
 import json
-from pathlib import Path
 import re
 import shlex
 import subprocess
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sherlock_kit import partitions, version_line
@@ -25,20 +29,23 @@ from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, ShkError
 SCRIPT_LIMIT = 1 << 20  # bytes
 ARRAY_MAX_TASKS = 1000  # Sherlock max_array_tasks (2026-10-10); indices are 0..count-1
 NAME = re.compile(r"shk\.[a-z0-9][a-z0-9-]{0,23}\.[a-z0-9-]{1,20}\.[0-9a-f]{10}")
-TEXT = re.compile(r"[^\x00-\x1f\x7f]{1,128}")  # --task and --campaign
 RUN_DIR = re.compile(r"/[A-Za-z0-9_./-]+")
 MEMORY = re.compile(r"([1-9][0-9]*)([MG])", re.IGNORECASE)
 DURATION = re.compile(r"([1-9][0-9]*)([hm])")
 CLOCK_TIME = re.compile(r"([0-9]+):([0-5][0-9]):([0-5][0-9])")
 ARRAY = re.compile(r"([0-9]+)(?:%([0-9]+))?")
-OPTION_GRAMMAR = {
-    "constraint": re.compile(r"[A-Za-z0-9_.:-]+(?:[&|][A-Za-z0-9_.:-]+)*"),
-    "signal": re.compile(r"(?:B:)?(?:USR1|USR2|TERM)@[1-9][0-9]*"),
-    "after-ok": re.compile(r"[1-9][0-9]*(?:_[0-9]+)?"),
-}
+JOB_ID = re.compile(r"[1-9][0-9]*(?:_[0-9]+)?")  # one --after-ok value: N or N_TASK
 # #SBATCH options that shk sets on the command line or that would bypass the profile.
 DENIED_LONG = (
-    "account", "exclude", "gres", "gpus", "partition", "array", "dependency", "begin", "job-name",
+    "account",
+    "exclude",
+    "gres",
+    "gpus",
+    "partition",
+    "array",
+    "dependency",
+    "begin",
+    "job-name",
 )
 DENIED_SHORT = "AxGpadbJ"  # -b is --begin
 FLAGS_WITHOUT_VALUE = "HhOQsuvVW"  # sbatch short flags that may be bundled before another one
@@ -47,12 +54,16 @@ HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: on
 
 @dataclass(frozen=True)
 class Array:
+    """--array N%M: count tasks (indices 0..count-1), at most throttle at a time."""
+
     count: int
     throttle: int | None
 
 
 @dataclass(frozen=True)
 class Resources:
+    """The checked resources of one submission."""
+
     partition: str
     cpus: int
     tasks: int
@@ -68,6 +79,8 @@ class Resources:
 
 @dataclass(frozen=True)
 class Spec:
+    """What submit sends: name, run directory, sbatch argv, script and the frozen document."""
+
     name: str
     run_dir: str
     argv: list[str]
@@ -83,6 +96,7 @@ class Spec:
 
 
 def canonical(value: Any) -> str:
+    """Compact JSON with sorted keys: the job-name hash input and the staged spec."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
@@ -91,9 +105,9 @@ def _invalid(message: str) -> ShkError:
 
 
 def checked_text(label: str, value: str) -> str:
-    """A --task or --campaign value: 1-128 printable characters."""
-    if not TEXT.fullmatch(value):
-        raise _invalid(f"--{label} must be 1-128 printable characters")
+    """A --task or --campaign value, which must not be empty (an unset shell variable)."""
+    if not value:
+        raise _invalid(f"--{label} must not be empty")
     return value
 
 
@@ -164,18 +178,22 @@ def directives(script: bytes) -> list[str]:
     words: list[str] = []
     for line in script.decode("utf-8", "replace").splitlines():
         if line.startswith("#SBATCH"):
-            words += _directive_words(line[len("#SBATCH"):])
+            words += _directive_words(line[len("#SBATCH") :])
         elif line.strip() and not line.lstrip().startswith("#"):
             break
     return words
 
 
 def denied(word: str) -> bool:
-    """Whether one #SBATCH word sets a denylisted option (-pgpu, -Hp, --part=gpu, --gpus=1) or
-    starts a heterogeneous job component."""
+    """Whether one #SBATCH word sets an option shk owns or starts a hetjob component.
+
+    sbatch parses #SBATCH words with getopt_long, so this follows it: -p, -pgpu, -Hp (value-less
+    flags bundle before another), --partition=gpu, --part=gpu (an unambiguous prefix) and
+    --gpus-per-node=1 are all denied.
+    """
     if word in HETJOB_SEPARATORS:
         return True
-    if word.startswith("--"):  # getopt_long also accepts unambiguous prefixes such as --part
+    if word.startswith("--"):
         option = word[2:].partition("=")[0]
         if not option:
             return False
@@ -197,19 +215,25 @@ def read_script(path: str) -> bytes:
         raise _invalid(f"{path} is larger than 1 MiB")
     refused = [word for word in directives(data) if denied(word)]
     if refused:
-        raise ShkError(EXIT_REFUSED, "sbatch_directive",
-                       f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
-                       hint="remove it from the script and use the shk submit command line instead "
-                       "(heterogeneous jobs are not supported)")
+        raise ShkError(
+            EXIT_REFUSED,
+            "sbatch_directive",
+            f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
+            hint="remove it from the script and use the shk submit command line instead "
+            "(heterogeneous jobs are not supported)",
+        )
     return data
 
 
-def _check_option_grammar(args: argparse.Namespace) -> None:
-    values = [("constraint", args.constraint), ("signal", args.signal)]
-    values += [("after-ok", job) for job in args.after_ok]
-    for flag, value in values:
-        if value is not None and not OPTION_GRAMMAR[flag].fullmatch(value):
-            raise _invalid(f"--{flag} {value!r} does not match {OPTION_GRAMMAR[flag].pattern}")
+def after_ok(values: list[str]) -> tuple[str, ...]:
+    """--after-ok job ids, each one N or N_TASK; shk joins them into afterok:A:B itself."""
+    for value in values:
+        if not JOB_ID.fullmatch(value):
+            raise _invalid(
+                f"--after-ok {value!r}: give one job id (N or N_TASK) per value; "
+                "repeat --after-ok or list several ids after it"
+            )
+    return tuple(values)
 
 
 def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resources:
@@ -217,13 +241,14 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
     if args.cpus < 1 or args.tasks < 1 or args.gpus < 0:
         raise _invalid("--cpus and --tasks must be at least 1 and --gpus at least 0")
     if args.gpus and not profile.gpus_allowed:
-        raise ShkError(EXIT_REFUSED, "gpus_not_allowed",
-                       f"partition {profile.name} does not allow GPUs")
+        raise ShkError(
+            EXIT_REFUSED, "gpus_not_allowed", f"partition {profile.name} does not allow GPUs"
+        )
     requeue = profile.requeue if args.requeue is None else args.requeue
     if requeue and not profile.requeue:
-        raise ShkError(EXIT_REFUSED, "requeue_not_allowed",
-                       f"partition {profile.name} does not allow requeue")
-    _check_option_grammar(args)
+        raise ShkError(
+            EXIT_REFUSED, "requeue_not_allowed", f"partition {profile.name} does not allow requeue"
+        )
     return Resources(
         partition=profile.name,
         cpus=args.cpus,
@@ -235,12 +260,12 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
         array=None if args.array is None else array(args.array),
         constraint=args.constraint,
         signal=args.signal,
-        after_ok=tuple(args.after_ok),
+        after_ok=after_ok(args.after_ok),
     )
 
 
 def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
-    """sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path."""
+    """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path."""
     log = f"{run}/slurm-{'%A_%a' if wanted.array else '%j'}"
     argv = ["sbatch", "--parsable", f"--job-name={name}", f"--partition={wanted.partition}"]
     if wanted.array:
@@ -272,9 +297,14 @@ def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
 
 
 def _git(root: Path, *argv: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "--no-optional-locks", "-C", str(root), *argv],
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
-                          check=False)
+    return subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(root), *argv],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
 
 
 def git_state(root: Path | None) -> dict[str, Any] | None:
@@ -288,14 +318,15 @@ def git_state(root: Path | None) -> dict[str, Any] | None:
         status = _git(root, "status", "--porcelain", "--untracked-files=no")
     except (OSError, subprocess.TimeoutExpired):  # no git binary, or a very slow checkout
         return None
-    return {"head": head.stdout.strip(),
-            "dirty": status.returncode != 0 or bool(status.stdout.strip())}
+    return {
+        "head": head.stdout.strip(),
+        "dirty": status.returncode != 0 or bool(status.stdout.strip()),
+    }
 
 
 def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spec:
     """All offline checks of shk submit, then the sbatch argv and the frozen spec document."""
     project = config.project
-    assert project is not None, "the submit handler requires project before building"
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
     profile = partitions.profile(args.partition)
@@ -303,10 +334,12 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     run = run_directory(args.run_dir, config, name)
     script = read_script(args.script)
     if profile.borrowed and not args.courtesy_ack:
-        raise ShkError(EXIT_REFUSED, "courtesy_ack_required",
-                       f"{profile.name} is borrowed: {profile.courtesy}",
-                       hint=f"run shk occupancy --partition {profile.name}, "
-                       "then add --courtesy-ack")
+        raise ShkError(
+            EXIT_REFUSED,
+            "courtesy_ack_required",
+            f"{profile.name} is borrowed: {profile.courtesy}",
+            hint=f"run shk occupancy --partition {profile.name}, then add --courtesy-ack",
+        )
     argv, digest = sbatch_argv(name, run, wanted), hashlib.sha256(script).hexdigest()
     document = {
         "schema": 1,

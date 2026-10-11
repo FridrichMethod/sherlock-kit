@@ -1,42 +1,50 @@
 """Exit codes, ShkError and Outcome: the result contract of every command (frozen 0.4.0).
 
-0 ok; 1 local error; 2 usage; 3 refused by policy or Slurm; 4 Sherlock unreachable
-without a new login; 5 outcome unknown after a dispatched mutation (shk status >= 60 s
-later); 6 status ok but the newest job of a requested name has an anomaly.
-ShkError(code 1-6, snake_case token, message, hint=None) prints {"ok": false, "error":
-token, "message", "hint"}. Outcome(payload dict, code 0-6): JSON ("ok" defaults to code
-in (0, 6)) or the str under "text" verbatim (Outcome.text(s)); anything else is a TypeError.
+0 ok; 1 local error; 2 usage; 3 refused by policy or Slurm; 4 Sherlock unreachable without a
+new login; 5 outcome unknown after a dispatched mutation (shk status >= 60 s later); 6 status
+ok but the newest job of a requested name has an anomaly. A ShkError prints {"ok": false,
+"error": token, "message", "hint"}. An Outcome prints its payload as JSON ("ok" defaults to
+code in (0, 6)), or the text of Outcome.text() verbatim.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
+from typing import Any
 
-EXIT_OK, EXIT_LOCAL, EXIT_USAGE, EXIT_REFUSED, EXIT_UNREACHABLE, EXIT_UNKNOWN, EXIT_ANOMALY = range(7)
+EXIT_OK = 0
+EXIT_LOCAL = 1
+EXIT_USAGE = 2
+EXIT_REFUSED = 3
+EXIT_UNREACHABLE = 4
+EXIT_UNKNOWN = 5
+EXIT_ANOMALY = 6
 
 
 class ShkError(Exception):
-    def __init__(self, code: int, token: str, message: str, hint: str | None = None):
-        if type(code) is not int or not 1 <= code <= 6 or not re.fullmatch(r"[a-z][a-z0-9_]*", str(token)):
-            raise ValueError(f"ShkError needs an exit code 1-6 and a snake_case token, not {code!r}, {token!r}")
-        super().__init__(message)
-        self.code, self.token, self.message, self.hint = code, token, message, hint
+    """A failed command: exit code 1-6, a snake_case token, a message and an optional hint."""
 
-    def payload(self) -> dict:
+    def __init__(self, code: int, token: str, message: str, hint: str | None = None) -> None:
+        """Keep the parts of the error payload; the message is also the exception text."""
+        super().__init__(message)
+        self.code = code
+        self.token = token
+        self.message = message
+        self.hint = hint
+
+    def payload(self) -> dict[str, Any]:
+        """The JSON error document."""
         return {"ok": False, "error": self.token, "message": self.message, "hint": self.hint}
 
 
 @dataclass(frozen=True)
 class Outcome:
-    payload: dict
-    code: int = EXIT_OK
+    """A command result: a JSON payload (or {"text": ...}) and its exit code."""
 
-    def __post_init__(self):
-        text = self.payload.get("text", "") if isinstance(self.payload, dict) else None
-        if not isinstance(text, str) or type(self.code) is not int or not EXIT_OK <= self.code <= EXIT_ANOMALY:
-            raise TypeError(f"Outcome needs a dict payload (a str under 'text') and an exit code 0-6, not "
-                            f"{type(self.payload).__name__}, {self.code!r}")
+    payload: dict[str, Any]
+    code: int = EXIT_OK
 
     @classmethod
     def text(cls, text: str, code: int = EXIT_OK) -> Outcome:
+        """A result printed verbatim instead of as JSON."""
         return cls({"text": text}, code)

@@ -9,6 +9,21 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.14"
+      - name: Install pre-commit
+        run: python -m pip install pre-commit
+      - name: Run pre-commit hooks (ruff, mypy, shellcheck, shfmt, mdformat)
+        run: pre-commit run --all-files --show-diff-on-failure
+
   tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -23,16 +38,14 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install rsync, shellcheck and dash
+      - name: Install rsync and dash
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends rsync shellcheck dash
+          sudo apt-get install --yes --no-install-recommends rsync dash
       - name: Create isolated packaging interpreter
         run: |
           python -m venv .venv-build
-          .venv-build/bin/python -m pip install 'setuptools>=77' wheel
+          .venv-build/bin/python -m pip install 'setuptools>=80' wheel
           echo "SHK_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
-      - name: Lint remote POSIX sh programs
-        run: shellcheck -s sh src/sherlock_kit/data/remote/*.sh
       - name: Run full offline suite (skips fail under CI)
         run: python tests/run_suite.py
