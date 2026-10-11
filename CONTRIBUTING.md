@@ -40,8 +40,10 @@ git diff --check
 ## Boundaries
 
 - Python is standard library only and runs on 3.11 to 3.14 (no newer syntax or
-  APIs). The package stays small: about 1,250 lines of Python, hard cap 1,500
-  (`wc -l src/sherlock_kit/*.py bin/shk`).
+  APIs). Keep it lean and readable: small functions, external input validated
+  once at the boundary, and no defensive code against situations that cannot
+  realistically happen. Lean is not a line count; do not compress code to save
+  lines.
 - Remote programs under `src/sherlock_kit/data/remote/` are fixed POSIX `sh`,
   passed literally and linted with `shellcheck -s sh`; they print only `SHK_`
   lines and sanitize `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*`.

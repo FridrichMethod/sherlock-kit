@@ -60,9 +60,10 @@ shk status --task smoke     # at least 60 s apart; the reply says when (next_che
 shk pull /scratch/users/USER/demo/runs/NAME/out results/smoke --validate bundle
 ```
 
-The job writes `out/SHA256SUMS` as its last step (`shk manifest out`, or
-`sha256sum` over the files); `shk pull` verifies every file against it before
-the copy appears under `results/`.
+The job writes `out/SHA256SUMS` as its last step (`shk manifest out`, or the
+`sha256sum` one-liner in the skill), over its output directory, never the run
+directory itself; `shk pull` verifies every file against it before the copy
+appears under `results/`.
 
 ## Commands
 
@@ -100,8 +101,8 @@ shk manifest DIR
 - `occupancy` lists current use of partitions; borrowed partitions need it and
   `--courtesy-ack` before a submission.
 - `install-skill` copies the agent skill into a project (`.claude/skills/` and
-  `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/`;
-  `--check` exits 1 when a copy is missing or stale.
+  `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/` (Codex
+  gets a hint instead); `--check` exits 1 when a copy is missing or stale.
 
 ## Configuration
 
@@ -132,8 +133,8 @@ are refused.
 | 1 | local error: configuration, spec, verification, validator, malformed reply |
 | 2 | usage error |
 | 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, Slurm rejected the job, push or pull on Sherlock |
-| 4 | Sherlock unreachable without a new login: `auth_required` (open the master) or `unavailable` (fix `~/.ssh/config`) |
-| 5 | outcome unknown after a dispatched mutation: run `shk status`, at least 60 s later |
+| 4 | Sherlock unreachable without a new login: `auth_required` (ask the user to open the master); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop) |
+| 5 | outcome unknown after a dispatched mutation: run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
 | 6 | status ok, but the newest job of a requested name has an anomaly |
 
 Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.

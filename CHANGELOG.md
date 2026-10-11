@@ -7,7 +7,7 @@ Slurm as the only source of truth and no local or remote state of its own. Job
 names derive from the logical task (`shk.<project>.<task slug>.<hash>`), so a
 retry reuses the name and deduplication reads `squeue` and `sacct`. Remote work
 runs as fixed POSIX `sh` programs over the existing OpenSSH control masters, and
-`shk` never logs in. Python shrinks from about 3,600 lines to under 1,500.
+`shk` never logs in.
 
 - Removed: the attempt registry on Sherlock and its `registry_root`, attempt ids,
   `reconcile` with `--acknowledge-preemption` and `--abandon`, the private
@@ -26,10 +26,11 @@ runs as fixed POSIX `sh` programs over the existing OpenSSH control masters, and
   optional project validator and a receipt beside the destination;
   `shk rules {workstation,cluster}`; `shk install-skill`; `bin/shk` (mode
   100755), a stdlib-only entry point that dotfiles links from its submodule.
-- Transport: `ssh -O check` before every dial, exit 4 `auth_required` (open the
-  master) or `unavailable` (fix `~/.ssh/config`) without one; dials are mux-only
-  with `-oProxyCommand=false`. On Sherlock the local executor runs the same
-  programs and `push`/`pull` are refused.
+- Transport: `ssh -O check` before every dial; without a usable master, exit 4
+  `auth_required` (open the master) or `unavailable` (fix `~/.ssh/config`, or
+  install OpenSSH). Dials are mux-only with `-oProxyCommand=false`; a transport
+  failure after the check is exit 4 with the hint `run shk doctor`. On Sherlock
+  the local executor runs the same programs and `push`/`pull` are refused.
 - Partitions: the ten profiles carry over; listing is the authorization fact,
   borrowed partitions need `--courtesy-ack`, and the possu window and btrippe
   budget are courtesy text. `#SBATCH` lines may set anything except the
@@ -215,6 +216,8 @@ Initial release prepared from the accepted foundation and CPU pilot.
   actual clients. Production registration/trust is explicit.
 - Explicit runtime state placement, release documentation and full POSIX CI.
 
-Supported limits and real acceptance are in
-[acceptance evidence](docs/validation/acceptance.md). No research code/data,
-borrowed-partition authorization or generic GPU recovery is distributed.
+Supported limits and real acceptance were in the acceptance document of the
+0.1.0 to 0.3.0 trees; its live Slurm observations are now in
+[observed Slurm behavior](docs/validation/observed-slurm.md). No research
+code/data, borrowed-partition authorization or generic GPU recovery is
+distributed.
