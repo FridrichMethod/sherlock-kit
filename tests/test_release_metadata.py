@@ -94,7 +94,8 @@ class ContractTests(unittest.TestCase):
 
     @unittest.skipUnless(in_git(), "needs a git checkout")
     def test_contract_paths_are_tracked_and_bin_shk_is_executable(self):
-        entries = {line.split("\t")[1]: line.split()[0] for line in git("ls-files", "-s", *CONTRACT.values()).splitlines()}
+        listed = git("ls-files", "-s", *CONTRACT.values()).splitlines()
+        entries = {line.split("\t")[1]: line.split()[0] for line in listed}
         self.assertEqual(set(entries), set(CONTRACT.values()))
         self.assertEqual(entries[CONTRACT["C4"]], "100755")
 

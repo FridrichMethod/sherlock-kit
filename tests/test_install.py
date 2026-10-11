@@ -20,7 +20,8 @@ DATA = SRC / "sherlock_kit/data"
 SKILL = DATA / "skills/sherlock-kit/SKILL.md"
 COPIES = {"claude": ".claude/skills/sherlock-kit/SKILL.md", "codex": ".agents/skills/sherlock-kit/SKILL.md"}
 RULES_COPY = ".claude/rules/sherlock-kit.md"
-MARKER = f"<!-- installed by sherlock-kit {sherlock_kit.__version__} via shk install-skill; edits are overwritten -->\n"
+MARKER = (f"<!-- installed by sherlock-kit {sherlock_kit.__version__} via shk install-skill; "
+          "edits are overwritten -->\n")
 
 
 def inventory(root: Path) -> dict:
