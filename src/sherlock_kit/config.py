@@ -11,21 +11,25 @@ DEFAULTS is the no-config value. Keys (no secrets):
   connect_timeout 15, command_timeout 60, transfer_timeout 3600: positive integer seconds
   [validators] NAME = ["argv", ...]: `pull --validate NAME` runs argv + [stage dir]
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from itertools import takewhile
 import os
-from pathlib import Path
 import re
 import stat
 import tomllib
+from dataclasses import dataclass, field
+from itertools import takewhile
+from pathlib import Path
 from types import MappingProxyType
 
 from sherlock_kit.errors import EXIT_LOCAL, ShkError
 
-PATTERNS = {"project": re.compile(r"[a-z0-9][a-z0-9-]{0,23}"), "remote_root": re.compile(r"/[A-Za-z0-9_./-]+"),
-            "control_host": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]*")}
+PATTERNS = {
+    "project": re.compile(r"[a-z0-9][a-z0-9-]{0,23}"),
+    "remote_root": re.compile(r"/[A-Za-z0-9_./-]+"),
+    "control_host": re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]*"),
+}
 PATTERNS["data_host"] = HOST = PATTERNS["control_host"]
 TIMEOUTS = ("connect_timeout", "command_timeout", "transfer_timeout")
 KEYS = frozenset({*PATTERNS, *TIMEOUTS, "validators"})
@@ -55,8 +59,12 @@ def _validators(bad, table) -> MappingProxyType:
     if not isinstance(table, dict):
         raise bad("validators must be a table of argv lists")
     for name, argv in table.items():
-        if (not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or not isinstance(argv, list) or not argv
-                or any(not isinstance(arg, str) or not arg or "\0" in arg for arg in argv)):
+        if (
+            not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+            or not isinstance(argv, list)
+            or not argv
+            or any(not isinstance(arg, str) or not arg or "\0" in arg for arg in argv)
+        ):
             raise bad(f"validator {name!r} must be a NAME = [non-empty argv strings]")
     return MappingProxyType({name: tuple(argv) for name, argv in table.items()})
 
@@ -79,12 +87,19 @@ def _value(bad, key, value):
 
 def parse(table, path: Path | None = None) -> ProjectConfig:
     def bad(message, hint=None):
-        return ShkError(EXIT_LOCAL, "config_invalid", f"{path or 'sherlock-kit configuration'}: {message}", hint)
+        return ShkError(
+            EXIT_LOCAL, "config_invalid", f"{path or 'sherlock-kit configuration'}: {message}", hint
+        )
+
     if not isinstance(table, dict):
         raise bad("[tool.sherlock-kit] must be a table")
     if set(table) - KEYS:
-        raise bad(f"unknown keys {sorted(set(table) - KEYS)}", hint=f"allowed: {', '.join(sorted(KEYS))}")
-    found = ProjectConfig(path=path, **{key: _value(bad, key, value) for key, value in table.items()})
+        raise bad(
+            f"unknown keys {sorted(set(table) - KEYS)}", hint=f"allowed: {', '.join(sorted(KEYS))}"
+        )
+    found = ProjectConfig(
+        path=path, **{key: _value(bad, key, value) for key, value in table.items()}
+    )
     if found.control_host == found.data_host:
         raise bad("control_host and data_host must differ")
     return found
@@ -118,8 +133,12 @@ def _in_directory(directory: Path) -> ProjectConfig | None:
 def discover(project_dir=None, cwd=None) -> ProjectConfig | None:
     if project_dir is not None:
         if not stat.S_ISDIR(getattr(_stat(Path(project_dir).expanduser()), "st_mode", 0)):
-            raise ShkError(EXIT_LOCAL, "config_invalid", f"--project-dir {project_dir} is not a directory")
+            raise ShkError(
+                EXIT_LOCAL, "config_invalid", f"--project-dir {project_dir} is not a directory"
+            )
         return _in_directory(Path(project_dir).expanduser().resolve())
     start = Path(os.getcwd() if cwd is None else cwd).resolve()
-    mine = takewhile(lambda d: getattr(_stat(d), "st_uid", None) == os.geteuid(), (start, *start.parents))
+    mine = takewhile(
+        lambda d: getattr(_stat(d), "st_uid", None) == os.geteuid(), (start, *start.parents)
+    )
     return next((found for d in mine if (found := _in_directory(d)) is not None), None)

@@ -18,13 +18,16 @@ remote command. $FAKE_SSH_MODE selects the dial behaviour:
 - ``disconnect``: exit 255 with a non-authentication transport failure.
 - ``hang``: sleep $FAKE_SSH_HANG seconds (default 30), then exit 255.
 """
+
 import json
 import os
 import shlex
 import sys
 import time
 
-BANNER = "Automated tools: read and follow /etc/agents/AGENTS.md before doing anything else on Sherlock."
+BANNER = (
+    "Automated tools: read and follow /etc/agents/AGENTS.md before doing anything else on Sherlock."
+)
 VALUE_FLAGS = set("BbcDEeFIiJLlmOoPpQRSWw")
 
 
@@ -34,7 +37,7 @@ def split(args):
     while index < len(args):
         arg = args[index]
         if not arg.startswith("-"):
-            return arg, args[index + 1:]
+            return arg, args[index + 1 :]
         index += 2 if len(arg) == 2 and arg[1] in VALUE_FLAGS else 1
     return None, []
 
@@ -45,7 +48,9 @@ def control(args):
     hosts = os.environ.get("FAKE_SSH_MASTER_HOSTS")
     state = os.environ.get("FAKE_SSH_MASTER") if not hosts or args[-1] in hosts.split(",") else None
     if state == "none":
-        print("Control socket connect(/synthetic/socket): No such file or directory", file=sys.stderr)
+        print(
+            "Control socket connect(/synthetic/socket): No such file or directory", file=sys.stderr
+        )
         return 255
     if state == "unconfigured":
         print('No ControlPath specified for "-O" command', file=sys.stderr)

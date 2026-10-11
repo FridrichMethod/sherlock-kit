@@ -9,7 +9,7 @@ if [ ! -d "$dir" ]; then
     printf "SHK_ERROR no_directory\n"
 elif [ ! -f "$sums" ] || [ ! -r "$sums" ]; then
     printf "SHK_ERROR no_manifest\n"
-elif [ "$(wc -c < "$sums")" -gt 4194304 ]; then
+elif [ "$(wc -c <"$sums")" -gt 4194304 ]; then
     printf "SHK_ERROR too_large\n"
 else
     count=$(find "$dir/." -name ".shk*" -prune -o -type f ! -name SHA256SUMS -print | head -n 10001 | wc -l)

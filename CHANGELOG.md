@@ -103,16 +103,14 @@ offline evidence. The partition-table change has no live pilot of its own.
 - Job arrays: `resources.array = {"count": 2..1000, "throttle": 1..count}`
   emits `--array=0-<count-1>[%throttle]` and `slurm-%A_%a` logs; sacct `N_k`
   task rows and `N_[a-b%t]` pending or cancelled aggregates are reconciled per
-  task and restart, reported as `tasks {count, terminal, running, pending,
-  missing, by_state, incomplete_history}`, with cost summed over complete task
+  task and restart, reported as `tasks {count, terminal, running, pending, missing, by_state, incomplete_history}`, with cost summed over complete task
   and restart groups and `known` only when every task is terminal with complete
   accounting.
 - Reconciliation: `status`/`reconcile --attempt ID` and `--all` make one cached
   reader call (one `sacct --name=shk-A,shk-B,...` on the login node; 500 open
   attempts, 50,000 rows); resolutions are `not_sent`, `abandoned`,
   `inconclusive`, `abandonable`, `identified`, `terminal`,
-  `unexpected_preemption` and `error`. New `reconcile --attempt ID --abandon
-  [--note T]` closes an attempt that stayed absent from accounting for 900 s
+  `unexpected_preemption` and `error`. New `reconcile --attempt ID --abandon [--note T]` closes an attempt that stayed absent from accounting for 900 s
   without a known job id after a fresh `squeue` check on the login node;
   `--acknowledge-preemption [--note T]` now writes a per-task waiver under the
   registry lock from a fresh query and needs the network. `reconcile` writes

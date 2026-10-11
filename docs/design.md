@@ -69,10 +69,7 @@ asks the local control socket:
   because logging in again would not help;
 - no `ssh`: exit 4 `unavailable`, hint `install OpenSSH`.
 
-The dial itself is `ssh -T -oBatchMode=yes -oRemoteCommand=none
--oConnectTimeout=N -oConnectionAttempts=1 -oStrictHostKeyChecking=yes
--oUpdateHostKeys=no -oControlMaster=no -oPermitLocalCommand=no
--oClearAllForwardings=yes -oForwardAgent=no -oProxyCommand=false HOST CMD`, where
+The dial itself is `ssh -T -oBatchMode=yes -oRemoteCommand=none -oConnectTimeout=N -oConnectionAttempts=1 -oStrictHostKeyChecking=yes -oUpdateHostKeys=no -oControlMaster=no -oPermitLocalCommand=no -oClearAllForwardings=yes -oForwardAgent=no -oProxyCommand=false HOST CMD`, where
 CMD is one `shlex.join` of a literal argv. The check and the dial are separate
 processes: if the master dies in between, or refuses the session, OpenSSH would
 fall back to a fresh login. `-oProxyCommand=false` turns that fallback into an
@@ -155,8 +152,7 @@ duplicates), rsyncs exactly those files into a private stage beside LOCAL,
 verifies the inventory and every hash, re-reads the manifest, runs the optional
 validator from the configuration on the stage, then renames the stage onto LOCAL
 and writes a receipt beside it. An existing LOCAL is kept unless `--replace`
-(which renames it aside, never deletes); a rerun resumes the stage. `manifest
-DIR` writes `DIR/SHA256SUMS` inside jobs.
+(which renames it aside, never deletes); a rerun resumes the stage. `manifest DIR` writes `DIR/SHA256SUMS` inside jobs.
 
 ## Weaker guarantees, accepted
 

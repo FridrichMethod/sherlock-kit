@@ -1,22 +1,23 @@
 """Offline submit checks: grammar, job name, #SBATCH denylist, profile gates, argv, frozen spec."""
-from argparse import Namespace
-from datetime import datetime, timezone
+
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from argparse import Namespace
+from datetime import UTC, datetime
+from pathlib import Path
 
 from fakes import SRC
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import config, spec  # noqa: E402
-from sherlock_kit.errors import ShkError  # noqa: E402
+from sherlock_kit import config, spec
+from sherlock_kit.errors import ShkError
 
-NOW = datetime(2026, 10, 10, 12, 0, 5, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 10, 12, 0, 5, tzinfo=UTC)
 SCRIPT = b"#!/bin/bash -l\n#SBATCH --mail-type=END\necho hi\n"
 NAME = "shk.demo.train-a." + hashlib.sha256(b'["demo","default","train-a"]').hexdigest()[:10]
 RUN = "/scratch/u/demo/runs/" + NAME
@@ -25,10 +26,25 @@ TAIL = ["--ntasks=1", "--mem=4096M", "--time=90", f"--chdir={RUN}"]
 SINGLE_LOGS = [f"--output={RUN}/slurm-%j.out", f"--error={RUN}/slurm-%j.err"]
 ARRAY_LOGS = [f"--output={RUN}/slurm-%A_%a.out", f"--error={RUN}/slurm-%A_%a.err"]
 EXPORT = f"--export=ALL,SHK_NAME={NAME}"
-DEFAULTS = {"task": "train-a", "campaign": "default", "partition": "normal", "cpus": 2,
-            "mem": "4G", "time": "90m", "gpus": 0, "tasks": 1, "array": None, "constraint": None,
-            "signal": None, "requeue": None, "after_ok": [], "run_dir": None,
-            "courtesy_ack": False, "resubmit": None, "dry_run": False}
+DEFAULTS = {
+    "task": "train-a",
+    "campaign": "default",
+    "partition": "normal",
+    "cpus": 2,
+    "mem": "4G",
+    "time": "90m",
+    "gpus": 0,
+    "tasks": 1,
+    "array": None,
+    "constraint": None,
+    "signal": None,
+    "requeue": None,
+    "after_ok": [],
+    "run_dir": None,
+    "courtesy_ack": False,
+    "resubmit": None,
+    "dry_run": False,
+}
 
 
 class Case(unittest.TestCase):
@@ -67,17 +83,33 @@ class GrammarTests(Case):
         bad += [(spec.minutes, t) for t in ("0m", "0:00:00", "1:60:00", "1:00", "2d", "1.5h", "")]
         bad += [(spec.array, t) for t in ("1", "1001", "4%0", "4%5", "x", "0-3", "4%", "")]
         for parse, text in bad:
-            with (self.subTest(parse=parse.__name__, text=text),
-                  self.assertRaises(ShkError) as caught):
+            with (
+                self.subTest(parse=parse.__name__, text=text),
+                self.assertRaises(ShkError) as caught,
+            ):
                 parse(text)
             self.assertEqual((caught.exception.code, caught.exception.token), (1, "spec_invalid"))
 
     def test_other_fields_are_checked_offline(self):
-        invalid = ({"cpus": 0}, {"tasks": 0}, {"gpus": -1}, {"constraint": "cpu; false"},
-                   {"constraint": "a||b"}, {"signal": "KILL@60"}, {"signal": "B:USR1@60\n"},
-                   {"after_ok": ["0"]}, {"after_ok": ["12;x"]}, {"task": ""}, {"task": "a\nb"},
-                   {"task": "x" * 129}, {"campaign": "tab\there"}, {"run_dir": "relative/run"},
-                   {"run_dir": "/scratch/../etc"}, {"run_dir": "/scratch/%j"}, {"run_dir": "/"})
+        invalid = (
+            {"cpus": 0},
+            {"tasks": 0},
+            {"gpus": -1},
+            {"constraint": "cpu; false"},
+            {"constraint": "a||b"},
+            {"signal": "KILL@60"},
+            {"signal": "B:USR1@60\n"},
+            {"after_ok": ["0"]},
+            {"after_ok": ["12;x"]},
+            {"task": ""},
+            {"task": "a\nb"},
+            {"task": "x" * 129},
+            {"campaign": "tab\there"},
+            {"run_dir": "relative/run"},
+            {"run_dir": "/scratch/../etc"},
+            {"run_dir": "/scratch/%j"},
+            {"run_dir": "/"},
+        )
         for overrides in invalid:
             with self.subTest(overrides=overrides):
                 self.refused(1, "spec_invalid", **overrides)
@@ -105,15 +137,47 @@ class GrammarTests(Case):
 
 
 class DirectiveTests(Case):
-    DENIED = ("-p normal", "--partition=gpu", "--partition gpu", "-pgpu", "-A grp", "--account=grp",
-              "-x sh01", "--exclude=sh01", "-G 1", "--gpus=1", "--gpus-per-node=2", "--gres=gpu:1",
-              "-a 0-3", "--array=0-3", "-d afterok:1", "--dependency=singleton",
-              "--begin=now+1hour", "-b now+1hour", "-bnow", "-Hb now", "-J other",
-              "--job-name=other", "--part=gpu", "-c 2 -p gpu", "-Hp gpu", "'--partition=gpu'",
-              "--comment='unbalanced -p gpu", "hetjob", "packjob")
-    ALLOWED = ("#SBATCH --mail-type=END", "#SBATCH -c 2 --mem=8G  # -p gpu is a comment",
-               "  #SBATCH -p gpu", "# SBATCH -p gpu", "#SBATCH --gres-flags=enforce-binding",
-               "#SBATCH -o out.log", "#SBATCH --comment='x y'", "#SBATCH --exclusive")
+    DENIED = (
+        "-p normal",
+        "--partition=gpu",
+        "--partition gpu",
+        "-pgpu",
+        "-A grp",
+        "--account=grp",
+        "-x sh01",
+        "--exclude=sh01",
+        "-G 1",
+        "--gpus=1",
+        "--gpus-per-node=2",
+        "--gres=gpu:1",
+        "-a 0-3",
+        "--array=0-3",
+        "-d afterok:1",
+        "--dependency=singleton",
+        "--begin=now+1hour",
+        "-b now+1hour",
+        "-bnow",
+        "-Hb now",
+        "-J other",
+        "--job-name=other",
+        "--part=gpu",
+        "-c 2 -p gpu",
+        "-Hp gpu",
+        "'--partition=gpu'",
+        "--comment='unbalanced -p gpu",
+        "hetjob",
+        "packjob",
+    )
+    ALLOWED = (
+        "#SBATCH --mail-type=END",
+        "#SBATCH -c 2 --mem=8G  # -p gpu is a comment",
+        "  #SBATCH -p gpu",
+        "# SBATCH -p gpu",
+        "#SBATCH --gres-flags=enforce-binding",
+        "#SBATCH -o out.log",
+        "#SBATCH --comment='x y'",
+        "#SBATCH --exclusive",
+    )
 
     def test_denylisted_directives_in_the_leading_block_are_refused(self):
         for directive in self.DENIED:
@@ -145,17 +209,49 @@ class ProfileAndArgvTests(Case):
 
     def test_golden_sbatch_argv(self):
         partition, cpus = "--partition=normal", "--cpus-per-task=2"
-        self.assertEqual(self.build().argv, [*HEAD, partition, cpus, "--no-requeue", *TAIL,
-                                             *SINGLE_LOGS, EXPORT, "--dependency=singleton"])
-        self.assertEqual(self.build(array="4%2").argv, [*HEAD, partition, "--array=0-3%2", cpus,
-                                                        "--no-requeue", *TAIL, *ARRAY_LOGS, EXPORT])
+        self.assertEqual(
+            self.build().argv,
+            [
+                *HEAD,
+                partition,
+                cpus,
+                "--no-requeue",
+                *TAIL,
+                *SINGLE_LOGS,
+                EXPORT,
+                "--dependency=singleton",
+            ],
+        )
+        self.assertEqual(
+            self.build(array="4%2").argv,
+            [*HEAD, partition, "--array=0-3%2", cpus, "--no-requeue", *TAIL, *ARRAY_LOGS, EXPORT],
+        )
         self.assertEqual(self.build(array="3", after_ok=["11"]).argv[-1], "--dependency=afterok:11")
-        owners = self.build(partition="owners", gpus=1, constraint="GPU_SKU:H100_SXM5|GPU_SKU:A100",
-                            signal="B:USR1@60", after_ok=["11", "12_3"])
-        self.assertEqual(owners.argv, [
-            *HEAD, "--partition=owners", cpus, "--requeue", "--open-mode=append", *TAIL,
-            *SINGLE_LOGS, "-G", "1", "--constraint=GPU_SKU:H100_SXM5|GPU_SKU:A100",
-            "--signal=B:USR1@60", EXPORT, "--dependency=afterok:11:12_3,singleton"])
+        owners = self.build(
+            partition="owners",
+            gpus=1,
+            constraint="GPU_SKU:H100_SXM5|GPU_SKU:A100",
+            signal="B:USR1@60",
+            after_ok=["11", "12_3"],
+        )
+        self.assertEqual(
+            owners.argv,
+            [
+                *HEAD,
+                "--partition=owners",
+                cpus,
+                "--requeue",
+                "--open-mode=append",
+                *TAIL,
+                *SINGLE_LOGS,
+                "-G",
+                "1",
+                "--constraint=GPU_SKU:H100_SXM5|GPU_SKU:A100",
+                "--signal=B:USR1@60",
+                EXPORT,
+                "--dependency=afterok:11:12_3,singleton",
+            ],
+        )
         self.assertIn("--no-requeue", self.build(partition="owners", requeue=False).argv)
         owners_array = self.build(array="2", partition="owners").argv
         self.assertFalse(any(option.startswith("--dependency") for option in owners_array))
@@ -164,18 +260,47 @@ class ProfileAndArgvTests(Case):
         built = self.build(resubmit="fixed the input path", array="4%2")
         doc = json.loads(built.text)
         self.assertEqual(built.text, spec.canonical(doc))
-        self.assertEqual(set(doc), {"schema", "name", "project", "campaign", "task", "run_dir",
-                                    "resources", "argv", "script", "resubmit_reason", "shk", "git",
-                                    "created_utc"})
-        self.assertEqual((doc["name"], doc["run_dir"], doc["argv"], doc["created_utc"]),
-                         (NAME, RUN, built.argv, "2026-10-10T12:00:05Z"))
+        self.assertEqual(
+            set(doc),
+            {
+                "schema",
+                "name",
+                "project",
+                "campaign",
+                "task",
+                "run_dir",
+                "resources",
+                "argv",
+                "script",
+                "resubmit_reason",
+                "shk",
+                "git",
+                "created_utc",
+            },
+        )
+        self.assertEqual(
+            (doc["name"], doc["run_dir"], doc["argv"], doc["created_utc"]),
+            (NAME, RUN, built.argv, "2026-10-10T12:00:05Z"),
+        )
         digest = hashlib.sha256(SCRIPT).hexdigest()
         self.assertEqual(doc["script"], {"name": "job.sh", "sha256": digest})
         self.assertEqual((built.sha256, built.script), (doc["script"]["sha256"], SCRIPT))
-        self.assertEqual(doc["resources"], {
-            "partition": "normal", "cpus": 2, "tasks": 1, "gpus": 0, "mem_mb": 4096, "minutes": 90,
-            "requeue": False, "array": {"count": 4, "throttle": 2}, "constraint": None,
-            "signal": None, "after_ok": []})
+        self.assertEqual(
+            doc["resources"],
+            {
+                "partition": "normal",
+                "cpus": 2,
+                "tasks": 1,
+                "gpus": 0,
+                "mem_mb": 4096,
+                "minutes": 90,
+                "requeue": False,
+                "array": {"count": 4, "throttle": 2},
+                "constraint": None,
+                "signal": None,
+                "after_ok": [],
+            },
+        )
         self.assertEqual((doc["resubmit_reason"], doc["git"]), ("fixed the input path", None))
         self.assertTrue(doc["shk"].startswith("sherlock-kit 0.4.0 ("))
 
@@ -184,8 +309,9 @@ class ProfileAndArgvTests(Case):
         git = ["git", "-C", str(self.tmp), "-c", "user.name=t", "-c", "user.email=t@example.test"]
         for argv in (["init", "-q"], ["add", "job.sh"], ["commit", "-qm", "x"]):
             subprocess.run([*git, *argv], check=True, env=env)
-        head = subprocess.run([*git, "rev-parse", "HEAD"], check=True, env=env, capture_output=True,
-                              text=True).stdout.strip()
+        head = subprocess.run(
+            [*git, "rev-parse", "HEAD"], check=True, env=env, capture_output=True, text=True
+        ).stdout.strip()
         self.assertEqual(json.loads(self.build().text)["git"], {"head": head, "dirty": False})
         (self.tmp / "job.sh").write_bytes(SCRIPT + b"echo changed\n")
         self.assertEqual(json.loads(self.build().text)["git"], {"head": head, "dirty": True})

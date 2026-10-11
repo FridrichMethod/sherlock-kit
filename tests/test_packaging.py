@@ -5,28 +5,46 @@ read-only with --no-build-isolation and no index, so nothing touches the network
 command runs with a temporary HOME; no shk command may change it (pip itself may: its
 user agent runs `rustc --version`, and a rustup shim then writes ~/.rustup).
 """
+
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tarfile
 import tempfile
 import unittest
 import zipfile
+from pathlib import Path
 
 from fakes import ROOT
 
 BUILD_PYTHON = os.environ.get("SHK_BUILD_PYTHON")
 DATA = "sherlock_kit/data/"
-CONTENT = ("rules/workstation.md", "rules/cluster.md", "skills/sherlock-kit/SKILL.md", "partitions.json")
+CONTENT = (
+    "rules/workstation.md",
+    "rules/cluster.md",
+    "skills/sherlock-kit/SKILL.md",
+    "partitions.json",
+)
 VERSION = "sherlock-kit 0.4.0 "
 
 
 def in_git() -> bool:
     """True when ROOT itself is the top of a git checkout (not, say, an sdist unpacked inside one)."""
-    top = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"], capture_output=True, text=True,
-                         check=False) if shutil.which("git") else None
-    return top is not None and top.returncode == 0 and Path(top.stdout.strip()).resolve() == ROOT.resolve()
+    top = (
+        subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if shutil.which("git")
+        else None
+    )
+    return (
+        top is not None
+        and top.returncode == 0
+        and Path(top.stdout.strip()).resolve() == ROOT.resolve()
+    )
 
 
 class HeadCase(unittest.TestCase):
@@ -39,18 +57,37 @@ class HeadCase(unittest.TestCase):
         self.home, self.tree = self.tmp / "home", self.tmp / "tree"
         self.home.mkdir()
         archive = self.tmp / "head.tar"
-        subprocess.run(["git", "-C", str(ROOT), "archive", "--format=tar", f"--output={archive}", "HEAD"],
-                       check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(ROOT), "archive", "--format=tar", f"--output={archive}", "HEAD"],
+            check=True,
+            capture_output=True,
+        )
         with tarfile.open(archive) as bundle:
             bundle.extractall(self.tree, filter="tar")
-        keep = {k: v for k, v in os.environ.items() if not k.startswith(("PYTHON", "PIP_", "SHK_", "VIRTUAL_ENV"))}
-        self.env = {**keep, "HOME": str(self.home), "PIP_NO_INDEX": "1", "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-                    "PIP_NO_CACHE_DIR": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+        keep = {
+            k: v
+            for k, v in os.environ.items()
+            if not k.startswith(("PYTHON", "PIP_", "SHK_", "VIRTUAL_ENV"))
+        }
+        self.env = {
+            **keep,
+            "HOME": str(self.home),
+            "PIP_NO_INDEX": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_CACHE_DIR": "1",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
 
     def run_ok(self, *argv, cwd=None) -> str:
         before = sorted(self.home.rglob("*"))
-        done = subprocess.run([str(a) for a in argv], cwd=cwd or self.tmp, env=self.env, capture_output=True,
-                              text=True, timeout=300)
+        done = subprocess.run(
+            [str(a) for a in argv],
+            cwd=cwd or self.tmp,
+            env=self.env,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
         self.assertEqual(done.returncode, 0, f"{argv}\n{done.stdout}\n{done.stderr}")
         if Path(argv[0]).name == "shk":
             self.assertEqual(sorted(self.home.rglob("*")), before, f"{argv} wrote under HOME")
@@ -83,14 +120,30 @@ class BinShkTests(HeadCase):
 
 
 @unittest.skipUnless(in_git(), "needs a git checkout to archive HEAD")
-@unittest.skipUnless(BUILD_PYTHON, "set SHK_BUILD_PYTHON to an interpreter with setuptools>=80 and wheel")
+@unittest.skipUnless(
+    BUILD_PYTHON, "set SHK_BUILD_PYTHON to an interpreter with setuptools>=80 and wheel"
+)
 class BuildTests(HeadCase):
     def build(self) -> tuple[Path, Path]:
         dist = self.tmp / "dist"
-        self.run_ok(BUILD_PYTHON, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation", "--wheel-dir", dist,
-                    self.tree)
-        self.run_ok(BUILD_PYTHON, "-c", "import setuptools.build_meta as b, sys; b.build_sdist(sys.argv[1])",
-                    dist, cwd=self.tree)
+        self.run_ok(
+            BUILD_PYTHON,
+            "-m",
+            "pip",
+            "wheel",
+            "--no-deps",
+            "--no-build-isolation",
+            "--wheel-dir",
+            dist,
+            self.tree,
+        )
+        self.run_ok(
+            BUILD_PYTHON,
+            "-c",
+            "import setuptools.build_meta as b, sys; b.build_sdist(sys.argv[1])",
+            dist,
+            cwd=self.tree,
+        )
         (wheel,), (sdist,) = dist.glob("*.whl"), dist.glob("*.tar.gz")
         return wheel, sdist
 
@@ -105,10 +158,18 @@ class BuildTests(HeadCase):
         for rel in (*CONTENT, *(f"remote/{n}" for n in self.remote_programs())):
             self.assertIn(DATA + rel, names)
         self.assertTrue(self.remote_programs())
-        self.assertFalse([n for n in names if not n.startswith(("sherlock_kit/", "sherlock_kit-0.4.0.dist-info/"))])
+        self.assertFalse([
+            n for n in names if not n.startswith(("sherlock_kit/", "sherlock_kit-0.4.0.dist-info/"))
+        ])
         with tarfile.open(sdist) as bundle:
             members = {m.name.split("/", 1)[1]: m for m in bundle.getmembers() if "/" in m.name}
-        for rel in ("bin/shk", "LICENSE", "CHANGELOG.md", "README.md", *(f"src/{DATA}{c}" for c in CONTENT)):
+        for rel in (
+            "bin/shk",
+            "LICENSE",
+            "CHANGELOG.md",
+            "README.md",
+            *(f"src/{DATA}{c}" for c in CONTENT),
+        ):
             self.assertIn(rel, members)
         self.assertEqual(members["bin/shk"].mode & 0o111, 0o111)
 
@@ -120,11 +181,26 @@ class BuildTests(HeadCase):
 
     def test_editable_install(self):
         bin_dir = self.venv("editable-env")
-        purelib = self.run_ok(BUILD_PYTHON, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-        site = self.run_ok(bin_dir / "python", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-        tools = Path(site.strip()) / "shk-build-tools.pth"  # setuptools for --no-build-isolation, read-only
+        purelib = self.run_ok(
+            BUILD_PYTHON, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+        )
+        site = self.run_ok(
+            bin_dir / "python", "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"
+        )
+        tools = (
+            Path(site.strip()) / "shk-build-tools.pth"
+        )  # setuptools for --no-build-isolation, read-only
         tools.write_text(purelib)
-        self.run_ok(bin_dir / "python", "-m", "pip", "install", "--no-deps", "--no-build-isolation", "-e", self.tree)
+        self.run_ok(
+            bin_dir / "python",
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-build-isolation",
+            "-e",
+            self.tree,
+        )
         tools.unlink()
         self.assert_cli(bin_dir / "shk", f"editable {self.tree}")
 

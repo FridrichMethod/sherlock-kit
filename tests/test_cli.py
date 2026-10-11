@@ -1,25 +1,26 @@
 """CLI frame, version provenance, bin/shk entry point and the read-only doctor."""
-from contextlib import redirect_stderr, redirect_stdout
-from datetime import datetime, timezone
+
 import io
 import json
 import os
-from pathlib import Path
 import pwd
 import shutil
 import subprocess
 import sys
 import tempfile
-from types import SimpleNamespace
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fakes import ROOT, SRC, install_fake_ssh
 
 sys.path.insert(0, str(SRC))
-import sherlock_kit  # noqa: E402
-from sherlock_kit import cli  # noqa: E402
-from sherlock_kit.errors import Outcome, ShkError  # noqa: E402
+import sherlock_kit
+from sherlock_kit import cli
+from sherlock_kit.errors import Outcome, ShkError
 
 CHECK = ["-O", "check", "-oBatchMode=yes"]
 VERSION = r"sherlock-kit 0\.4\.0 \((git [0-9a-f]+|editable .+|submodule .+|source .+|unknown)\)\n\Z"
@@ -28,6 +29,7 @@ VERSION = r"sherlock-kit 0\.4\.0 \((git [0-9a-f]+|editable .+|submodule .+|sourc
 def command(name, handler):
     def register(subparsers):
         subparsers.add_parser(name).set_defaults(handler=handler)
+
     return SimpleNamespace(register=register)
 
 
@@ -48,8 +50,14 @@ class TempCase(unittest.TestCase):
 class VersionTests(TempCase):
     def test_module_entry_point(self):
         env = {**os.environ, "PYTHONPATH": str(SRC)}
-        out = subprocess.run([sys.executable, "-B", "-m", "sherlock_kit", "--version"], env=env, cwd=self.tmp,
-                             capture_output=True, text=True, check=True).stdout
+        out = subprocess.run(
+            [sys.executable, "-B", "-m", "sherlock_kit", "--version"],
+            env=env,
+            cwd=self.tmp,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
         self.assertRegex(out, VERSION)
         self.assertEqual(sherlock_kit.__version__, "0.4.0")
 
@@ -57,9 +65,16 @@ class VersionTests(TempCase):
         tree = self.tmp / "tree"
         tree.mkdir()
         p = sherlock_kit.provenance
-        self.assertEqual(p({"url": "git+https://x", "vcs_info": {"vcs": "git", "commit_id": "ab12"}}, None), "git ab12")
-        self.assertEqual(p({"url": tree.as_uri(), "dir_info": {"editable": True}}, tree), f"editable {tree}")
-        self.assertEqual(p({"url": "file:///elsewhere", "dir_info": {"editable": True}}, tree), f"source {tree}")
+        self.assertEqual(
+            p({"url": "git+https://x", "vcs_info": {"vcs": "git", "commit_id": "ab12"}}, None),
+            "git ab12",
+        )
+        self.assertEqual(
+            p({"url": tree.as_uri(), "dir_info": {"editable": True}}, tree), f"editable {tree}"
+        )
+        self.assertEqual(
+            p({"url": "file:///elsewhere", "dir_info": {"editable": True}}, tree), f"source {tree}"
+        )
         self.assertEqual(p({}, None), "unknown")
         (tree / ".git").write_text("gitdir: ../../.git/modules/common/sherlock-kit/sherlock-kit\n")
         self.assertEqual(p({}, tree), f"submodule {tree}")
@@ -68,8 +83,11 @@ class VersionTests(TempCase):
 
     def test_bin_shk_two_hop_symlink_writes_nothing(self):
         repo = self.tmp / "repo"
-        shutil.copytree(SRC / "sherlock_kit", repo / "src/sherlock_kit",
-                        ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(
+            SRC / "sherlock_kit",
+            repo / "src/sherlock_kit",
+            ignore=shutil.ignore_patterns("__pycache__"),
+        )
         shutil.copy2(ROOT / "pyproject.toml", repo)
         (repo / "bin").mkdir()
         shutil.copy2(ROOT / "bin/shk", repo / "bin/shk")
@@ -77,16 +95,27 @@ class VersionTests(TempCase):
         (self.tmp / "hop1").symlink_to(repo / "bin/shk")
         (self.tmp / "hop2").symlink_to(self.tmp / "hop1")
         env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
-        out = subprocess.run([str(self.tmp / "hop2"), "--version"], env=env, cwd=self.tmp,
-                             capture_output=True, text=True, check=True).stdout
+        out = subprocess.run(
+            [str(self.tmp / "hop2"), "--version"],
+            env=env,
+            cwd=self.tmp,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
         self.assertEqual(out, f"sherlock-kit 0.4.0 (source {repo})\n")
         self.assertEqual(list(repo.rglob("__pycache__")), [])
 
     def test_bin_shk_refuses_old_python(self):
-        code = ("import runpy, sys; sys.version_info = (3, 10, 4, 'final', 0); "
-                "runpy.run_path(sys.argv[1], run_name='__main__')")
-        result = subprocess.run([sys.executable, "-B", "-c", code, str(ROOT / "bin/shk")],
-                                capture_output=True, text=True)
+        code = (
+            "import runpy, sys; sys.version_info = (3, 10, 4, 'final', 0); "
+            "runpy.run_path(sys.argv[1], run_name='__main__')"
+        )
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", code, str(ROOT / "bin/shk")],
+            capture_output=True,
+            text=True,
+        )
         self.assertEqual(result.returncode, 1)
         self.assertIn("Python 3.11", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
@@ -97,11 +126,15 @@ class FrameTests(TempCase):
         return cli.Context(project_dir=self.tmp, env={}, hostname="lab-ubuntu", **kw)
 
     def test_outcomes_errors_and_text(self):
-        modules = [command("good", lambda a, c: Outcome({"value": 1})),
-                   command("anomaly", lambda a, c: Outcome({"value": 2}, 6)),
-                   command("text", lambda a, c: Outcome.text("raw\n")),
-                   command("refuse", lambda a, c: (_ for _ in ()).throw(ShkError(3, "live", "busy", "wait"))),
-                   command("crash", lambda a, c: 1 / 0)]
+        modules = [
+            command("good", lambda a, c: Outcome({"value": 1})),
+            command("anomaly", lambda a, c: Outcome({"value": 2}, 6)),
+            command("text", lambda a, c: Outcome.text("raw\n")),
+            command(
+                "refuse", lambda a, c: (_ for _ in ()).throw(ShkError(3, "live", "busy", "wait"))
+            ),
+            command("crash", lambda a, c: 1 / 0),
+        ]
         code, out, _ = run(["good"], modules, self.context())
         self.assertEqual((code, json.loads(out)), (0, {"ok": True, "value": 1}))
         self.assertEqual(json.loads(run(["anomaly"], modules, self.context())[1])["ok"], True)
@@ -120,9 +153,15 @@ class FrameTests(TempCase):
 
     def test_loading_handler_and_rendering_failures_are_json(self):
         broken = SimpleNamespace(register=lambda subparsers: 1 / 0)
-        modules = [command("none_text", lambda a, c: Outcome.text(None)),
-                   command("bad_key", lambda a, c: Outcome({"rows": {(1, 2): 3}}))]
-        for argv, mods in ((["none_text"], modules), (["bad_key"], modules), (["doctor"], [broken])):
+        modules = [
+            command("none_text", lambda a, c: Outcome.text(None)),
+            command("bad_key", lambda a, c: Outcome({"rows": {(1, 2): 3}})),
+        ]
+        for argv, mods in (
+            (["none_text"], modules),
+            (["bad_key"], modules),
+            (["doctor"], [broken]),
+        ):
             with self.subTest(argv=argv):
                 code, out, err = run(argv, mods, self.context())
                 self.assertEqual((code, json.loads(out)["error"]), (1, "internal_error"))
@@ -132,7 +171,7 @@ class FrameTests(TempCase):
                 Outcome(payload, code)
 
     def test_context(self):
-        now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 10, tzinfo=UTC)
         ctx = self.context(clock=lambda: now)
         self.assertEqual(ctx.clock(), now)
         self.assertIsNotNone(cli.Context().clock().tzinfo)
@@ -147,13 +186,19 @@ class FrameTests(TempCase):
             ctx.require("project", "remote_root")
         self.assertIn("remote_root", caught.exception.message)
         self.assertIs(ctx.executor(), ctx.executor())
-        self.assertEqual((ctx.executor().host, ctx.data_executor().host), ("sherlock-plain", "sherlock-dtn"))
-        self.assertEqual(cli.Context(executor="local", env={}, hostname="x").data_executor().kind, "local")
+        self.assertEqual(
+            (ctx.executor().host, ctx.data_executor().host), ("sherlock-plain", "sherlock-dtn")
+        )
+        self.assertEqual(
+            cli.Context(executor="local", env={}, hostname="x").data_executor().kind, "local"
+        )
 
     def test_command_module_loading(self):
         self.assertEqual(cli.COMMAND_MODULES, ("slurm", "transfer", "install"))
-        self.assertEqual([m.__name__ for m in cli.load_modules()],
-                         ["sherlock_kit.slurm", "sherlock_kit.transfer", "sherlock_kit.install"])
+        self.assertEqual(
+            [m.__name__ for m in cli.load_modules()],
+            ["sherlock_kit.slurm", "sherlock_kit.transfer", "sherlock_kit.install"],
+        )
         with self.assertRaises(ModuleNotFoundError):
             cli.load_modules(("not_written_yet",))
         (self.tmp / "broken_dep.py").write_text("import shk_missing_dependency_xyz\n")
@@ -190,21 +235,33 @@ class DoctorTests(TempCase):
         self.assertEqual(self.fake.calls(), checks)
 
     def test_doctor_master_states(self):
-        code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="none",
-                                   FAKE_SSH_MASTER_HOSTS="sherlock-dtn")
+        code, report = self.doctor(
+            "--executor",
+            "ssh",
+            "doctor",
+            FAKE_SSH_MASTER="none",
+            FAKE_SSH_MASTER_HOSTS="sherlock-dtn",
+        )
         self.assertEqual((code, report["masters"]), (0, {"control": "running", "data": "none"}))
         self.assertTrue(any("ssh -fN sherlock-dtn" in w for w in report["warnings"]))
         code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="unconfigured")
         self.assertEqual((code, report["masters"]["control"]), (4, "not_configured"))
-        self.assertTrue(any("No ControlPath specified" in p and "ControlPath ~/.ssh/%C for sherlock-plain in "
-                            "~/.ssh/config" in p for p in report["problems"]))
+        self.assertTrue(
+            any(
+                "No ControlPath specified" in p
+                and "ControlPath ~/.ssh/%C for sherlock-plain in ~/.ssh/config" in p
+                for p in report["problems"]
+            )
+        )
 
     def test_remote_doctor(self):
         code, report = self.doctor("--executor", "ssh", "doctor", "--remote")
         self.assertEqual((code, report["remote"]["status"]), (0, "complete"))
         self.assertEqual(set(report["remote"]["tools"]), {"sbatch", "squeue", "sacct", "sha256sum"})
         self.assertEqual(len([c for c in self.fake.calls() if "-O" not in c]), 1)
-        code, report = self.doctor("--executor", "ssh", "doctor", "--remote", FAKE_SSH_MASTER="none")
+        code, report = self.doctor(
+            "--executor", "ssh", "doctor", "--remote", FAKE_SSH_MASTER="none"
+        )
         self.assertEqual((code, report["remote"]["status"]), (4, "auth_required"))
         self.assertTrue(all("-O" in c for c in self.fake.calls()))
 

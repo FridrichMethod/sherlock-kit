@@ -72,8 +72,7 @@ bundles from those pilots are not public and are not reproduced here.
 
 - `sherlock-dtn` accepts plain `rsync -rt --exclude=...` over the control
   master. Options that change the remote command line were rejected:
-  `--itemize-changes` and `--chmod` failed with `invalid characters in scp
-  command! here:%i ...`.
+  `--itemize-changes` and `--chmod` failed with `invalid characters in scp command! here:%i ...`.
 - The DTN has no interactive shell; fix permissions afterwards from a login
   node.
 - Manifest-checked pulls of 4 to 6 files (1.5 KB to 25 MB) through the DTN into a

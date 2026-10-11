@@ -12,6 +12,7 @@ anyway). Codex has no rules import, so it gets a hint instead of a file.
 Copies are idempotent. `--check` writes nothing and exits 1 when a copy is missing
 or stale. It never writes into HOME itself or through a link that leaves DIR.
 """
+
 import argparse
 from dataclasses import dataclass, field
 from importlib import resources
@@ -22,7 +23,10 @@ from sherlock_kit.errors import EXIT_LOCAL, EXIT_OK, Outcome, ShkError
 
 KINDS = ("workstation", "cluster")
 CLIENTS = ("claude", "codex")
-SKILL_COPIES = {"claude": ".claude/skills/sherlock-kit/SKILL.md", "codex": ".agents/skills/sherlock-kit/SKILL.md"}
+SKILL_COPIES = {
+    "claude": ".claude/skills/sherlock-kit/SKILL.md",
+    "codex": ".agents/skills/sherlock-kit/SKILL.md",
+}
 RULES_COPY = ".claude/rules/sherlock-kit.md"
 PERSONAL_SKILL = ".claude/skills/sherlock-kit"
 MARKER = f"<!-- installed by sherlock-kit {__version__} via shk install-skill; edits are overwritten -->\n"
@@ -46,12 +50,18 @@ def register(subparsers) -> None:
     rules.add_argument("kind", choices=KINDS)
     rules.set_defaults(handler=print_rules)
 
-    skill = subparsers.add_parser("install-skill", help="copy the sherlock-kit skill (and rules) into a project")
+    skill = subparsers.add_parser(
+        "install-skill", help="copy the sherlock-kit skill (and rules) into a project"
+    )
     skill.add_argument("--project", required=True, type=Path, metavar="DIR")
     skill.add_argument("--client", choices=(*CLIENTS, "all"), default="all")
     skill.add_argument("--rules", choices=KINDS, help=f"also copy these rules to DIR/{RULES_COPY}")
-    skill.add_argument("--check", action="store_true", help="write nothing; exit 1 if a copy is missing or stale")
-    skill.add_argument("--force", action="store_true", help=f"copy --rules even when ~/{RULES_COPY} exists")
+    skill.add_argument(
+        "--check", action="store_true", help="write nothing; exit 1 if a copy is missing or stale"
+    )
+    skill.add_argument(
+        "--force", action="store_true", help=f"copy --rules even when ~/{RULES_COPY} exists"
+    )
     skill.set_defaults(handler=install)
 
 
@@ -73,16 +83,22 @@ def wanted_files(args: argparse.Namespace, home: Path) -> Wanted:
     for client in clients:
         wanted.files[SKILL_COPIES[client]] = skill
     if "claude" in clients and (home / PERSONAL_SKILL).exists():
-        wanted.notices.append(f"~/{PERSONAL_SKILL} exists: Claude Code uses that personal skill, not this copy")
+        wanted.notices.append(
+            f"~/{PERSONAL_SKILL} exists: Claude Code uses that personal skill, not this copy"
+        )
     if args.rules and "claude" in clients:
         if (home / RULES_COPY).exists() and not args.force:
-            wanted.notices.append(f"~/{RULES_COPY} already loads in Claude Code: --rules skipped "
-                                  "(--force copies anyway)")
+            wanted.notices.append(
+                f"~/{RULES_COPY} already loads in Claude Code: --rules skipped "
+                "(--force copies anyway)"
+            )
         else:
             wanted.files[RULES_COPY] = packaged("rules", f"{args.rules}.md")
     if args.rules and "codex" in clients:
-        wanted.notices.append(f"Codex has no rules import: append the output of `shk rules {args.rules}` to the "
-                              "project's AGENTS.md if Codex should load it")
+        wanted.notices.append(
+            f"Codex has no rules import: append the output of `shk rules {args.rules}` to the "
+            "project's AGENTS.md if Codex should load it"
+        )
     return wanted
 
 
@@ -94,8 +110,11 @@ def refuse_links_out_of(project: Path, paths: list[str]) -> None:
         if not resolved.is_relative_to(project):
             outside.append(f"{rel} -> {resolved}")
     if outside:
-        raise ShkError(EXIT_LOCAL, "target_outside_project",
-                       f"{'; '.join(outside)}: a link leads out of {project}; nothing written")
+        raise ShkError(
+            EXIT_LOCAL,
+            "target_outside_project",
+            f"{'; '.join(outside)}: a link leads out of {project}; nothing written",
+        )
 
 
 def copy_state(path: Path, text: str) -> str:
@@ -111,7 +130,11 @@ def install(args: argparse.Namespace, ctx: object) -> Outcome:
     home = Path.home().resolve()
     project = args.project.expanduser().resolve()
     if not project.is_dir() or project == home:
-        raise ShkError(EXIT_LOCAL, "project_invalid", f"--project {args.project}: not a directory or HOME itself")
+        raise ShkError(
+            EXIT_LOCAL,
+            "project_invalid",
+            f"--project {args.project}: not a directory or HOME itself",
+        )
     wanted = wanted_files(args, home)
     refuse_links_out_of(project, list(wanted.files))
     states = {rel: copy_state(project / rel, text) for rel, text in wanted.files.items()}

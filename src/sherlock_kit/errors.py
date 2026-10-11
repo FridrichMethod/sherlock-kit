@@ -7,18 +7,27 @@ ShkError(code 1-6, snake_case token, message, hint=None) prints {"ok": false, "e
 token, "message", "hint"}. Outcome(payload dict, code 0-6): JSON ("ok" defaults to code
 in (0, 6)) or the str under "text" verbatim (Outcome.text(s)); anything else is a TypeError.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
+from dataclasses import dataclass
 
-EXIT_OK, EXIT_LOCAL, EXIT_USAGE, EXIT_REFUSED, EXIT_UNREACHABLE, EXIT_UNKNOWN, EXIT_ANOMALY = range(7)
+EXIT_OK, EXIT_LOCAL, EXIT_USAGE, EXIT_REFUSED, EXIT_UNREACHABLE, EXIT_UNKNOWN, EXIT_ANOMALY = range(
+    7
+)
 
 
 class ShkError(Exception):
     def __init__(self, code: int, token: str, message: str, hint: str | None = None):
-        if type(code) is not int or not 1 <= code <= 6 or not re.fullmatch(r"[a-z][a-z0-9_]*", str(token)):
-            raise ValueError(f"ShkError needs an exit code 1-6 and a snake_case token, not {code!r}, {token!r}")
+        if (
+            type(code) is not int
+            or not 1 <= code <= 6
+            or not re.fullmatch(r"[a-z][a-z0-9_]*", str(token))
+        ):
+            raise ValueError(
+                f"ShkError needs an exit code 1-6 and a snake_case token, not {code!r}, {token!r}"
+            )
         super().__init__(message)
         self.code, self.token, self.message, self.hint = code, token, message, hint
 
@@ -33,9 +42,15 @@ class Outcome:
 
     def __post_init__(self):
         text = self.payload.get("text", "") if isinstance(self.payload, dict) else None
-        if not isinstance(text, str) or type(self.code) is not int or not EXIT_OK <= self.code <= EXIT_ANOMALY:
-            raise TypeError(f"Outcome needs a dict payload (a str under 'text') and an exit code 0-6, not "
-                            f"{type(self.payload).__name__}, {self.code!r}")
+        if (
+            not isinstance(text, str)
+            or type(self.code) is not int
+            or not EXIT_OK <= self.code <= EXIT_ANOMALY
+        ):
+            raise TypeError(
+                f"Outcome needs a dict payload (a str under 'text') and an exit code 0-6, not "
+                f"{type(self.payload).__name__}, {self.code!r}"
+            )
 
     @classmethod
     def text(cls, text: str, code: int = EXIT_OK) -> Outcome:

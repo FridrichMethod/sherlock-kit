@@ -5,17 +5,18 @@ partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob 
 the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
 script_unreadable) for bad grammar, an unreadable script or one over 1 MiB.
 """
+
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
-from datetime import datetime
 import hashlib
 import json
-from pathlib import Path
 import re
 import shlex
 import subprocess
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sherlock_kit import partitions, version_line
@@ -38,7 +39,15 @@ OPTION_GRAMMAR = {
 }
 # #SBATCH options that shk sets on the command line or that would bypass the profile.
 DENIED_LONG = (
-    "account", "exclude", "gres", "gpus", "partition", "array", "dependency", "begin", "job-name",
+    "account",
+    "exclude",
+    "gres",
+    "gpus",
+    "partition",
+    "array",
+    "dependency",
+    "begin",
+    "job-name",
 )
 DENIED_SHORT = "AxGpadbJ"  # -b is --begin
 FLAGS_WITHOUT_VALUE = "HhOQsuvVW"  # sbatch short flags that may be bundled before another one
@@ -164,7 +173,7 @@ def directives(script: bytes) -> list[str]:
     words: list[str] = []
     for line in script.decode("utf-8", "replace").splitlines():
         if line.startswith("#SBATCH"):
-            words += _directive_words(line[len("#SBATCH"):])
+            words += _directive_words(line[len("#SBATCH") :])
         elif line.strip() and not line.lstrip().startswith("#"):
             break
     return words
@@ -172,7 +181,8 @@ def directives(script: bytes) -> list[str]:
 
 def denied(word: str) -> bool:
     """Whether one #SBATCH word sets a denylisted option (-pgpu, -Hp, --part=gpu, --gpus=1) or
-    starts a heterogeneous job component."""
+    starts a heterogeneous job component.
+    """
     if word in HETJOB_SEPARATORS:
         return True
     if word.startswith("--"):  # getopt_long also accepts unambiguous prefixes such as --part
@@ -197,10 +207,13 @@ def read_script(path: str) -> bytes:
         raise _invalid(f"{path} is larger than 1 MiB")
     refused = [word for word in directives(data) if denied(word)]
     if refused:
-        raise ShkError(EXIT_REFUSED, "sbatch_directive",
-                       f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
-                       hint="remove it from the script and use the shk submit command line instead "
-                       "(heterogeneous jobs are not supported)")
+        raise ShkError(
+            EXIT_REFUSED,
+            "sbatch_directive",
+            f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
+            hint="remove it from the script and use the shk submit command line instead "
+            "(heterogeneous jobs are not supported)",
+        )
     return data
 
 
@@ -217,12 +230,14 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
     if args.cpus < 1 or args.tasks < 1 or args.gpus < 0:
         raise _invalid("--cpus and --tasks must be at least 1 and --gpus at least 0")
     if args.gpus and not profile.gpus_allowed:
-        raise ShkError(EXIT_REFUSED, "gpus_not_allowed",
-                       f"partition {profile.name} does not allow GPUs")
+        raise ShkError(
+            EXIT_REFUSED, "gpus_not_allowed", f"partition {profile.name} does not allow GPUs"
+        )
     requeue = profile.requeue if args.requeue is None else args.requeue
     if requeue and not profile.requeue:
-        raise ShkError(EXIT_REFUSED, "requeue_not_allowed",
-                       f"partition {profile.name} does not allow requeue")
+        raise ShkError(
+            EXIT_REFUSED, "requeue_not_allowed", f"partition {profile.name} does not allow requeue"
+        )
     _check_option_grammar(args)
     return Resources(
         partition=profile.name,
@@ -240,7 +255,7 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
 
 
 def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
-    """sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path."""
+    """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path."""
     log = f"{run}/slurm-{'%A_%a' if wanted.array else '%j'}"
     argv = ["sbatch", "--parsable", f"--job-name={name}", f"--partition={wanted.partition}"]
     if wanted.array:
@@ -272,9 +287,14 @@ def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
 
 
 def _git(root: Path, *argv: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", "--no-optional-locks", "-C", str(root), *argv],
-                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20,
-                          check=False)
+    return subprocess.run(
+        ["git", "--no-optional-locks", "-C", str(root), *argv],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
 
 
 def git_state(root: Path | None) -> dict[str, Any] | None:
@@ -288,8 +308,10 @@ def git_state(root: Path | None) -> dict[str, Any] | None:
         status = _git(root, "status", "--porcelain", "--untracked-files=no")
     except (OSError, subprocess.TimeoutExpired):  # no git binary, or a very slow checkout
         return None
-    return {"head": head.stdout.strip(),
-            "dirty": status.returncode != 0 or bool(status.stdout.strip())}
+    return {
+        "head": head.stdout.strip(),
+        "dirty": status.returncode != 0 or bool(status.stdout.strip()),
+    }
 
 
 def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spec:
@@ -303,10 +325,12 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     run = run_directory(args.run_dir, config, name)
     script = read_script(args.script)
     if profile.borrowed and not args.courtesy_ack:
-        raise ShkError(EXIT_REFUSED, "courtesy_ack_required",
-                       f"{profile.name} is borrowed: {profile.courtesy}",
-                       hint=f"run shk occupancy --partition {profile.name}, "
-                       "then add --courtesy-ack")
+        raise ShkError(
+            EXIT_REFUSED,
+            "courtesy_ack_required",
+            f"{profile.name} is borrowed: {profile.courtesy}",
+            hint=f"run shk occupancy --partition {profile.name}, then add --courtesy-ack",
+        )
     argv, digest = sbatch_argv(name, run, wanted), hashlib.sha256(script).hexdigest()
     document = {
         "schema": 1,

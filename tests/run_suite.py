@@ -7,10 +7,11 @@ setuptools>=80 and wheel) is inherited by the packaging tests; when set it must
 name an existing file. A file entry point keeps multiprocessing spawn workers
 from re-running the suite on import.
 """
+
 import os
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 
 def _flag(name):

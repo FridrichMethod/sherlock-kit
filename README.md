@@ -86,12 +86,10 @@ shk manifest DIR
 
 - Operational commands print one JSON document on stdout; `rules` and `--version`
   print text. `shk <command> --help` is the authoritative flag list.
-- `submit`: the job name is `shk.<project>.<task slug>.<hash of project, campaign,
-  task>`. One read call decides `new`, `live`, `done`, `failed` or `stale`; a live
+- `submit`: the job name is `shk.<project>.<task slug>.<hash of project, campaign, task>`. One read call decides `new`, `live`, `done`, `failed` or `stale`; a live
   name is always refused, a finished one unless `--resubmit REASON`. Then one
   mutation call stages the script under `<run-dir>/.shk/` and runs `sbatch`.
-  Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`, `--array
-  N%M` with 2 to 1000 tasks. `--dry-run` is offline.
+  Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`, `--array N%M` with 2 to 1000 tasks. `--dry-run` is offline.
 - `status`: one `squeue` and one `sacct` for all selected names; `--since`
   defaults to 30 days (7 with `--all`). `cancel` cancels the jobs of one name.
 - `push` rsyncs through the DTN into an absolute REMOTE under `remote_root`

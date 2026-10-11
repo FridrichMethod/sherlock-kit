@@ -17,20 +17,21 @@ manifest: write DIR/SHA256SUMS locally (inside jobs, no network), sha256sum-comp
 The DTN refuses rsync option forms that change its remote command line (--itemize-changes, --chmod):
 add no options. --files-from=- sends the same remote command as 0.3.0's DTN-proven list file.
 """
+
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass
-from datetime import datetime
 import fcntl
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import __version__, executor
@@ -50,14 +51,19 @@ TAIL_CHARS = 500
 LINK_LOST = (12, 255)  # rsync: protocol stream broken; ssh: connection failed
 PUSH = ("rsync", "-rlt", "--protect-args", "--partial")
 PULL = ("rsync", "-r", "--protect-args", "--checksum", "--partial", "--from0", "--files-from=-")
-MANIFEST_HINT = "write SHA256SUMS last in the job: shk manifest DIR (or the documented sha256sum one-liner)"
+MANIFEST_HINT = (
+    "write SHA256SUMS last in the job: shk manifest DIR (or the documented sha256sum one-liner)"
+)
 RERUN_HINT = "push is idempotent and pull resumes from its stage"
 
 
 # SHA256SUMS ------------------------------------------------------------------------------------
 
+
 def _invalid(message: str) -> ShkError:
-    return ShkError(EXIT_LOCAL, "manifest_invalid", message, hint="fix the named file or line; " + MANIFEST_HINT)
+    return ShkError(
+        EXIT_LOCAL, "manifest_invalid", message, hint="fix the named file or line; " + MANIFEST_HINT
+    )
 
 
 def _is_utf8(name: str) -> bool:
@@ -65,7 +71,9 @@ def _is_utf8(name: str) -> bool:
         name.encode("utf-8")
     except UnicodeEncodeError:  # undecodable bytes from a local listing (surrogateescape)
         return False
-    return "\ufffd" not in name  # undecodable bytes in a remote reply (decoded with errors="replace")
+    return (
+        "\ufffd" not in name
+    )  # undecodable bytes in a remote reply (decoded with errors="replace")
 
 
 def _check_name(where: str, name: str) -> None:
@@ -89,8 +97,10 @@ def _check_name(where: str, name: str) -> None:
 
 def _parse_line(where: str, line: str) -> tuple[str, str]:
     if line.startswith("\\"):
-        raise _invalid(f"{where}: sha256sum escaped this name because it holds a backslash or a newline; "
-                       "rename the file")
+        raise _invalid(
+            f"{where}: sha256sum escaped this name because it holds a backslash or a newline; "
+            "rename the file"
+        )
     match = SUMS_LINE.fullmatch(line)
     if match is None:
         raise _invalid(f"{where}: want '<64 hex digits>  <path>' as sha256sum writes it")
@@ -140,7 +150,9 @@ def _digest(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def _walk(root: Path, skip_reserved: bool, prefix: str = "") -> Iterator[tuple[str, os.DirEntry[str]]]:
+def _walk(
+    root: Path, skip_reserved: bool, prefix: str = ""
+) -> Iterator[tuple[str, os.DirEntry[str]]]:
     """(relative path, entry) for everything below root, depth first; symlinks are never followed."""
     with os.scandir(root / prefix) as scan:
         found = list(scan)
@@ -155,20 +167,35 @@ def _walk(root: Path, skip_reserved: bool, prefix: str = "") -> Iterator[tuple[s
 
 # Reading the remote manifest -------------------------------------------------------------------
 
+
 def _malformed(remote: str, problem: str) -> ShkError:
-    return ShkError(EXIT_LOCAL, "malformed_reply", f"reading {remote}/SHA256SUMS: {problem}",
-                    hint="run shk doctor --remote")
+    return ShkError(
+        EXIT_LOCAL,
+        "malformed_reply",
+        f"reading {remote}/SHA256SUMS: {problem}",
+        hint="run shk doctor --remote",
+    )
 
 
 def _manifest_error(remote: str, error: str) -> ShkError:
     if error == "no_directory":
-        return ShkError(EXIT_LOCAL, "manifest_unavailable", f"{remote} is not a directory on Sherlock",
-                        hint="check REMOTE: the absolute path of the directory the job wrote")
+        return ShkError(
+            EXIT_LOCAL,
+            "manifest_unavailable",
+            f"{remote} is not a directory on Sherlock",
+            hint="check REMOTE: the absolute path of the directory the job wrote",
+        )
     if error == "no_manifest":
-        return ShkError(EXIT_LOCAL, "manifest_unavailable", f"{remote}/SHA256SUMS is missing or unreadable",
-                        hint=MANIFEST_HINT)
+        return ShkError(
+            EXIT_LOCAL,
+            "manifest_unavailable",
+            f"{remote}/SHA256SUMS is missing or unreadable",
+            hint=MANIFEST_HINT,
+        )
     if error == "too_large":
-        return _invalid(f"{remote}/SHA256SUMS is larger than the limit of {MAX_MANIFEST_BYTES} bytes")
+        return _invalid(
+            f"{remote}/SHA256SUMS is larger than the limit of {MAX_MANIFEST_BYTES} bytes"
+        )
     return _malformed(remote, f"unknown error {error!r}")
 
 
@@ -184,7 +211,9 @@ def _read_manifest(control: Any, remote: str) -> tuple[str, int]:
     count = fields.get("SHK_COUNT", "")
     if not count.isdigit():
         raise _malformed(remote, "the reply has no file count")
-    text = "".join(line.removeprefix("SHK_M|") + "\n" for line in lines if line.startswith("SHK_M|"))
+    text = "".join(
+        line.removeprefix("SHK_M|") + "\n" for line in lines if line.startswith("SHK_M|")
+    )
     return text, int(count)
 
 
@@ -192,11 +221,16 @@ def _check_complete(remote: str, count: int, listed: int) -> None:
     if count == listed:
         return
     held = f"more than {MAX_FILES}" if count > MAX_FILES else str(count)
-    raise ShkError(EXIT_LOCAL, "manifest_incomplete", f"{remote} holds {held} regular files; SHA256SUMS lists "
-                   f"{listed}", hint="list every regular file except SHA256SUMS and .shk* entries; " + MANIFEST_HINT)
+    raise ShkError(
+        EXIT_LOCAL,
+        "manifest_incomplete",
+        f"{remote} holds {held} regular files; SHA256SUMS lists {listed}",
+        hint="list every regular file except SHA256SUMS and .shk* entries; " + MANIFEST_HINT,
+    )
 
 
 # Running rsync and validators ------------------------------------------------------------------
+
 
 def _failure(label: str, result: executor.Result, timeout: int) -> str:
     """The message "<label> <what happened>: <tail>"; the tail is printable, collapsed and bounded."""
@@ -207,18 +241,22 @@ def _failure(label: str, result: executor.Result, timeout: int) -> str:
     else:  # unavailable: the program could not start
         what = result.status
     printable = "".join(c for c in result.stdout + result.stderr if c.isprintable() or c.isspace())
-    tail = " ".join(printable.split())[-TAIL_CHARS:]  # the executor already dropped the banner lines
+    tail = " ".join(printable.split())[
+        -TAIL_CHARS:
+    ]  # the executor already dropped the banner lines
     return f"{label} {what}: {tail}" if tail else f"{label} {what}"
 
 
 def _rsync(argv: list[str], timeout: int, stdin: bytes | None = None) -> None:
-    """rsync with the executor's timeout (which kills the whole process group); else transfer_failed."""
+    """Rsync with the executor's timeout (which kills the whole process group); else transfer_failed."""
     result = executor.LocalExecutor().run(argv, stdin=stdin, timeout=timeout)
     if result.status == "complete":
         return
     code = EXIT_UNREACHABLE if result.returncode in LINK_LOST else EXIT_LOCAL
     if result.status == "timeout":
-        hint = f"raise transfer_timeout ({timeout} s) in the project config, then rerun: {RERUN_HINT}"
+        hint = (
+            f"raise transfer_timeout ({timeout} s) in the project config, then rerun: {RERUN_HINT}"
+        )
     else:
         hint = f"fix the cause, then rerun: {RERUN_HINT}"
     raise ShkError(code, "transfer_failed", _failure("rsync", result, timeout), hint=hint)
@@ -226,17 +264,28 @@ def _rsync(argv: list[str], timeout: int, stdin: bytes | None = None) -> None:
 
 def _validate(settings: ProjectConfig, name: str, stage: Path) -> None:
     """validators[name] + [stage], run from the project root; only exit 0 lets pull promote."""
-    argv = ["sh", "-c", 'cd "$1" && shift && exec "$@"', "shk-validate", str(settings.root),
-            *settings.validators[name], str(stage)]
+    argv = [
+        "sh",
+        "-c",
+        'cd "$1" && shift && exec "$@"',
+        "shk-validate",
+        str(settings.root),
+        *settings.validators[name],
+        str(stage),
+    ]
     result = executor.LocalExecutor().run(argv, timeout=settings.transfer_timeout)
     if result.status != "complete":
-        raise ShkError(EXIT_LOCAL, "validator_failed",
-                       _failure(f"validator {name!r}", result, settings.transfer_timeout),
-                       hint="nothing was promoted and the stage is kept; fix the data or the validator, "
-                       "then rerun pull")
+        raise ShkError(
+            EXIT_LOCAL,
+            "validator_failed",
+            _failure(f"validator {name!r}", result, settings.transfer_timeout),
+            hint="nothing was promoted and the stage is kept; fix the data or the validator, "
+            "then rerun pull",
+        )
 
 
 # Paths -------------------------------------------------------------------------------------------
+
 
 def _settings(ctx: Context) -> ProjectConfig:
     return ctx.config or DEFAULTS
@@ -245,7 +294,11 @@ def _settings(ctx: Context) -> ProjectConfig:
 def _remote(path: str) -> str:
     """REMOTE without its trailing "/"; absolute and free of ".." (rsync_args checks the characters)."""
     if not path.startswith("/") or ".." in path.split("/"):
-        raise ShkError(EXIT_LOCAL, "invalid_remote_path", f"REMOTE {path!r} must be an absolute path without '..'")
+        raise ShkError(
+            EXIT_LOCAL,
+            "invalid_remote_path",
+            f"REMOTE {path!r} must be an absolute path without '..'",
+        )
     return path.rstrip("/") or "/"
 
 
@@ -253,14 +306,18 @@ def _destination(local: str) -> Path:
     """LOCAL as an absolute path with its existing parent resolved (LOCAL itself may not exist yet)."""
     path = Path(os.path.abspath(Path(local).expanduser()))
     if not path.name or not path.parent.is_dir():
-        raise ShkError(EXIT_LOCAL, "local_parent_missing", f"LOCAL {local} must name an entry in an existing "
-                       "directory")
+        raise ShkError(
+            EXIT_LOCAL,
+            "local_parent_missing",
+            f"LOCAL {local} must name an entry in an existing directory",
+        )
     return path.parent.resolve() / path.name
 
 
 @dataclass(frozen=True)
 class Places:
     """LOCAL and the shk files beside it: .NAME.shk-lock, .NAME.shk-stage, .NAME.shk-receipt.json."""
+
     dest: Path
     lock: Path
     stage: Path
@@ -270,6 +327,7 @@ class Places:
     def beside(cls, dest: Path) -> Places:
         def sibling(kind: str) -> Path:
             return dest.with_name(f".{dest.name}.shk-{kind}")
+
         return cls(dest, sibling("lock"), sibling("stage"), sibling("receipt.json"))
 
     def old_copy(self, now: datetime) -> Path:
@@ -284,6 +342,7 @@ def _locked(path: Path) -> Iterator[None]:
 
 
 # Pull steps --------------------------------------------------------------------------------------
+
 
 def _read_receipt(path: Path) -> dict[str, Any] | None:
     try:
@@ -307,14 +366,22 @@ def _existing(places: Places, digest: str, validator: str | None, replace: bool)
     receipt = _read_receipt(places.receipt)
     if receipt is not None and receipt.get("manifest_sha256") == digest:
         if validator is None or receipt.get("validator") == validator:
-            return Outcome({"action": "already_present", "local": str(places.dest), "manifest_sha256": digest,
-                            "validator": receipt.get("validator")})
+            return Outcome({
+                "action": "already_present",
+                "local": str(places.dest),
+                "manifest_sha256": digest,
+                "validator": receipt.get("validator"),
+            })
         reason = f"holds this SHA256SUMS but was pulled without validator {validator!r}"
     else:
         reason = "exists without a receipt for this SHA256SUMS"
     if not replace:
-        raise ShkError(EXIT_REFUSED, "destination_exists", f"{places.dest} {reason}",
-                       hint="pass --replace to pull again and swap it in; the old copy is kept as .NAME.shk-old-*")
+        raise ShkError(
+            EXIT_REFUSED,
+            "destination_exists",
+            f"{places.dest} {reason}",
+            hint="pass --replace to pull again and swap it in; the old copy is kept as .NAME.shk-old-*",
+        )
     return None
 
 
@@ -353,9 +420,13 @@ def _verify(stage: Path, entries: dict[str, str]) -> int:
     if not problems:
         problems = [name for name, digest in entries.items() if _digest(stage / name) != digest]
     if problems:
-        raise ShkError(EXIT_LOCAL, "verify_failed", f"{stage} differs from SHA256SUMS at {problems[:3]}; nothing "
-                       "was promoted", hint="the remote files do not match SHA256SUMS: rewrite it once the job's "
-                       "outputs are final, then rerun pull (it keeps the stage and refetches what differs)")
+        raise ShkError(
+            EXIT_LOCAL,
+            "verify_failed",
+            f"{stage} differs from SHA256SUMS at {problems[:3]}; nothing was promoted",
+            hint="the remote files do not match SHA256SUMS: rewrite it once the job's "
+            "outputs are final, then rerun pull (it keeps the stage and refetches what differs)",
+        )
     return sum((stage / name).stat().st_size for name in entries)
 
 
@@ -369,12 +440,16 @@ def _promote(stage: Path, dest: Path, old_copy: Path) -> Path | None:
     except OSError as exc:
         if kept is not None and not os.path.lexists(dest):
             os.rename(kept, dest)
-        raise ShkError(EXIT_LOCAL, "promote_failed", f"cannot move the stage onto {dest} ({exc}); {dest} is "
-                       "unchanged") from None
+        raise ShkError(
+            EXIT_LOCAL,
+            "promote_failed",
+            f"cannot move the stage onto {dest} ({exc}); {dest} is unchanged",
+        ) from None
     return kept
 
 
 # Commands ----------------------------------------------------------------------------------------
+
 
 def push(args: argparse.Namespace, ctx: Context) -> Outcome:
     remote = _remote(args.remote)
@@ -382,8 +457,12 @@ def push(args: argparse.Namespace, ctx: Context) -> Outcome:
     if not args.anywhere:
         root = ctx.require("remote_root").remote_root
         if remote != root and not remote.startswith(root + "/"):
-            raise ShkError(EXIT_REFUSED, "outside_remote_root", f"{remote} is outside remote_root {root}",
-                           hint="pass --anywhere to push there on purpose")
+            raise ShkError(
+                EXIT_REFUSED,
+                "outside_remote_root",
+                f"{remote} is outside remote_root {root}",
+                hint="pass --anywhere to push there on purpose",
+            )
     if not local.is_dir():
         raise ShkError(EXIT_LOCAL, "local_missing", f"LOCAL {args.local} is not a directory")
     options, target = ctx.data_executor().rsync_args(remote)  # DTN preflight; refused on Sherlock
@@ -394,12 +473,17 @@ def push(args: argparse.Namespace, ctx: Context) -> Outcome:
 def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
     remote, settings = _remote(args.remote), _settings(ctx)
     if args.validate is not None and args.validate not in settings.validators:
-        raise ShkError(EXIT_LOCAL, "validator_unknown", f"no validator {args.validate!r} in "
-                       "[tool.sherlock-kit.validators]")
+        raise ShkError(
+            EXIT_LOCAL,
+            "validator_unknown",
+            f"no validator {args.validate!r} in [tool.sherlock-kit.validators]",
+        )
     places = Places.beside(_destination(args.local))
     data = ctx.data_executor()
     if data.kind == "local":
-        data.rsync_args(remote)  # raises transfer_on_sherlock before any work: the data is already here
+        data.rsync_args(
+            remote
+        )  # raises transfer_on_sherlock before any work: the data is already here
     text, count = _read_manifest(ctx.executor(), remote)
     entries = parse_manifest(text)
     _check_complete(remote, count, len(entries))
@@ -410,20 +494,39 @@ def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
             return present
         options, target = data.rsync_args(remote)  # DTN preflight, only once a transfer is needed
         _prepare_stage(places.stage, entries)
-        _rsync([*PULL, *options, "--", f"{target}/", f"{places.stage}/"], settings.transfer_timeout,
-               stdin=b"".join(name.encode("utf-8") + b"\0" for name in entries))
+        _rsync(
+            [*PULL, *options, "--", f"{target}/", f"{places.stage}/"],
+            settings.transfer_timeout,
+            stdin=b"".join(name.encode("utf-8") + b"\0" for name in entries),
+        )
         total = _verify(places.stage, entries)
         if _read_manifest(ctx.executor(), remote) != (text, count):
-            raise ShkError(EXIT_LOCAL, "manifest_changed", f"{remote} changed during the transfer; nothing was "
-                           "promoted", hint="rerun pull once the job has finished writing")
+            raise ShkError(
+                EXIT_LOCAL,
+                "manifest_changed",
+                f"{remote} changed during the transfer; nothing was promoted",
+                hint="rerun pull once the job has finished writing",
+            )
         if args.validate is not None:
             _validate(settings, args.validate, places.stage)
         now = ctx.clock()
         old = _promote(places.stage, places.dest, places.old_copy(now))
-        receipt = {"manifest_sha256": digest, "remote": remote, "files": len(entries), "bytes": total,
-                   "validator": args.validate, "shk_version": __version__, "created_utc": f"{now:%Y-%m-%dT%H:%M:%SZ}"}
+        receipt = {
+            "manifest_sha256": digest,
+            "remote": remote,
+            "files": len(entries),
+            "bytes": total,
+            "validator": args.validate,
+            "shk_version": __version__,
+            "created_utc": f"{now:%Y-%m-%dT%H:%M:%SZ}",
+        }
         _write_receipt(places.receipt, receipt)
-    return Outcome({"action": "pulled", "local": str(places.dest), **receipt, "replaced": str(old) if old else None})
+    return Outcome({
+        "action": "pulled",
+        "local": str(places.dest),
+        **receipt,
+        "replaced": str(old) if old else None,
+    })
 
 
 def manifest(args: argparse.Namespace, ctx: Context) -> Outcome:
@@ -440,28 +543,46 @@ def manifest(args: argparse.Namespace, ctx: Context) -> Outcome:
         else:
             skipped.append(path)  # symlinks and special files, as `find -type f` leaves them out
     names = sorted(files)
-    parse_manifest(_sums_text((ZERO_DIGEST, name) for name in names))  # names, count, size before hashing
+    parse_manifest(
+        _sums_text((ZERO_DIGEST, name) for name in names)
+    )  # names, count, size before hashing
     text = _sums_text((_digest(root / name), name) for name in names)
     temporary = root / f"{RESERVED_PREFIX}-{SUMS}"
     temporary.write_text(text, encoding="utf-8")
     os.replace(temporary, root / SUMS)
-    return Outcome({"action": "manifest_written", "path": str(root / SUMS), "files": len(names),
-                    "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(), "skipped": sorted(skipped)})
+    return Outcome({
+        "action": "manifest_written",
+        "path": str(root / SUMS),
+        "files": len(names),
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        "skipped": sorted(skipped),
+    })
 
 
 def register(subparsers: Any) -> None:
     to = subparsers.add_parser("push", help="rsync LOCAL/ into data_host:REMOTE/ (never deletes)")
     to.add_argument("local", metavar="LOCAL")
-    to.add_argument("remote", metavar="REMOTE", help="absolute; below remote_root unless --anywhere")
+    to.add_argument(
+        "remote", metavar="REMOTE", help="absolute; below remote_root unless --anywhere"
+    )
     to.add_argument("--anywhere", action="store_true", help="allow REMOTE outside remote_root")
     to.set_defaults(handler=push)
-    back = subparsers.add_parser("pull", help="fetch what REMOTE/SHA256SUMS lists, verify it, then create LOCAL")
+    back = subparsers.add_parser(
+        "pull", help="fetch what REMOTE/SHA256SUMS lists, verify it, then create LOCAL"
+    )
     back.add_argument("remote", metavar="REMOTE")
     back.add_argument("local", metavar="LOCAL", help="new directory; its parent must exist")
-    back.add_argument("--validate", metavar="NAME",
-                      help="first run validators.NAME from the config on the stage (treat it as read-only)")
-    back.add_argument("--replace", action="store_true", help="swap an existing LOCAL (kept as .LOCAL.shk-old-*)")
+    back.add_argument(
+        "--validate",
+        metavar="NAME",
+        help="first run validators.NAME from the config on the stage (treat it as read-only)",
+    )
+    back.add_argument(
+        "--replace", action="store_true", help="swap an existing LOCAL (kept as .LOCAL.shk-old-*)"
+    )
     back.set_defaults(handler=pull)
-    sums = subparsers.add_parser("manifest", help="write DIR/SHA256SUMS (inside jobs; never uses the network)")
+    sums = subparsers.add_parser(
+        "manifest", help="write DIR/SHA256SUMS (inside jobs; never uses the network)"
+    )
     sums.add_argument("directory", metavar="DIR")
     sums.set_defaults(handler=manifest)

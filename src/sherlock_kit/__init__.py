@@ -3,10 +3,11 @@
 version_line() is `shk --version`: "sherlock-kit <version> (git <commit> | editable <path> |
 submodule <path> | source <path> | unknown)". It reads files only.
 """
+
 from __future__ import annotations
 
-from importlib import metadata
 import json
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -37,7 +38,7 @@ def _is_submodule(root: Path) -> bool:
     git = root / ".git"
     text = git.read_text(encoding="utf-8") if git.is_file() else ""
     parts = Path(text.removeprefix("gitdir:").strip()).parts if text.startswith("gitdir:") else ()
-    return ".git" in parts and "modules" in parts[parts.index(".git"):]
+    return ".git" in parts and "modules" in parts[parts.index(".git") :]
 
 
 def provenance(direct_url: dict[str, Any], source: Path | None) -> str:

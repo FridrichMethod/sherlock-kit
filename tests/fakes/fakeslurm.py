@@ -18,14 +18,15 @@ Knobs: FAKE_SBATCH_RC, FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queue
 FAKE_SCANCEL_RC. Every call is recorded with the SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_
 variables it saw. FakeSlurm is the test-side API.
 """
+
 import fcntl
 import json
 import os
-from pathlib import Path
 import pwd
 import re
 import sys
 import time
+from pathlib import Path
 
 BIN = Path(__file__).resolve().with_name("bin")
 LIVE = {"PENDING", "RUNNING", "SUSPENDED", "COMPLETING", "CONFIGURING", "REQUEUED"}
@@ -39,8 +40,13 @@ def _user():
 
 
 def _restart(state, cpus=1, tres="", elapsed=0):
-    return {"state": state, "elapsed": elapsed, "cpus": cpus,
-            "tres": tres or f"cpu={cpus},mem=1G,node=1", "exit": "0:0"}
+    return {
+        "state": state,
+        "elapsed": elapsed,
+        "cpus": cpus,
+        "tres": tres or f"cpu={cpus},mem=1G,node=1",
+        "exit": "0:0",
+    }
 
 
 def _locked(path, change):
@@ -56,9 +62,17 @@ def _locked(path, change):
 
 
 def _append_job(state, *, name, user, partition, tasks, array=None, submit=None, script=""):
-    job = {"id": state["next"], "name": name, "user": user, "partition": partition,
-           "array": array, "tasks": tasks, "submit": time.time() if submit is None else submit,
-           "last": None, "script": script}
+    job = {
+        "id": state["next"],
+        "name": name,
+        "user": user,
+        "partition": partition,
+        "array": array,
+        "tasks": tasks,
+        "submit": time.time() if submit is None else submit,
+        "last": None,
+        "script": script,
+    }
     state["next"] += 1
     state["jobs"].append(job)
     return job
@@ -74,8 +88,12 @@ class FakeSlurm:
         self.path.write_text(json.dumps({"next": 1001, "jobs": [], "calls": []}), encoding="utf-8")
 
     def env(self, **knobs):
-        return {"PATH": f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}",
-                "FAKE_SLURM_STATE": str(self.path), "FAKE_SLURM_PYTHON": sys.executable, **knobs}
+        return {
+            "PATH": f"{BIN}{os.pathsep}{os.environ.get('PATH', '')}",
+            "FAKE_SLURM_STATE": str(self.path),
+            "FAKE_SLURM_PYTHON": sys.executable,
+            **knobs,
+        }
 
     def state(self):
         return json.loads(self.path.read_text(encoding="utf-8"))
@@ -89,13 +107,22 @@ class FakeSlurm:
         array = {"count": len(states), "throttle": None} if len(states) > 1 else None
 
         def change(state):
-            job = _append_job(state, name=name, user=user or _user(), partition=partition,
-                              tasks=tasks, array=array, submit=time.time() - age_days * 86400)
+            job = _append_job(
+                state,
+                name=name,
+                user=user or _user(),
+                partition=partition,
+                tasks=tasks,
+                array=array,
+                submit=time.time() - age_days * 86400,
+            )
             return job["id"]
+
         return _locked(self.path, change)
 
     def set(self, job_id, *states, **fields):
         """Set the newest restart of task i to states[i] (None keeps it)."""
+
         def change(state):
             job = _job(state, job_id)
             for index, value in enumerate(states):
@@ -104,14 +131,17 @@ class FakeSlurm:
                 job["tasks"][index][-1].update(state=value, elapsed=60, **fields)
                 if value not in LIVE:
                     job["last"] = index  # the last task to leave the array keeps the array id
+
         _locked(self.path, change)
 
     def requeue(self, job_id, index=0):
         """Preempt and requeue task index: one more restart row, pending again."""
+
         def change(state):
             task = _job(state, job_id)["tasks"][index]
             task[-1].update(state="PREEMPTED", elapsed=30)
             task.append(_restart("PENDING", task[-1]["cpus"]))
+
         _locked(self.path, change)
 
 
@@ -132,10 +162,13 @@ def _options(args):
 
 def _selected(state, options):
     names = set(options["name"].split(",")) if options.get("name") else None
-    return [job for job in state["jobs"]
-            if options.get("u") in (None, job["user"])
-            and options.get("p") in (None, job["partition"])
-            and (names is None or job["name"] in names)]
+    return [
+        job
+        for job in state["jobs"]
+        if options.get("u") in (None, job["user"])
+        and options.get("p") in (None, job["partition"])
+        and (names is None or job["name"] in names)
+    ]
 
 
 def _ranges(indices):
@@ -169,12 +202,15 @@ def _queue_entries(job):
 def _format_columns(job, top, layout):
     """One fixed-width squeue -O line for a layout such as "UserName:64,State:24"."""
     running = top["state"] == "RUNNING"
-    values = {"username": job["user"], "state": top["state"],
-              "tres-alloc": top["tres"] if running else ""}
+    values = {
+        "username": job["user"],
+        "state": top["state"],
+        "tres-alloc": top["tres"] if running else "",
+    }
     line = ""
     for column in layout.split(","):
         field, _, width = column.partition(":")
-        line += values[field.lower()].ljust(int(width))[:int(width)]
+        line += values[field.lower()].ljust(int(width))[: int(width)]
     return line
 
 
@@ -210,13 +246,19 @@ def _acct_rows(job, duplicates):
         restarts = list(enumerate(task)) if duplicates else [(len(task) - 1, task[-1])]
         for restart, entry in restarts:
             keeps_id = not job["array"] or job["last"] == index
-            yield {"JobID": f"{job['id']}_{index}" if job["array"] else str(job["id"]),
-                   "JobIDRaw": str(job["id"] if keeps_id else job["id"] + 1 + index),
-                   "JobName": job["name"], "State": entry["state"], "Partition": job["partition"],
-                   "ElapsedRaw": str(entry["elapsed"]), "AllocCPUS": str(entry["cpus"]),
-                   "AllocTRES": entry["tres"],
-                   "Submit": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(job["submit"])),
-                   "Restarts": str(restart), "ExitCode": entry["exit"]}
+            yield {
+                "JobID": f"{job['id']}_{index}" if job["array"] else str(job["id"]),
+                "JobIDRaw": str(job["id"] if keeps_id else job["id"] + 1 + index),
+                "JobName": job["name"],
+                "State": entry["state"],
+                "Partition": job["partition"],
+                "ElapsedRaw": str(entry["elapsed"]),
+                "AllocCPUS": str(entry["cpus"]),
+                "AllocTRES": entry["tres"],
+                "Submit": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(job["submit"])),
+                "Restarts": str(restart),
+                "ExitCode": entry["exit"],
+            }
 
 
 def sacct(state, options):
@@ -238,10 +280,15 @@ def sbatch(state, options, script):
     count = int(last) + 1 if last else 1
     cpus = int(options.get("cpus-per-task", "1")) * int(options.get("ntasks", "1"))
     array = {"count": count, "throttle": int(throttle) if throttle else None} if last else None
-    job = _append_job(state, name=options.get("job-name"), user=_user(),
-                      partition=options.get("partition"), array=array,
-                      tasks=[[_restart("PENDING", cpus)] for _ in range(count)],
-                      script=Path(script).read_text(encoding="utf-8"))
+    job = _append_job(
+        state,
+        name=options.get("job-name"),
+        user=_user(),
+        partition=options.get("partition"),
+        array=array,
+        tasks=[[_restart("PENDING", cpus)] for _ in range(count)],
+        script=Path(script).read_text(encoding="utf-8"),
+    )
     if os.environ.get("FAKE_SBATCH_UNPARSED"):
         return f"Submitted batch job {job['id']}\n", "", 0
     if os.environ.get("FAKE_SBATCH_SUBMIT_THEN_FAIL"):
@@ -269,6 +316,7 @@ def main(tool, args):
         if tool == "sbatch":  # the staged script path comes last
             return sbatch(state, _options(args[:-1]), args[-1])
         return {"squeue": squeue, "sacct": sacct, "scancel": scancel}[tool](state, _options(args))
+
     out, err, code = _locked(os.environ["FAKE_SLURM_STATE"], run)
     sys.stdout.write(out)
     sys.stderr.write(err)

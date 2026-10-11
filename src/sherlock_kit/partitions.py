@@ -8,20 +8,23 @@ ShkError(3, "unknown_partition") when unlisted (profiles().get does not); parse(
 raises ShkError(1, "partitions_invalid"); markdown() is the "### Partition profiles"
 block pasted byte-identically into both rules files.
 """
+
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from functools import lru_cache
 from importlib import resources
-import json
-import re
 from types import MappingProxyType
 
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, ShkError
 
 FLAGS = ("preemptible", "requeue", "borrowed", "gpus_allowed")
-INTRO = ("`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. "
-         "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`.")
+INTRO = (
+    "`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. "
+    "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`."
+)
 
 
 @dataclass(frozen=True)
@@ -45,11 +48,20 @@ def _unique(pairs):
 
 
 def _profile(name, entry) -> Profile:
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or not isinstance(entry, dict) or set(entry) != {*FLAGS, "courtesy"}:
-        raise _invalid(f"{name!r}: needs a valid name and exactly the keys {', '.join(FLAGS)}, courtesy")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9_.-]+", name)
+        or not isinstance(entry, dict)
+        or set(entry) != {*FLAGS, "courtesy"}
+    ):
+        raise _invalid(
+            f"{name!r}: needs a valid name and exactly the keys {', '.join(FLAGS)}, courtesy"
+        )
     courtesy = entry["courtesy"]
-    if (any(type(entry[flag]) is not bool for flag in FLAGS) or not isinstance(courtesy, str)
-            or any(ord(c) < 32 or ord(c) == 127 for c in courtesy)):
+    if (
+        any(type(entry[flag]) is not bool for flag in FLAGS)
+        or not isinstance(courtesy, str)
+        or any(ord(c) < 32 or ord(c) == 127 for c in courtesy)
+    ):
         raise _invalid(f"{name}: flags must be booleans and courtesy one line of text")
     return Profile(name, *(entry[flag] for flag in FLAGS), courtesy)
 
@@ -65,24 +77,35 @@ def parse(text: str) -> MappingProxyType:
         raise _invalid("schema_version must be 1")
     if not isinstance(payload["partitions"], dict) or not payload["partitions"]:
         raise _invalid("partitions must be a non-empty mapping")
-    return MappingProxyType({name: _profile(name, entry) for name, entry in payload["partitions"].items()})
+    return MappingProxyType({
+        name: _profile(name, entry) for name, entry in payload["partitions"].items()
+    })
 
 
 @lru_cache(maxsize=1)
 def profiles() -> MappingProxyType:
-    return parse((resources.files("sherlock_kit") / "data" / "partitions.json").read_text(encoding="utf-8"))
+    return parse(
+        (resources.files("sherlock_kit") / "data" / "partitions.json").read_text(encoding="utf-8")
+    )
 
 
 def profile(name: str) -> Profile:
     found = profiles().get(name)
     if found is None:
-        raise ShkError(EXIT_REFUSED, "unknown_partition", f"partition {name!r} is not listed; listed: "
-                       f"{', '.join(profiles())}", hint="scheduler visibility is never authorization")
+        raise ShkError(
+            EXIT_REFUSED,
+            "unknown_partition",
+            f"partition {name!r} is not listed; listed: {', '.join(profiles())}",
+            hint="scheduler visibility is never authorization",
+        )
     return found
 
 
 def _bullet(p: Profile) -> str:
-    flags = zip(("preemptible", "requeue", "borrowed", "gpus"), (p.preemptible, p.requeue, p.borrowed, p.gpus_allowed))
+    flags = zip(
+        ("preemptible", "requeue", "borrowed", "gpus"),
+        (p.preemptible, p.requeue, p.borrowed, p.gpus_allowed),
+    )
     text = ", ".join(f"{label}={'yes' if value else 'no'}" for label, value in flags)
     return f"- `{p.name}`: {text}." + (f" {p.courtesy}" if p.courtesy else "")
 

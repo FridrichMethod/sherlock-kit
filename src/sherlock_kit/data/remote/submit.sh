@@ -4,7 +4,7 @@
 # SHK_LIVE <ids>, SHK_REJECTED <rc> (+ SHK_ERR| lines, files removed), SHK_UNPARSED (files
 # kept) or SHK_REFUSED <why> (nothing ran); always exits 0.
 for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
-    case $v in SLURM_CONF) ;; SBATCH_*|SQUEUE_*|SACCT_*|SLURM_*) unset "$v" ;; esac
+    case $v in SLURM_CONF) ;; SBATCH_* | SQUEUE_* | SACCT_* | SLURM_*) unset "$v" ;; esac
 done
 name=$1 run=$2 stamp=$3 sum=$4 spec=$5
 base=$run/.shk/$name.$stamp
@@ -16,13 +16,17 @@ refuse() {
 case $6:$7 in --:sbatch) shift 6 ;; *) refuse usage ;; esac
 u=$(id -un)
 live=$(squeue -h -u "$u" --name="$name" -o "%i" </dev/null) || refuse squeue
-[ -z "$live" ] || { printf "SHK_LIVE %s\n" "$(printf "%s" "$live" | tr "\n" " ")"; exit 0; }
+[ -z "$live" ] || {
+    printf "SHK_LIVE %s\n" "$(printf "%s" "$live" | tr "\n" " ")"
+    exit 0
+}
 mkdir -p "$run/.shk" || refuse mkdir
 cat >"$base.sh" || refuse write
 got=$(sha256sum <"$base.sh") || refuse digest
 [ "${got%% *}" = "$sum" ] || refuse digest
 printf "%s\n" "$spec" >"$base.json" || refuse write
-out=$("$@" "$base.sh" 2>"$base.err" </dev/null); rc=$?
+out=$("$@" "$base.sh" 2>"$base.err" </dev/null)
+rc=$?
 if [ "$rc" -ne 0 ]; then
     printf "SHK_REJECTED %s\n" "$rc"
     head -c 2000 "$base.err" | sed "s/^/SHK_ERR|/"
