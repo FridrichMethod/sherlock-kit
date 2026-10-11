@@ -7,7 +7,7 @@ dir=${1:?usage: manifest.sh DIR}
 sums="$dir/SHA256SUMS"
 if [ ! -d "$dir" ]; then
     printf "SHK_ERROR no_directory\n"
-elif [ -L "$sums" ] || [ ! -f "$sums" ] || [ ! -r "$sums" ]; then
+elif [ ! -f "$sums" ] || [ ! -r "$sums" ]; then
     printf "SHK_ERROR no_manifest\n"
 elif [ "$(wc -c < "$sums")" -gt 4194304 ]; then
     printf "SHK_ERROR too_large\n"
