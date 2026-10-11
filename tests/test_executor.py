@@ -5,6 +5,7 @@ from pathlib import Path
 import shlex
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -121,6 +122,13 @@ class LocalExecutorTests(unittest.TestCase):
             ex.rsync_args("/scratch/x")
         self.assertEqual(caught.exception.code, 3)
 
+    def test_timeout_kills_the_whole_process_group(self):
+        ex = executor.LocalExecutor(command_timeout=10)
+        started = time.monotonic()
+        result = ex.run(["sh", "-c", "echo partial; sleep 30; echo late"], timeout=0.5)
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertEqual((result.status, result.stdout), ("timeout", "partial\n"))
+
     def test_check(self):
         result = executor.Result
         self.assertEqual(executor.check(result("complete", "x"), "read").stdout, "x")
@@ -149,6 +157,8 @@ class DetectionTests(unittest.TestCase):
         self.assertEqual(self.kind("marlowe-n01", SLURM_JOB_ID="1", SLURM_CLUSTER_NAME="marlowe"), "ssh")
         self.assertEqual(self.kind("sh02-ln04x"), "ssh")
         self.assertEqual(self.kind("lab-ubuntu"), "ssh")
+        self.assertEqual(self.kind("lab-ubuntu", SHK_EXECUTOR=" Local "), "local")
+        self.assertEqual(self.kind("sh02-ln04", SHK_EXECUTOR=""), "local")
         with self.assertRaises(ShkError):
             self.kind("lab-ubuntu", SHK_EXECUTOR="remote")
 

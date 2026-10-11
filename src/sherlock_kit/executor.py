@@ -178,9 +178,11 @@ def check(result: Result, action: str) -> Result:
 
 def detect(config=None, override=None, env=None, hostname=None, *, data=False):
     env, settings = os.environ if env is None else env, config or DEFAULTS
-    choice = override if override not in (None, "auto") else (env.get("SHK_EXECUTOR") or "auto").strip()
+    choice = override if override not in (None, "auto") else (env.get("SHK_EXECUTOR") or "").strip().lower()
+    choice = choice or "auto"
     if choice not in ("auto", "local", "ssh"):
-        raise ShkError(EXIT_LOCAL, "executor_invalid", f"SHK_EXECUTOR={choice!r}; use local, ssh or auto")
+        raise ShkError(EXIT_LOCAL, "executor_invalid", f"executor {choice!r} (--executor or SHK_EXECUTOR) "
+                       "must be auto, local or ssh")
     short = (socket.gethostname() if hostname is None else hostname).split(".")[0].lower()
     on_sherlock = (re.fullmatch(r"sh\d+-ln\d+", short) or env.get("SLURM_CLUSTER_NAME") == "sherlock"
                    or (re.match(r"sh\d+-", short) and env.get("SLURM_JOB_ID")))
