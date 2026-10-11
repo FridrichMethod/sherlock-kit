@@ -7,11 +7,11 @@ at $FAKE_SLURM_STATE is {"next", "jobs", "calls"}. A job is {"id", "name", "user
 "submit", "last", "script"}; a restart is {"state", "elapsed", "cpus", "tres", "exit"}.
 
 Live Sherlock facts modelled: array tasks that never started (throttle-held) have no sacct
-row and show in squeue as one N_[a-b%t] PENDING aggregate (reason JobArrayTaskLimit, unread); started tasks are N_k rows
-with distinct JobIDRaw, except the last task to leave the array, which keeps N (query.sh
-does not ask for JobIDRaw, so the quirk cannot confuse the parser); --duplicates prints
-one row per restart (Restarts 0, 1, ...); squeue -t all forgets a finished job after
-MinJobAge; sbatch --parsable prints N or N;cluster.
+row and show in squeue as one N_[a-b%t] PENDING aggregate (reason JobArrayTaskLimit, which
+shk does not read); started tasks are N_k rows with distinct JobIDRaw, except the last task
+to leave the array, which keeps N (query.sh does not ask for JobIDRaw, so the quirk cannot
+confuse the parser); --duplicates prints one row per restart (Restarts 0, 1, ...); squeue
+-t all forgets a finished job after MinJobAge; sbatch --parsable prints N or N;cluster.
 
 Knobs: FAKE_SBATCH_RC, FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued, exit
 1), FAKE_SBATCH_HANG (queued, then sleep that many seconds), FAKE_SBATCH_CLUSTER,
