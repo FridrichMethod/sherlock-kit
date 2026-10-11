@@ -43,7 +43,11 @@ def _config(ctx: Context, problems: list[str]) -> tuple[ProjectConfig | None, di
         return None, {"status": exc.token}
     if found is None:
         return None, {"status": "none"}
-    report = {"path": str(found.path), "project": found.project, "remote_root": found.remote_root}
+    report = {  # an unset project or remote_root ("") is reported as null
+        "path": str(found.path),
+        "project": found.project or None,
+        "remote_root": found.remote_root or None,
+    }
     return found, {"status": "found", **report}
 
 
