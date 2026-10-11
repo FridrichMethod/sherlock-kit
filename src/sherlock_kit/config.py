@@ -5,7 +5,8 @@ directory at or above cwd that has a configuration; None when there is none. par
 path) validates: bad values and unknown keys raise ShkError(1, "config_invalid").
 ProjectConfig is frozen and DEFAULTS is the no-config value. Keys (no secrets):
   project      ^[a-z0-9][a-z0-9-]{0,23}$ (submit, status, cancel)
-  remote_root  absolute [A-Za-z0-9_./-]+ without "..", trailing "/" dropped (submit, push, pull)
+  remote_root  absolute [A-Za-z0-9_./-]+ without "..", trailing "/" dropped (submit and its
+               default run dirs, push unless --anywhere)
   control_host "sherlock-plain", data_host "sherlock-dtn": distinct OpenSSH aliases
   connect_timeout 15, command_timeout 60, transfer_timeout 3600: positive integer seconds
   [validators] NAME = ["argv", ...]: `pull --validate NAME` runs argv + [stage dir]

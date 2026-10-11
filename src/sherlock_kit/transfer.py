@@ -258,7 +258,12 @@ def _settings(ctx: Context) -> ProjectConfig:
 
 
 def _remote(path: str) -> str:
-    """REMOTE without its trailing "/"; absolute and free of ".." (rsync_args checks the characters)."""
+    """REMOTE without its trailing "/"; absolute and free of "..".
+
+    Nothing else about its characters is checked: rsync runs with --protect-args, which sends the
+    path inside its own protocol instead of on the remote shell's command line, and manifest.sh
+    gets it as one argument of the executor's shlex-joined remote command.
+    """
     if not path.startswith("/") or ".." in path.split("/"):
         raise ShkError(
             EXIT_LOCAL,

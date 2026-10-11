@@ -28,7 +28,7 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 
 ## Configuration
 
-`shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or top-level keys in `sherlock-kit.toml`) in the nearest directory at or above the working directory that has one; from elsewhere pass `--project-dir DIR`. Keys: `project` (required to submit), `remote_root` (absolute Sherlock path, required to submit, push and pull), optional `control_host`, `data_host`, timeouts and `[tool.sherlock-kit.validators]`. Unknown keys are errors. Never put secrets there.
+`shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or top-level keys in `sherlock-kit.toml`) in the nearest directory at or above the working directory that has one; from elsewhere pass `--project-dir DIR`. Keys: `project` (required to submit), `remote_root` (absolute Sherlock path, required to submit and, without `--anywhere`, to push), optional `control_host`, `data_host`, timeouts and `[tool.sherlock-kit.validators]`. Unknown keys are errors. Never put secrets there.
 
 ## Submit
 
@@ -65,11 +65,12 @@ shk status --all
 
 ```sh
 shk push data/inputs /scratch/users/USER/project/inputs
+mkdir -p results
 shk pull /scratch/users/USER/project/runs/NAME/out results/NAME --validate bundle
 ```
 
 - `shk push LOCAL REMOTE` copies into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. Pushed files keep their local modification times, so inputs that are old locally can be purge-eligible on scratch soon after the push: push them shortly before the jobs that read them.
-- `shk pull REMOTE LOCAL` needs `REMOTE/SHA256SUMS`, copies exactly those files into a private stage beside LOCAL (`.NAME.shk-stage` for LOCAL `.../NAME`, with `.NAME.shk-lock`), verifies every hash, runs the validator named by `--validate`, then renames the stage onto LOCAL and writes `.NAME.shk-receipt.json`. An existing LOCAL is kept unless `--replace` (the old copy stays as `.NAME.shk-old-<UTC>`); a rerun resumes the stage.
+- `shk pull REMOTE LOCAL` needs `REMOTE/SHA256SUMS` and an existing parent directory of LOCAL, copies exactly those files into a private stage beside LOCAL (`.NAME.shk-stage` for LOCAL `.../NAME`, with `.NAME.shk-lock`), verifies every hash, runs the validator named by `--validate`, then renames the stage onto LOCAL and writes `.NAME.shk-receipt.json`. An existing LOCAL is kept unless `--replace` (the old copy stays as `.NAME.shk-old-<UTC>`); a rerun resumes the stage.
 - The validator is the project's argv from `[tool.sherlock-kit.validators]`; it runs from the project root with the stage directory as its last argument, exit 0 passes, and it must treat the stage as read-only (what it writes is promoted).
 - The job writes the manifest as its last step: `shk manifest DIR` when shk is available there, else `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`. DIR is the job's output directory (for example `out/` under the run directory), never the run directory itself, which holds `.shk/` and the Slurm logs still being written.
 - Never touch or rewrite scratch files to keep them from the 90-day purge; copy what must last to `$GROUP_HOME`, Oak or the workstation.

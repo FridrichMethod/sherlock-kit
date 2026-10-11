@@ -57,6 +57,7 @@ shk doctor                  # offline: Python, ssh, rsync, config, both ssh mast
 shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m --dry-run
 shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m
 shk status --task smoke     # at least 60 s apart; the reply says when (next_check_after)
+mkdir -p results            # pull creates LOCAL, never its parent
 shk pull /scratch/users/USER/demo/runs/NAME/out results/smoke --validate bundle
 ```
 
