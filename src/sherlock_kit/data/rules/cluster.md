@@ -1,9 +1,9 @@
 ## Sherlock: agent running on Sherlock
 
-The site banner requires reading `/etc/agents/AGENTS.md` first. It and its topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it) override this file; only its numbered rules are requirements, the rest is recommended practice. Run `hostname` and check `$SLURM_JOB_ID` before anything else: login node names contain `-ln` and have no job id. Reviewed 2026-10-10 against the site files.
+The site banner requires reading `/etc/agents/AGENTS.md` first. It and its topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it) override this file; only its numbered rules are requirements, the rest is recommended practice. Reviewed 2026-10-10 against the site files.
 
 ### Where you are
-- Login node: light work only (editing, small reads, job preparation, submitting and polling). Nothing server-like: no listeners, nothing unattended, no keep-alive or restart loops, no continuous sync, nothing that outlives the session; no background agent sessions (`claude agents`, `--bg`), and do not restart a terminated supervisor. Leftovers terminated by the site are expected, not a fault.
+- Run `hostname` and check `$SLURM_JOB_ID` before anything else: login node names contain `-ln` and have no job id.
 - Inside an allocation (`sh_dev`, `salloc`, a batch job) the allocated CPUs, memory and GPUs are yours to use fully; prefer running agents there. `scontrol show job $SLURM_JOB_ID` shows its limits.
 - Codex: its sandbox cannot start here, so per-command approval is expected; never try to disable it. Claude Code: managed settings block or confirm some commands; do not work around them.
 - Never bypass authentication, MFA, limits or permissions; no relays, reverse shells, alternate login services, unattended tunnels or stored second factors; never share credentials or sessions (account termination).
@@ -15,13 +15,17 @@ The site banner requires reading `/etc/agents/AGENTS.md` first. It and its topic
 - Scope `find`, `du` and `ncdu` to your own or authorized project directories; never scan filesystem roots or other users' directories. Group path variables in shell profiles are not evidence of authorization. Low and Moderate Risk data only; stop and ask when unclear.
 - Large internal copies run in a Slurm job. External transfers start outside Sherlock (DTN, Globus); never ssh to a DTN from here, and `shk push` and `shk pull` refuse here (exit 3).
 
+### Login nodes
+- Light work only: editing, small reads, job preparation, submitting and polling. Sustained computation, significant CPU or memory, GPUs, intensive I/O or many processes go to a job (`sh_dev` or `sbatch`).
+- Nothing server-like: no listeners, nothing unattended, no keep-alive or restart loops, no continuous sync, nothing that outlives the session; no background agent sessions (`claude agents`, `--bg`), and do not restart a terminated supervisor. Leftovers terminated by the site are expected, not a fault.
+
 ### Software
 - `ml spider NAME` first; prefer a module, then a group install in `$GROUP_HOME`, then your own build in `$GROUP_HOME`, then a container. Never put environments in `$SCRATCH`. No `sudo`, system-wide installs or unreviewed remote install scripts. Compile and do heavy installs inside a job; compute nodes may lack outbound network, so fetch sources first.
 - Job scripts: `#!/bin/bash -l` (a non-login shell has no `ml`), `ml purge`, load modules, activate the environment, record versions, `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK`. Do not probe or change system configuration (reading `/etc/agents/` is fine) or add slow startup to `~/.bashrc`. Find agent CLIs and Python with `ml spider`; `shk` needs Python 3.11 or newer.
 
 ### Slurm
 - Prefer `shk submit`, `shk status` and `shk cancel`: the same contract as from a workstation, run by the local executor. Plain `sbatch` follows the same rules and the partition profiles below: explicit `--time`; GPU jobs `-G n` on a GPU partition; `-C` instead of `--exclude`; no `--account`. `sh_part` and `sh_node_feat` (login shell) list partitions and node features.
-- At least 60 s between checks (`squeue --me`, `sacct -j ID -o JobID,State,Elapsed,MaxRSS,ExitCode`, `seff ID`); prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; never resubmit without finding the cause; jobs do at least 10 minutes of work. `shk` exit 5: `shk status` after its `next_check_after`, never a blind resubmit; exit 6: stop and report.
+- At least 60 s between checks (`squeue --me`, `sacct -j ID -o JobID,State,Elapsed,MaxRSS,ExitCode`, `seff ID`); prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; never resubmit without finding the cause; jobs do at least 10 minutes of work. `shk` exit 5: run the `shk status` command in the reply's `next`, not before the time it names, never a blind resubmit; exit 6: stop and report.
 - Never schedule an agent to run later (`scrontab`, `--begin`, self-resubmitting jobs, a job script that calls `shk submit` or starts an agent).
 - Cancel only your own jobs, with `scancel ID` or `shk cancel`, and only when the user asks; never `scancel -u $USER`; never kill processes on compute nodes.
 - `shk doctor` is read-only. `shk` reads `[tool.sherlock-kit]` at or above the working directory and stops at a directory you do not own (group trees): pass `--project-dir DIR`.

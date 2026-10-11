@@ -1,9 +1,11 @@
 """Release metadata: contract paths C1-C4, one version, rules format, mentioned CLI, removed terms, HOME."""
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -134,6 +136,30 @@ class RulesFormatTests(unittest.TestCase):
                 self.assertNotRegex(text, r"\]\((?!https://)", "no relative links")
                 self.assertIn("Reviewed 2026-10-10", text)
 
+    def test_rules_headings(self):
+        expected = {"workstation.md": ["Connection", "Jobs", "Data", "Partition profiles"],
+                    "cluster.md": ["Where you are", "Filesystems", "Login nodes", "Software", "Slurm",
+                                   "Partition profiles"]}
+        for path in RULES:
+            with self.subTest(path=path.name):
+                headings = re.findall(r"^### (.+)$", path.read_text(encoding="utf-8"), re.M)
+                self.assertEqual(headings, expected[path.name])
+
+    def test_agent_ssh_commands_cannot_log_in(self):
+        """An ssh line that runs a remote command must ride the master only: never a fresh login."""
+        checked = 0
+        for path in (*RULES, ROOT / CONTRACT["C3"]):
+            for snippet in snippets(path.read_text(encoding="utf-8")):
+                tokens = snippet.split()
+                hosts = [i for i, token in enumerate(tokens) if token.startswith("sherlock")]
+                if tokens[:1] != ["ssh"] or not hosts or hosts[0] == len(tokens) - 1:
+                    continue
+                checked += 1
+                with self.subTest(path=path.name, snippet=snippet):
+                    self.assertIn("-oBatchMode=yes", tokens[:hosts[0]])
+                    self.assertIn("-oProxyCommand=false", tokens[:hosts[0]])
+        self.assertGreater(checked, 0)
+
     def test_skill_front_matter(self):
         text = (ROOT / CONTRACT["C3"]).read_text(encoding="ascii")
         front = re.match(r"---\n(.*?)\n---\n", text, re.S)
@@ -175,6 +201,52 @@ class MentionedCliTests(unittest.TestCase):
     @unittest.skipIf(absent("transfer"), "integration-only: transfer absent")
     def test_transfer_commands_exist(self):
         self.check("transfer")
+
+
+class ManifestOneLinerTests(unittest.TestCase):
+    """The skill's sha256sum fallback must write what `shk pull` accepts, like `shk manifest`."""
+
+    FILES = {"a.txt": b"a\n", "-b": b"b\n", "-c": b"c\n", "sub/d.bin": b"\0d", "slurm-1.out": b"log\n"}
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.out = Path(temporary.name).resolve() / "out"
+        for rel, data in self.FILES.items():
+            (self.out / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.out / rel).write_bytes(data)
+        (self.out / ".shk").mkdir()
+        (self.out / ".shk/shk.p.t.0123456789.1.sh").write_text("#!/bin/sh\n")
+        (self.out / "sub/.shk-stage").write_text("x\n")
+        (self.out / "sub/SHA256SUMS").write_text("nested\n")
+        (self.out / "SHA256SUMS").write_text("old\n")
+
+    def one_liner(self) -> str:
+        text = (ROOT / CONTRACT["C3"]).read_text(encoding="utf-8")
+        found = [span for span in SPAN.findall(text) if "sha256sum" in span and "find" in span]
+        self.assertEqual(len(found), 1, "one sha256sum one-liner in the skill")
+        return found[0]
+
+    def written(self) -> str:
+        command = self.one_liner().replace("DIR", shlex.quote(str(self.out)))
+        subprocess.run(["sh", "-c", command], cwd=self.out.parent, check=True, timeout=60)
+        return (self.out / "SHA256SUMS").read_text(encoding="utf-8")
+
+    def expected(self) -> dict:
+        return {rel: hashlib.sha256(data).hexdigest() for rel, data in self.FILES.items()}
+
+    def test_one_liner_lists_every_file_except_shk_entries(self):
+        lines = self.written().splitlines()
+        self.assertEqual(sorted(lines), sorted(f"{digest}  {rel}" for rel, digest in self.expected().items()))
+
+    @unittest.skipIf(absent("transfer"), "integration-only: transfer absent")
+    def test_shk_pull_accepts_the_one_liner(self):
+        from sherlock_kit import transfer
+        self.assertEqual(transfer.parse_manifest(self.written()), self.expected())
+        program = SRC / "sherlock_kit/data/remote/manifest.sh"
+        reply = subprocess.run(["sh", str(program), str(self.out)], capture_output=True, text=True, check=True,
+                               timeout=60).stdout
+        self.assertIn(f"SHK_COUNT {len(self.FILES)}\n", reply)
 
 
 class RemovedTermTests(unittest.TestCase):

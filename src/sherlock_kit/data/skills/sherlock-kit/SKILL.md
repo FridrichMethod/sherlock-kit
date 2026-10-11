@@ -9,7 +9,7 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 
 ## Setup check
 
-1. Prefer the project environment's `shk` (`uv run shk`, `.venv/bin/shk` or `python -m sherlock_kit`), else the global `~/.local/bin/shk`. Ask before any `pip install`, upgrade or version switch.
+1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` and `python -m sherlock_kit` in the activated environment), else the global `~/.local/bin/shk`. Not `uv run shk`: it locks and syncs the project environment first. Ask before any `pip install`, upgrade or version switch.
 2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>` (the dotfiles copy), `source <path>` (a development checkout: never use it for real work) or `unknown`. This skill requires shk 0.4 or newer; with an older one, or when a flag here is missing, follow `shk <cmd> --help` instead.
 3. If no Sherlock rules are loaded in this session, read them first: `shk rules workstation` on a workstation, `shk rules cluster` on Sherlock.
 4. `shk doctor` is read-only and offline (`--remote` adds one read-only call on Sherlock).
@@ -22,8 +22,8 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 | 1 | local error: config, spec, verification, validator, malformed reply | fix the input; do not retry unchanged |
 | 2 | usage error | read `shk <cmd> --help` |
 | 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive shk owns, Slurm rejected, push or pull on Sherlock | read the message; change the request, not the guard |
-| 4 | Sherlock unreachable without a new login | `auth_required`: ask the user to run the hint (`ssh sherlock-plain`, or `ssh -fN sherlock-dtn`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help |
-| 5 | outcome unknown after a dispatched submit or cancel | `shk status` for that task, not before `next_check_after`; never resubmit blind |
+| 4 | Sherlock unreachable without a new login | `auth_required`: ask the user to run the hint (`ssh sherlock-plain`, or `ssh -fN sherlock-dtn`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Other `unavailable` or `timeout` (hint `run shk doctor`): run `shk doctor`, retry once after about a minute, then stop and tell the user |
+| 5 | outcome unknown after a dispatched submit or cancel | run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s); never resubmit blind |
 | 6 | status ok, but the newest job of a name has an anomaly | stop and report it to the user |
 
 ## Configuration
@@ -40,6 +40,7 @@ shk submit --task train-a --script job.sh --partition normal --cpus 4 --mem 16G 
 - Always `--dry-run` first: it is offline and prints the job name, the sbatch argv and the frozen spec.
 - The name is `shk.<project>.<task slug>.<hash>` from project, `--campaign` (default `default`) and `--task`. The same task always gets the same name, so a second submit is refused (exit 3) while a job of that name is pending or running, even with `--resubmit`.
 - A done or failed task is refused unless `--resubmit "<reason>"` names why it runs again; find the cause of a failure first.
+- Deduplication reads only `squeue` and the last 30 days of `sacct`. A task whose jobs are older than that submits again as new, without `--resubmit`, even when its run directory still exists: check before rerunning old work.
 - Partition, CPUs, memory and walltime are explicit. GPUs only with `--gpus N` on a partition that allows them; `--constraint` instead of excluding nodes. Requeue only on `owners`, whose scripts must checkpoint periodically.
 - The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns: account, exclude, GPUs or gres, partition, array, dependency, begin or job name.
 - Chain stages with `--after-ok JOBID` instead of polling. Inside a job script never call `shk submit` or start an agent.
@@ -68,7 +69,7 @@ shk pull /scratch/users/USER/project/runs/NAME/out results/NAME --validate bundl
 
 - `shk push LOCAL REMOTE` copies into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes.
 - `shk pull REMOTE LOCAL` needs `REMOTE/SHA256SUMS`, copies exactly those files into a private stage beside LOCAL, verifies every hash, runs the validator named by `--validate`, then renames the stage onto LOCAL and writes a receipt. An existing LOCAL is kept unless `--replace`; a rerun resumes.
-- The job writes the manifest as its last step: `shk manifest DIR` when shk is available there, else `(cd DIR && find . -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum) > DIR/SHA256SUMS`.
+- The job writes the manifest as its last step: `shk manifest DIR` when shk is available there, else `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`. DIR is the job's output directory (for example `out/` under the run directory), never the run directory itself, which holds `.shk/` and the Slurm logs still being written.
 - Never touch or rewrite scratch files to keep them from the 90-day purge; copy what must last to `$GROUP_HOME`, Oak or the workstation.
 
 ## Occupancy and borrowed partitions
