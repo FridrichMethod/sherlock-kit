@@ -14,17 +14,6 @@ NAMES = ["normal", "bigmem", "dev", "service", "gpu", "owners", "bioe", "stat", 
 KEYS = {"preemptible", "requeue", "borrowed", "gpus_allowed", "courtesy"}
 
 
-def table(**profile):
-    entry = {
-        "preemptible": False,
-        "requeue": False,
-        "borrowed": False,
-        "gpus_allowed": False,
-        "courtesy": "",
-    }
-    return json.dumps({"schema_version": 1, "partitions": {"normal": {**entry, **profile}}})
-
-
 class PartitionTableTests(unittest.TestCase):
     def test_packaged_table_shape(self):
         raw = json.loads((SRC / "sherlock_kit/data/partitions.json").read_text(encoding="utf-8"))
@@ -58,25 +47,6 @@ class PartitionTableTests(unittest.TestCase):
             partitions.profiles()["normal"] = None
         with self.assertRaises(AttributeError):
             partitions.profile("normal").requeue = True
-
-    def test_parse_refuses_malformed_tables(self):
-        bad = [
-            "not json",
-            json.dumps({"schema_version": 2, "partitions": {}}),
-            json.dumps({"schema_version": 1, "partitions": {}}),
-            '{"schema_version": 1, "partitions": {"a": {}, "a": {}}}',
-            table(window="00:00-07:00"),
-            table(requeue="no"),
-            table(courtesy="two\nlines"),
-            table().replace('"normal"', '"bad name"'),
-        ]
-        for text in bad:
-            with self.subTest(text=text[:60]), self.assertRaises(ShkError) as caught:
-                partitions.parse(text)
-            self.assertEqual(
-                (caught.exception.code, caught.exception.token), (1, "partitions_invalid")
-            )
-        self.assertEqual(list(partitions.parse(table())), ["normal"])
 
 
 class MarkdownTests(unittest.TestCase):

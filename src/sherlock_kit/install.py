@@ -13,13 +13,19 @@ Copies are idempotent. `--check` writes nothing and exits 1 when a copy is missi
 or stale. It never writes into HOME itself or through a link that leaves DIR.
 """
 
+from __future__ import annotations
+
 import argparse
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from sherlock_kit import __version__
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_OK, Outcome, ShkError
+
+if TYPE_CHECKING:
+    from sherlock_kit.cli import Context
 
 KINDS = ("workstation", "cluster")
 CLIENTS = ("claude", "codex")
@@ -42,10 +48,12 @@ class Wanted:
 
 
 def packaged(*parts: str) -> str:
+    """The text of a data file shipped in sherlock_kit/data, given its path parts."""
     return (resources.files("sherlock_kit") / "data").joinpath(*parts).read_text(encoding="utf-8")
 
 
-def register(subparsers) -> None:
+def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add the rules and install-skill commands."""
     rules = subparsers.add_parser("rules", help="print the packaged Sherlock rules for agents")
     rules.add_argument("kind", choices=KINDS)
     rules.set_defaults(handler=print_rules)
@@ -65,7 +73,8 @@ def register(subparsers) -> None:
     skill.set_defaults(handler=install)
 
 
-def print_rules(args: argparse.Namespace, ctx: object) -> Outcome:
+def print_rules(args: argparse.Namespace, _ctx: Context) -> Outcome:
+    """`shk rules KIND`: the packaged rules file, verbatim."""
     return Outcome.text(packaged("rules", f"{args.kind}.md"))
 
 
@@ -77,6 +86,7 @@ def marked_skill() -> str:
 
 
 def wanted_files(args: argparse.Namespace, home: Path) -> Wanted:
+    """The copies and notices for these arguments, given the user's home directory."""
     clients = CLIENTS if args.client == "all" else (args.client,)
     wanted = Wanted()
     skill = marked_skill()
@@ -126,7 +136,8 @@ def copy_state(path: Path, text: str) -> str:
     return "stale"
 
 
-def install(args: argparse.Namespace, ctx: object) -> Outcome:
+def install(args: argparse.Namespace, _ctx: Context) -> Outcome:
+    """`shk install-skill`: write (or with --check only compare) the project copies."""
     home = Path.home().resolve()
     project = args.project.expanduser().resolve()
     if not project.is_dir() or project == home:

@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-# Global shk (contract C4): stdlib only, follows symlinks, <repo>/src first on sys.path, no
-# bytecode (a dotfiles submodule stays clean). Keep it parseable by old Pythons for the check.
+"""Global shk (contract C4): run the sherlock_kit source of the checkout this file is in.
+
+Standard library only. It follows symlinks to <repo>/bin/shk, puts <repo>/src first on
+sys.path and writes no bytecode, so a dotfiles submodule stays clean. Keep it parseable by old
+Pythons, which it refuses with a message.
+"""
+
 import os
 import sys
 

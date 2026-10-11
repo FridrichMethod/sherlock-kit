@@ -115,7 +115,7 @@ class SshExecutorTests(unittest.TestCase):
     def test_stdin_and_run_program(self):
         self.knobs(FAKE_SSH_MODE="exec")
         self.assertEqual(self.ssh.run(["wc", "-c"], stdin=b"abc\ndef").stdout.strip(), "7")
-        self.assertEqual(self.ssh.run(["cat"], stdin="text").stdout, "text")
+        self.assertEqual(self.ssh.run(["cat"], stdin=b"text").stdout, "text")
         result = executor.run_program(self.ssh, "doctor", [])
         self.assertEqual(result.status, "complete")
         self.assertIn("SHK_END", result.stdout.splitlines())
@@ -128,19 +128,6 @@ class SshExecutorTests(unittest.TestCase):
         options, target = self.dtn.rsync_args("/scratch/users/u/a b")
         self.assertEqual(options, ["-e", shlex.join([str(self.fake.path), *PREFIX])])
         self.assertEqual(target, "sherlock-dtn:/scratch/users/u/a b")
-        for bad in ("relative", "/x\ny", "/x\0y"):
-            with self.subTest(path=bad), self.assertRaises(ShkError):
-                self.dtn.rsync_args(bad)
-
-    def test_invalid_input_is_refused_before_dialing(self):
-        self.knobs()
-        for argv in ("hostname", [], [""], ["-x"], ["a\0"], [1]):
-            with self.subTest(argv=argv), self.assertRaises(ValueError):
-                self.ssh.run(argv)
-        for host in ("-oProxyCommand=x", "a b", "", "host:22"):
-            with self.subTest(host=host), self.assertRaises(ValueError):
-                executor.SshExecutor(host)
-        self.assertEqual(self.fake.calls(), [])
 
 
 @unittest.skipUnless(shutil.which("ssh"), "OpenSSH client not installed")

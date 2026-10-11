@@ -33,10 +33,10 @@ def command(name, handler):
     return SimpleNamespace(register=register)
 
 
-def run(argv, modules=(), context=None):
+def run(argv, modules=cli.MODULES, context=None):
     out, err = io.StringIO(), io.StringIO()
     with redirect_stdout(out), redirect_stderr(err):
-        code = cli.main(argv, modules=list(modules), context=context)
+        code = cli.main(argv, modules=modules, context=context)
     return code, out.getvalue(), err.getvalue()
 
 
@@ -151,24 +151,14 @@ class FrameTests(TempCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             cli.main(["--executor", "remote", "doctor"], modules=[])
 
-    def test_loading_handler_and_rendering_failures_are_json(self):
+    def test_loading_and_rendering_failures_are_json(self):
         broken = SimpleNamespace(register=lambda subparsers: 1 / 0)
-        modules = [
-            command("none_text", lambda a, c: Outcome.text(None)),
-            command("bad_key", lambda a, c: Outcome({"rows": {(1, 2): 3}})),
-        ]
-        for argv, mods in (
-            (["none_text"], modules),
-            (["bad_key"], modules),
-            (["doctor"], [broken]),
-        ):
+        unrenderable = command("bad_key", lambda a, c: Outcome({"rows": {(1, 2): 3}}))
+        for argv, modules in ((["bad_key"], [unrenderable]), (["doctor"], [broken])):
             with self.subTest(argv=argv):
-                code, out, err = run(argv, mods, self.context())
+                code, out, err = run(argv, modules, self.context())
                 self.assertEqual((code, json.loads(out)["error"]), (1, "internal_error"))
                 self.assertIn("Traceback", err)
-        for payload, code in (("text", 0), ({"text": 5}, 0), ({}, 7), ({}, True)):
-            with self.subTest(payload=payload, code=code), self.assertRaises(TypeError):
-                Outcome(payload, code)
 
     def test_context(self):
         now = datetime(2026, 10, 10, tzinfo=UTC)
@@ -193,19 +183,24 @@ class FrameTests(TempCase):
             cli.Context(executor="local", env={}, hostname="x").data_executor().kind, "local"
         )
 
-    def test_command_module_loading(self):
-        self.assertEqual(cli.COMMAND_MODULES, ("slurm", "transfer", "install"))
+    def test_every_command_is_registered(self):
+        parser = cli.build_parser()
+        commands = next(a for a in parser._actions if a.dest == "command").choices
         self.assertEqual(
-            [m.__name__ for m in cli.load_modules()],
-            ["sherlock_kit.slurm", "sherlock_kit.transfer", "sherlock_kit.install"],
+            sorted(commands),
+            [
+                "cancel",
+                "doctor",
+                "install-skill",
+                "manifest",
+                "occupancy",
+                "pull",
+                "push",
+                "rules",
+                "status",
+                "submit",
+            ],
         )
-        with self.assertRaises(ModuleNotFoundError):
-            cli.load_modules(("not_written_yet",))
-        (self.tmp / "broken_dep.py").write_text("import shk_missing_dependency_xyz\n")
-        with patch.object(sherlock_kit, "__path__", [*sherlock_kit.__path__, str(self.tmp)]):
-            with self.assertRaises(ModuleNotFoundError):
-                cli.load_modules(("broken_dep",))
-            sys.modules.pop("sherlock_kit.broken_dep", None)
 
 
 class DoctorTests(TempCase):

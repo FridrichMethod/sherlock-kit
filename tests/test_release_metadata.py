@@ -1,7 +1,6 @@
 """Release metadata: contract paths C1-C4, one version, rules format, mentioned CLI, removed terms, HOME."""
 
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -37,17 +36,6 @@ REMOVED = (
     "registry_root",
     "SHERLOCK.md",
 )
-# Commands registered by modules another package writes; until the lead merges them their
-# checks skip as integration-only, and run_suite fails those skips under SHK_REQUIRE_ALL.
-OWNER = {
-    "submit": "slurm",
-    "status": "slurm",
-    "cancel": "slurm",
-    "occupancy": "slurm",
-    "push": "transfer",
-    "pull": "transfer",
-    "manifest": "transfer",
-}
 GLOBAL_VALUE = ("--project-dir", "--executor")
 FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.M | re.S)
 SPAN = re.compile(r"`([^`\n]+)`")
@@ -76,10 +64,6 @@ def in_git() -> bool:
         and top.returncode == 0
         and Path(top.stdout.strip()).resolve() == ROOT.resolve()
     )
-
-
-def absent(module: str) -> bool:
-    return importlib.util.find_spec(f"sherlock_kit.{module}") is None
 
 
 def snippets(text: str) -> list[str]:
@@ -228,23 +212,7 @@ class RulesFormatTests(unittest.TestCase):
 
 
 class MentionedCliTests(unittest.TestCase):
-    def check(self, owned_by):
-        parser = cli.build_parser(cli.load_modules())
-        commands = next(a for a in parser._actions if a.dest == "command").choices
-        top = {s for a in parser._actions for s in a.option_strings}
-        checked = 0
-        for path in MENTIONING:
-            for command, options in mentions(path.read_text(encoding="utf-8")):
-                if OWNER.get(command) != owned_by:
-                    continue
-                checked += 1
-                self.assertTrue(command in commands, f"{path.name}: shk {command} does not exist")
-                known = top | {s for a in commands[command]._actions for s in a.option_strings}
-                for option in options:
-                    self.assertTrue(option in known, f"{path.name}: shk {command} has no {option}")
-        self.assertGreater(checked, 0)
-
-    def test_core_and_install_commands_exist(self):
+    def test_mentions_are_parsed(self):
         self.assertEqual(
             mentions(
                 "`shk --executor local status --all ...` and `shk rules <kind>`\n```\n"
@@ -257,15 +225,20 @@ class MentionedCliTests(unittest.TestCase):
                 ("rules", []),
             ],
         )
-        self.check(None)
 
-    @unittest.skipIf(absent("slurm"), "integration-only: slurm absent")
-    def test_slurm_commands_exist(self):
-        self.check("slurm")
-
-    @unittest.skipIf(absent("transfer"), "integration-only: transfer absent")
-    def test_transfer_commands_exist(self):
-        self.check("transfer")
+    def test_every_mentioned_command_and_option_exists(self):
+        parser = cli.build_parser()
+        commands = next(a for a in parser._actions if a.dest == "command").choices
+        top = {s for a in parser._actions for s in a.option_strings}
+        mentioned = set()
+        for path in MENTIONING:
+            for command, options in mentions(path.read_text(encoding="utf-8")):
+                mentioned.add(command)
+                self.assertTrue(command in commands, f"{path.name}: shk {command} does not exist")
+                known = top | {s for a in commands[command]._actions for s in a.option_strings}
+                for option in options:
+                    self.assertTrue(option in known, f"{path.name}: shk {command} has no {option}")
+        self.assertEqual(mentioned, set(commands))
 
 
 class ManifestOneLinerTests(unittest.TestCase):
@@ -312,7 +285,6 @@ class ManifestOneLinerTests(unittest.TestCase):
             sorted(lines), sorted(f"{digest}  {rel}" for rel, digest in self.expected().items())
         )
 
-    @unittest.skipIf(absent("transfer"), "integration-only: transfer absent")
     def test_shk_pull_accepts_the_one_liner(self):
         from sherlock_kit import transfer
 
@@ -393,7 +365,6 @@ class NoHomeWriteTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout)
         self.assertTrue(json.loads(done.stdout)["ok"])
 
-    @unittest.skipIf(absent("slurm"), "integration-only: slurm absent")
     def test_submit_dry_run(self):
         done = self.shk(
             "submit",

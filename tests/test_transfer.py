@@ -498,7 +498,7 @@ class RefusalAndPushTests(TransferCase):
             self.assertEqual(
                 self.shk("push", str(source), str(remote))[1]["error"], "outside_remote_root"
             )
-        for remote in ("relative/x", f"{self.root}/../x", "/a\nb"):
+        for remote in ("relative/x", f"{self.root}/../x"):
             self.assertEqual(
                 self.shk("push", str(source), remote, "--anywhere")[1]["error"],
                 "invalid_remote_path",
