@@ -447,7 +447,8 @@ def _register_status(subparsers: Any) -> None:
     which.add_argument("--task", action="append", help="repeatable")
     which.add_argument("--name", action="append", help="repeatable")
     which.add_argument("--all", action="store_true", help="every shk job of this project")
-    parser.add_argument("--campaign", default="default")
+    parser.add_argument("--campaign", action="append",
+                        help="once for every --task, or once per --task (default: default)")
     parser.add_argument("--run-dir", action="append",
                         help="once per --task (default <remote_root>/runs/<name>)")
     parser.add_argument("--since", type=int, metavar="DAYS",
@@ -625,13 +626,17 @@ class Selected:
 def _selection(args: argparse.Namespace, ctx: Context) -> list[Selected]:
     selected = [Selected(_checked_name(name)) for name in args.name or ()]
     tasks = args.task or []
+    campaigns = args.campaign or ["default"]
+    if len(campaigns) == 1:  # one --campaign serves every --task
+        campaigns = campaigns * len(tasks)
     run_dirs = args.run_dir or [None] * len(tasks)
-    if len(run_dirs) != len(tasks):
-        raise ShkError(EXIT_LOCAL, "spec_invalid", "give --run-dir once per --task, or not at all")
-    for task, given in zip(tasks, run_dirs, strict=True):
-        config, name = ctx.require("project"), _task_name(ctx, args.campaign, task)
+    if len(campaigns) != len(tasks) or len(run_dirs) != len(tasks):
+        raise ShkError(EXIT_LOCAL, "spec_invalid", "give --campaign once or once per --task, "
+                       "and --run-dir once per --task or not at all")
+    for task, campaign, given in zip(tasks, campaigns, run_dirs, strict=True):
+        config, name = ctx.require("project"), _task_name(ctx, campaign, task)
         run_dir = spec.run_directory(given, config, name) if given or config.remote_root else None
-        selected.append(Selected(name, run_dir, {"campaign": args.campaign, "task": task}))
+        selected.append(Selected(name, run_dir, {"campaign": campaign, "task": task}))
     return selected
 
 

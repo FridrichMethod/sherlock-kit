@@ -199,6 +199,21 @@ class StatusCancelOccupancyFlows(Flow):
         refused = self.shk("status", "--name", out["name"], "--since", "0")[1]
         self.assertEqual(refused["error"], "spec_invalid")
 
+    def test_status_pairs_each_campaign_with_its_task(self):
+        first = self.submit("--campaign", "x", task="a")[1]
+        second = self.submit("--campaign", "y", task="b")[1]
+        code, report = self.shk("status", "--task", "a", "--campaign", "x",
+                                "--task", "b", "--campaign", "y")
+        found = [(e["task"], e["campaign"], e["name"], e["state"]) for e in report["names"]]
+        self.assertEqual((code, found), (0, [("a", "x", first["name"], "live"),
+                                             ("b", "y", second["name"], "live")]))
+        shared = self.shk("status", "--task", "a", "--task", "b", "--campaign", "x")[1]
+        self.assertEqual([(e["campaign"], e["state"]) for e in shared["names"]],
+                         [("x", "live"), ("x", "new")])
+        code, refused = self.shk("status", "--task", "a", "--task", "b",
+                                 "--campaign", "x", "--campaign", "y", "--campaign", "z")
+        self.assertEqual((code, refused["error"]), (1, "spec_invalid"))
+
     def test_jobs_outside_the_sacct_window_are_forgotten(self):
         self.slurm.add(spec.job_name("demo", "default", "old"), "COMPLETED", age_days=40)
         self.assertEqual(self.entry("old")["state"], "new")
