@@ -4,12 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sherlock-kit"
-version = "0.3.0"
-description = "Shared Sherlock policy, bounded transport and typed CPU operations"
+version = "0.4.0"
+description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/FridrichMethod/sherlock-kit"
@@ -17,12 +18,11 @@ Documentation = "https://github.com/FridrichMethod/sherlock-kit/blob/main/README
 Issues = "https://github.com/FridrichMethod/sherlock-kit/issues"
 
 [project.scripts]
-shk = "sherlock_kit:main"
+shk = "sherlock_kit.cli:main"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-py-modules = ["sherlock_kit", "sherlock_partitions", "sherlock_orchestration", "sherlock_artifacts", "sherlock_commands", "sherlock_guard", "sherlock_registry"]
-packages = ["sherlock_kit_data"]
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = false
 
 [tool.setuptools.package-data]
-sherlock_kit_data = ["partitions.json", "SHERLOCK.md", "build_identity.json", "adapters/**"]
+sherlock_kit = ["data/*.json", "data/remote/*.sh", "data/rules/*.md", "data/skills/*/SKILL.md"]
