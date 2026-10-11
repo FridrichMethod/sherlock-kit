@@ -117,6 +117,19 @@ class FrameTests(TempCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             cli.main(["--executor", "remote", "doctor"], modules=[])
 
+    def test_loading_handler_and_rendering_failures_are_json(self):
+        broken = SimpleNamespace(register=lambda subparsers: 1 / 0)
+        modules = [command("none_text", lambda a, c: Outcome.text(None)),
+                   command("bad_key", lambda a, c: Outcome({"rows": {(1, 2): 3}}))]
+        for argv, mods in ((["none_text"], modules), (["bad_key"], modules), (["doctor"], [broken])):
+            with self.subTest(argv=argv):
+                code, out, err = run(argv, mods, self.context())
+                self.assertEqual((code, json.loads(out)["error"]), (1, "internal_error"))
+                self.assertIn("Traceback", err)
+        for payload, code in (("text", 0), ({"text": 5}, 0), ({}, 7), ({}, True)):
+            with self.subTest(payload=payload, code=code), self.assertRaises(TypeError):
+                Outcome(payload, code)
+
     def test_context(self):
         now = datetime(2026, 10, 10, tzinfo=timezone.utc)
         ctx = self.context(clock=lambda: now)

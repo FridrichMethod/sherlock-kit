@@ -1,17 +1,13 @@
 """The shk command line: global options, subcommands, JSON output, exit codes (frozen 0.4.0).
 
-`shk [--project-dir DIR] [--executor auto|ssh|local] [--version] COMMAND ...`.
-Each sherlock_kit.<name> in COMMAND_MODULES has register(subparsers); each of its
-subcommands calls set_defaults(handler=fn), fn(args, ctx) -> Outcome. doctor is
-registered here. A module not written yet is skipped until STRICT_COMMAND_IMPORTS.
-ctx (Context): .config (ProjectConfig | None, discovered lazily; a broken config
-raises when touched); .require(*keys) -> ProjectConfig or
-ShkError(1, "config_required"); .executor() (control host) and .data_executor()
-(DTN; on Sherlock a LocalExecutor that refuses transfers), each detected once;
-.clock() (aware UTC now, injectable); .env, .hostname, .executor_override.
-Output: payload JSON on stdout (non-JSON values str()-ed) or "text" verbatim;
-ShkError -> its payload and code; any other exception -> traceback on stderr,
-internal_error JSON, exit 1.
+Each sherlock_kit.<name> in COMMAND_MODULES has register(subparsers); its subcommands
+set_defaults(handler=fn), fn(args, ctx) -> Outcome; unwritten modules are skipped until
+STRICT_COMMAND_IMPORTS. Context: .config (lazy ProjectConfig | None), .require(*keys)
+(else ShkError(1, "config_required")), .executor() / .data_executor() (control host /
+DTN, detected once), .clock() (aware UTC, injectable), .env, .hostname. stdout is the
+payload as JSON or its "text" verbatim; ShkError -> its payload and code; any other
+exception (module loading, handler, rendering) -> traceback on stderr, internal_error
+JSON, exit 1; usage errors stay argparse's exit 2.
 """
 from __future__ import annotations
 
@@ -96,32 +92,35 @@ def build_parser(modules) -> argparse.ArgumentParser:
     return parser
 
 
-def _emit(payload: dict, code: int) -> int:
+def _render(payload: dict, code: int) -> str:
     if "text" in payload:
-        sys.stdout.write(payload["text"])
-    else:
-        body = payload if "ok" in payload else {"ok": code in (EXIT_OK, EXIT_ANOMALY), **payload}
-        print(json.dumps(body, indent=2, ensure_ascii=False, default=str))
-    sys.stdout.flush()
-    return code
+        return payload["text"]
+    body = payload if "ok" in payload else {"ok": code in (EXIT_OK, EXIT_ANOMALY), **payload}
+    return json.dumps(body, indent=2, ensure_ascii=False, default=str) + "\n"
 
 
-def main(argv=None, *, modules=None, context=None) -> int:
+def _run(argv, modules, context) -> tuple[str, int]:
     parser = build_parser(load_modules() if modules is None else modules)
     args = parser.parse_args(argv)
     if args.version:
-        print(version_line())
-        return EXIT_OK
+        return version_line() + "\n", EXIT_OK
     if args.command is None:
         parser.error("a command is required")
+    outcome = args.handler(args, context or Context(project_dir=args.project_dir, executor=args.executor))
+    if not isinstance(outcome, Outcome):
+        raise TypeError(f"{args.command} handler returned {type(outcome).__name__}, not Outcome")
+    return _render(outcome.payload, outcome.code), outcome.code
+
+
+def main(argv=None, *, modules=None, context=None) -> int:
     try:
-        outcome = args.handler(args, context or Context(project_dir=args.project_dir, executor=args.executor))
-        if not isinstance(outcome, Outcome):
-            raise TypeError(f"{args.command} handler returned {type(outcome).__name__}, not Outcome")
+        text, code = _run(argv, modules, context)
     except ShkError as exc:
-        return _emit(exc.payload(), exc.code)
+        text, code = _render(exc.payload(), exc.code), exc.code
     except Exception as exc:  # never swallowed: traceback on stderr, JSON error on stdout
         traceback.print_exc()
-        return _emit({"ok": False, "error": "internal_error", "message": f"{type(exc).__name__}: {exc}",
-                      "hint": "report this with the traceback printed on stderr"}, EXIT_LOCAL)
-    return _emit(outcome.payload, outcome.code)
+        text, code = _render({"ok": False, "error": "internal_error", "message": f"{type(exc).__name__}: {exc}",
+                              "hint": "report this with the traceback printed on stderr"}, EXIT_LOCAL), EXIT_LOCAL
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    return code
