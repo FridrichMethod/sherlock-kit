@@ -12,6 +12,7 @@ import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+from typing import ClassVar
 
 from fakes import ROOT, SRC, install_fake_ssh
 
@@ -70,8 +71,8 @@ def snippets(text: str) -> list[str]:
     """Shell-like snippets: fenced lines (indented lines continue the previous one) and inline code spans."""
     found = []
     for block in FENCE.findall(text):
-        for line in block.splitlines():
-            line = re.sub(r"\s#\s.*$", "", line).rstrip().removesuffix("\\")
+        for raw in block.splitlines():
+            line = re.sub(r"\s#\s.*$", "", raw).rstrip().removesuffix("\\")
             if found and line[:1].isspace():
                 found[-1] += " " + line.strip()
             elif line:
@@ -244,7 +245,7 @@ class MentionedCliTests(unittest.TestCase):
 class ManifestOneLinerTests(unittest.TestCase):
     """The skill's sha256sum fallback must write what `shk pull` accepts, like `shk manifest`."""
 
-    FILES = {
+    FILES: ClassVar[dict[str, bytes]] = {
         "a.txt": b"a\n",
         "-b": b"b\n",
         "-c": b"c\n",
@@ -352,7 +353,13 @@ class NoHomeWriteTests(unittest.TestCase):
             *argv,
         ]
         done = subprocess.run(
-            command, env=self.env, cwd=self.project, capture_output=True, text=True, timeout=60
+            command,
+            env=self.env,
+            cwd=self.project,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
         )
         self.assertEqual(list(self.home.rglob("*")), [], f"shk {' '.join(argv)} wrote under HOME")
         return done

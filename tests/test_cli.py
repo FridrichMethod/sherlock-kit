@@ -115,6 +115,7 @@ class VersionTests(TempCase):
             [sys.executable, "-B", "-c", code, str(ROOT / "bin/shk")],
             capture_output=True,
             text=True,
+            check=False,
         )
         self.assertEqual(result.returncode, 1)
         self.assertIn("Python 3.11", result.stderr)

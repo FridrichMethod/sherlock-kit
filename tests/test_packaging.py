@@ -87,6 +87,7 @@ class HeadCase(unittest.TestCase):
             capture_output=True,
             text=True,
             timeout=300,
+            check=False,
         )
         self.assertEqual(done.returncode, 0, f"{argv}\n{done.stdout}\n{done.stderr}")
         if Path(argv[0]).name == "shk":
