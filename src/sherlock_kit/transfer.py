@@ -1,6 +1,9 @@
 """`shk push`, `shk pull`, `shk manifest`: rsync through the DTN, bound by a SHA256SUMS manifest.
 
-push: rsync -rlt LOCAL/ into data_host:REMOTE/ (below remote_root unless --anywhere); it never deletes.
+push: rsync -rlt LOCAL/ into data_host:REMOTE/ (below remote_root unless --anywhere); it never
+deletes. -t keeps the local modification times, so a re-push skips unchanged files instead of
+rewriting them (and refreshing their scratch purge clock); pushed files that are old locally can
+therefore be purge-eligible on scratch soon after the push.
 
 pull: read REMOTE/SHA256SUMS through the control host (data/remote/manifest.sh); it must list every
 regular file under REMOTE except SHA256SUMS and .shk* entries. Under a flock on .NAME.shk-lock, an
@@ -43,10 +46,7 @@ if TYPE_CHECKING:
 
 SUMS = "SHA256SUMS"
 RESERVED_PREFIX = ".shk"
-MAX_FILES = 10_000
-MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 SUMS_LINE = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
-ZERO_DIGEST = "0" * 64
 TAIL_CHARS = 500
 LINK_LOST = (12, 255)  # rsync: protocol stream broken; ssh: connection failed
 PUSH = ("rsync", "-rlt", "--protect-args", "--partial")
@@ -66,16 +66,6 @@ def _invalid(message: str) -> ShkError:
     )
 
 
-def _is_utf8(name: str) -> bool:
-    try:
-        name.encode("utf-8")
-    except UnicodeEncodeError:  # undecodable bytes from a local listing (surrogateescape)
-        return False
-    return (
-        "\ufffd" not in name
-    )  # undecodable bytes in a remote reply (decoded with errors="replace")
-
-
 def _check_name(where: str, name: str) -> None:
     parts = name.split("/")
     if name.startswith("/"):
@@ -86,21 +76,12 @@ def _check_name(where: str, name: str) -> None:
         problem = "starts with .shk, a name reserved for shk"
     elif parts[-1] == SUMS:
         problem = "is named SHA256SUMS, a name reserved for the manifest"
-    elif not _is_utf8(name):
-        problem = "is not UTF-8"
-    elif "\\" in name or not name.isprintable():
-        problem = "holds a backslash or a control character"
     else:
         return
     raise _invalid(f"{where}: {name!r} {problem}")
 
 
 def _parse_line(where: str, line: str) -> tuple[str, str]:
-    if line.startswith("\\"):
-        raise _invalid(
-            f"{where}: sha256sum escaped this name because it holds a backslash or a newline; "
-            "rename the file"
-        )
     match = SUMS_LINE.fullmatch(line)
     if match is None:
         raise _invalid(f"{where}: want '<64 hex digits>  <path>' as sha256sum writes it")
@@ -120,9 +101,6 @@ def _parents(names: Iterable[str]) -> set[str]:
 
 def parse_manifest(text: str) -> dict[str, str]:
     """{relative path: lowercase sha256} from SHA256SUMS text, else ShkError(1, "manifest_invalid")."""
-    size = len(text.encode("utf-8", "surrogateescape"))
-    if size > MAX_MANIFEST_BYTES:
-        raise _invalid(f"SHA256SUMS is {size} bytes; the limit is {MAX_MANIFEST_BYTES}")
     entries: dict[str, str] = {}
     for number, line in enumerate(text.split("\n"), 1):
         if not line:
@@ -133,11 +111,6 @@ def parse_manifest(text: str) -> dict[str, str]:
         entries[name] = digest
     if not entries:
         raise _invalid("SHA256SUMS lists no files")
-    if len(entries) > MAX_FILES:
-        raise _invalid(f"SHA256SUMS lists {len(entries)} files; the limit is {MAX_FILES}")
-    clashes = sorted(_parents(entries) & entries.keys())
-    if clashes:
-        raise _invalid(f"SHA256SUMS lists {clashes[0]!r} as a file and as a directory")
     return entries
 
 
@@ -192,14 +165,10 @@ def _manifest_error(remote: str, error: str) -> ShkError:
             f"{remote}/SHA256SUMS is missing or unreadable",
             hint=MANIFEST_HINT,
         )
-    if error == "too_large":
-        return _invalid(
-            f"{remote}/SHA256SUMS is larger than the limit of {MAX_MANIFEST_BYTES} bytes"
-        )
     return _malformed(remote, f"unknown error {error!r}")
 
 
-def _read_manifest(control: Any, remote: str) -> tuple[str, int]:
+def _read_manifest(control: executor.Executor, remote: str) -> tuple[str, int]:
     """(SHA256SUMS text, regular files under REMOTE that a complete manifest lists) via manifest.sh."""
     reply = executor.check(executor.run_program(control, "manifest", [remote]), "read SHA256SUMS")
     lines = reply.stdout.split("\n")
@@ -220,11 +189,10 @@ def _read_manifest(control: Any, remote: str) -> tuple[str, int]:
 def _check_complete(remote: str, count: int, listed: int) -> None:
     if count == listed:
         return
-    held = f"more than {MAX_FILES}" if count > MAX_FILES else str(count)
     raise ShkError(
         EXIT_LOCAL,
         "manifest_incomplete",
-        f"{remote} holds {held} regular files; SHA256SUMS lists {listed}",
+        f"{remote} holds {count} regular files; SHA256SUMS lists {listed}",
         hint="list every regular file except SHA256SUMS and .shk* entries; " + MANIFEST_HINT,
     )
 
@@ -233,17 +201,14 @@ def _check_complete(remote: str, count: int, listed: int) -> None:
 
 
 def _failure(label: str, result: executor.Result, timeout: int) -> str:
-    """The message "<label> <what happened>: <tail>"; the tail is printable, collapsed and bounded."""
+    """The message "<label> <what happened>: <tail>", with the output's tail on one line."""
     if result.status == "timeout":
         what = f"timed out after {timeout} s"
     elif result.status == "failed":
         what = f"exit {result.returncode}"
     else:  # unavailable: the program could not start
         what = result.status
-    printable = "".join(c for c in result.stdout + result.stderr if c.isprintable() or c.isspace())
-    tail = " ".join(printable.split())[
-        -TAIL_CHARS:
-    ]  # the executor already dropped the banner lines
+    tail = " ".join((result.stdout + result.stderr).split())[-TAIL_CHARS:]  # banner already gone
     return f"{label} {what}: {tail}" if tail else f"{label} {what}"
 
 
@@ -325,12 +290,15 @@ class Places:
 
     @classmethod
     def beside(cls, dest: Path) -> Places:
+        """The shk files of LOCAL dest, which may not exist yet."""
+
         def sibling(kind: str) -> Path:
             return dest.with_name(f".{dest.name}.shk-{kind}")
 
         return cls(dest, sibling("lock"), sibling("stage"), sibling("receipt.json"))
 
     def old_copy(self, now: datetime) -> Path:
+        """Where --replace keeps the previous LOCAL."""
         return self.dest.with_name(f".{self.dest.name}.shk-old-{now:%Y%m%dT%H%M%S%fZ}")
 
 
@@ -407,7 +375,6 @@ def _prepare_stage(stage: Path, entries: dict[str, str]) -> None:
     would fail verification forever. The stage belongs to shk, so they go before rsync resumes.
     """
     stage.mkdir(mode=0o700, exist_ok=True)
-    stage.chmod(0o700)
     _prune(stage, set(entries), _parents(entries))
 
 
@@ -452,6 +419,7 @@ def _promote(stage: Path, dest: Path, old_copy: Path) -> Path | None:
 
 
 def push(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk push LOCAL REMOTE`: rsync LOCAL/ into REMOTE/ through the DTN; never deletes."""
     remote = _remote(args.remote)
     local = Path(args.local).expanduser().resolve()
     if not args.anywhere:
@@ -471,6 +439,7 @@ def push(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 
 def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk pull REMOTE LOCAL`: fetch, verify, validate and promote what SHA256SUMS lists."""
     remote, settings = _remote(args.remote), _settings(ctx)
     if args.validate is not None and args.validate not in settings.validators:
         raise ShkError(
@@ -480,10 +449,8 @@ def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
         )
     places = Places.beside(_destination(args.local))
     data = ctx.data_executor()
-    if data.kind == "local":
-        data.rsync_args(
-            remote
-        )  # raises transfer_on_sherlock before any work: the data is already here
+    if data.kind == "local":  # on Sherlock: refuse before any work, the data is already here
+        data.rsync_args(remote)
     text, count = _read_manifest(ctx.executor(), remote)
     entries = parse_manifest(text)
     _check_complete(remote, count, len(entries))
@@ -529,7 +496,8 @@ def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
     })
 
 
-def manifest(args: argparse.Namespace, ctx: Context) -> Outcome:
+def manifest(args: argparse.Namespace, _ctx: Context) -> Outcome:
+    """`shk manifest DIR`: write DIR/SHA256SUMS over its regular files (inside jobs, offline)."""
     root = Path(args.directory).expanduser().resolve()
     if not root.is_dir():
         raise ShkError(EXIT_LOCAL, "bundle_missing", f"{args.directory} is not a directory")
@@ -543,9 +511,6 @@ def manifest(args: argparse.Namespace, ctx: Context) -> Outcome:
         else:
             skipped.append(path)  # symlinks and special files, as `find -type f` leaves them out
     names = sorted(files)
-    parse_manifest(
-        _sums_text((ZERO_DIGEST, name) for name in names)
-    )  # names, count, size before hashing
     text = _sums_text((_digest(root / name), name) for name in names)
     temporary = root / f"{RESERVED_PREFIX}-{SUMS}"
     temporary.write_text(text, encoding="utf-8")
@@ -559,7 +524,8 @@ def manifest(args: argparse.Namespace, ctx: Context) -> Outcome:
     })
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    """Add the push, pull and manifest commands."""
     to = subparsers.add_parser("push", help="rsync LOCAL/ into data_host:REMOTE/ (never deletes)")
     to.add_argument("local", metavar="LOCAL")
     to.add_argument(
