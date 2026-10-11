@@ -444,6 +444,11 @@ def push(args: argparse.Namespace, ctx: Context) -> Outcome:
     return Outcome({"action": "pushed", "local": str(local), "remote": remote, "target": target})
 
 
+def _owned_by_me(path: Path) -> bool:
+    """Whether the current user owns path: validators are commands, never taken from another user."""
+    return path.stat().st_uid == os.geteuid()
+
+
 def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk pull REMOTE LOCAL`: fetch, verify, validate and promote what SHA256SUMS lists."""
     remote, settings = _remote(args.remote), _settings(ctx)
@@ -452,6 +457,14 @@ def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
             EXIT_LOCAL,
             "validator_unknown",
             f"no validator {args.validate!r} in [tool.sherlock-kit.validators]",
+        )
+    if args.validate is not None and settings.path and not _owned_by_me(settings.path):
+        raise ShkError(
+            EXIT_REFUSED,
+            "validator_untrusted",
+            f"{settings.path} belongs to another user; shk runs validators only from a "
+            "configuration you own",
+            hint="copy the configuration into a project you own, or pull without --validate",
         )
     places = Places.beside(_destination(args.local))
     data = ctx.data_executor()

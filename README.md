@@ -149,7 +149,7 @@ Unknown keys are errors; nothing secret belongs here.
 | `control_host` | `sherlock-plain` | every remote call |
 | `data_host` | `sherlock-dtn` | `push`, `pull` |
 | `connect_timeout`, `command_timeout`, `transfer_timeout` | 15, 60, 3600 s | ssh and rsync |
-| `[tool.sherlock-kit.validators]` | none; `NAME = ["argv", ...]` | `pull --validate NAME` runs argv plus the stage directory |
+| `[tool.sherlock-kit.validators]` | none; `NAME = ["argv", ...]` | `pull --validate NAME` runs argv plus the stage directory, only from a configuration file you own |
 
 `doctor`, `rules` and `occupancy` work without a configuration. On Sherlock
 (`sh<N>-ln<N>` login nodes, `SLURM_CLUSTER_NAME=sherlock`, a compute node inside a

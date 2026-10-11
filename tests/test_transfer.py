@@ -332,6 +332,14 @@ class PullTests(TransferCase):
         self.assertEqual(self.pull("--validate", "ok")[0], 0)
         self.assertEqual(self.receipt()["validator"], "ok")
 
+    def test_validators_run_only_from_a_configuration_the_user_owns(self):
+        with patch.object(transfer, "_owned_by_me", return_value=False):
+            result = self.pull("--validate", "ok")
+        self.assert_refused(result, 3, "validator_untrusted")
+        self.assertEqual(self.fake.calls(), [])
+        self.assertFalse(self.dest.exists())
+        self.assertEqual(self.pull("--validate", "ok")[0], 0)
+
     def test_a_validator_that_writes_into_its_input_still_promotes(self):
         code, body = self.pull("--validate", "writes")
         self.assertEqual((code, body["action"], body["validator"]), (0, "pulled", "writes"), body)

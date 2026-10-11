@@ -179,7 +179,9 @@ validator named by `--validate`, if any: its argv from
 `[tool.sherlock-kit.validators]` plus the stage directory as the last argument,
 from the project root (the directory of the configuration file); exit 0 passes,
 and the validator treats the stage as read-only because whatever it writes is
-promoted. Then it renames the stage onto LOCAL and writes
+promoted. Validators are commands, so they run only from a configuration file the
+current user owns (otherwise exit 3 `validator_untrusted`); discovery itself walks up
+freely so group-owned project trees on Sherlock keep working. Then it renames the stage onto LOCAL and writes
 `.NAME.shk-receipt.json`. An existing LOCAL with a receipt for the same manifest
 is `already_present`; any other existing LOCAL is kept unless `--replace`,
 which renames it to `.NAME.shk-old-<UTC>` (never deletes). `manifest DIR`
