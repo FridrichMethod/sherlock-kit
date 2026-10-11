@@ -168,7 +168,8 @@ class RulesFormatTests(unittest.TestCase):
                 self.assertNotIn("<!--", text)
                 self.assertNotIn("@", text)
                 self.assertNotRegex(text, r"\]\((?!https://)", "no relative links")
-                self.assertIn("Reviewed 2026-10-10", text)
+                reviewed = "2026-10-11" if path.name == "workstation.md" else "2026-10-10"
+                self.assertIn(f"Reviewed {reviewed}", text)
 
     def test_rules_headings(self):
         expected = {

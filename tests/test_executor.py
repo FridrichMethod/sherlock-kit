@@ -5,6 +5,7 @@ import os
 import shlex
 import shutil
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -69,6 +70,7 @@ class SshExecutorTests(unittest.TestCase):
                 ex.run(["hostname"], mutation=True)
             self.assertEqual((caught.exception.code, caught.exception.token), (4, "auth_required"))
             self.assertEqual(caught.exception.hint, hint)
+            self.assertIn("Ask the user", caught.exception.message)
         with self.assertRaises(ShkError):
             self.dtn.rsync_args("/scratch/x")
         self.assertTrue(self.fake.calls())
@@ -91,6 +93,41 @@ class SshExecutorTests(unittest.TestCase):
         with self.assertRaises(ShkError) as caught:
             ex.run(["hostname"])
         self.assertEqual((caught.exception.code, caught.exception.token), (4, "unavailable"))
+
+    def test_local_master_denial_never_requests_login_or_dials(self):
+        for mode in ("denied", "blocked"):
+            with self.subTest(mode=mode):
+                self.knobs(FAKE_SSH_MASTER=mode)
+                for ex in (self.ssh, self.dtn):
+                    with self.assertRaises(ShkError) as caught:
+                        ex.run(["hostname"], mutation=True)
+                    self.assertEqual(
+                        (caught.exception.code, caught.exception.token), (4, "unavailable")
+                    )
+                    self.assertIn("inaccessible", caught.exception.message)
+                    self.assertIn("per-command approval", caught.exception.hint)
+                    self.assertNotIn(f"ssh {ex.host}", caught.exception.hint)
+                with self.assertRaises(ShkError):
+                    self.dtn.rsync_args("/scratch/x")
+        self.assertTrue(all(call[:2] == ["-O", "check"] for call in self.fake.calls()))
+
+    def test_check_timeout_and_other_failures_do_not_claim_master_absent(self):
+        cases = (
+            (subprocess.TimeoutExpired("ssh", 10), "timeout"),
+            (PermissionError(13, "Permission denied"), "inaccessible"),
+            (OSError(24, "Too many open files"), "unavailable"),
+        )
+        for failure, state in cases:
+            with self.subTest(state=state), patch("subprocess.run", side_effect=failure):
+                self.assertEqual(executor.master_status("sherlock-plain")[0], state)
+                with self.assertRaises(ShkError) as caught:
+                    self.ssh.preflight()
+                self.assertEqual(caught.exception.token, "unavailable")
+        result = subprocess.CompletedProcess(
+            [], 255, b"", b"mux_client_hello_exchange: read failed"
+        )
+        with patch("subprocess.run", return_value=result):
+            self.assertEqual(executor.master_status("sherlock-plain")[0], "unavailable")
 
     def test_status_mapping(self):
         cases = [
@@ -172,6 +209,22 @@ class RealOpenSshTests(unittest.TestCase):
         state, detail = executor.master_status("no-control-path", ssh)
         self.assertEqual(state, "not_configured")
         self.assertIn("ControlPath", detail)
+        self.assertFalse(self.marker.exists())
+
+    @unittest.skipIf(os.geteuid() == 0, "root can traverse a mode-000 directory")
+    def test_inaccessible_control_path_is_local_denial(self):
+        denied = self.tmp / "denied"
+        denied.mkdir()
+        with (self.tmp / "config").open("a") as stream:
+            stream.write(
+                f"Host blocked-socket\n  ControlPath {denied}/socket\n  ProxyCommand false\n"
+            )
+        denied.chmod(0)
+        self.addCleanup(denied.chmod, 0o700)
+        ssh = self.wrapper("denied-ssh", False)
+        state, detail = executor.master_status("blocked-socket", ssh)
+        self.assertEqual(state, "inaccessible")
+        self.assertIn("Permission denied", detail)
         self.assertFalse(self.marker.exists())
 
 

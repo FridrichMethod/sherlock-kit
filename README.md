@@ -61,6 +61,12 @@ mkdir -p results            # pull creates LOCAL, never its parent
 shk pull /scratch/users/USER/demo/runs/NAME/out results/smoke --validate bundle
 ```
 
+Codex may need per-command approval to reach the existing SSH control socket,
+even for offline `doctor`. A sandbox startup failure or a local socket permission
+denial does not mean the user needs a new login. Approve the bounded command;
+do not disable the sandbox or grant write access to all of HOME.
+`submit --dry-run` needs no SSH socket or network access.
+
 The job writes `out/SHA256SUMS` as its last step (`shk manifest out`, or the
 `sha256sum` one-liner in the skill), over its output directory, never the run
 directory itself; `shk pull` verifies every file against it before the copy
@@ -85,8 +91,9 @@ shk pull REMOTE LOCAL [--validate NAME] [--replace]
 shk manifest DIR
 ```
 
-- Operational commands print one JSON document on stdout; `rules` and `--version`
-  print text. `shk <command> --help` is the authoritative flag list. `submit`,
+- Operational results print one JSON document on stdout; `rules`, `--version`
+  and help print text, and usage errors print text on stderr (exit 2).
+  `shk <command> --help` is the authoritative flag list. `submit`,
   `status`, `cancel` and `occupancy` report `next_check_after`, 60 s after they
   ran.
 - `submit`: the job name is `shk.<project>.<task slug>.<hash>` of project,
@@ -117,6 +124,10 @@ shk manifest DIR
   their local modification times (`rsync -t`, so a re-push skips unchanged
   files instead of rewriting them); inputs that are old locally can therefore be
   purge-eligible on scratch soon after a push.
+  REMOTE's parent must already exist. For a new remote root, push a staging
+  directory containing `inputs/` to the root itself, for example
+  `shk push staging/ /scratch/users/USER/demo` when `/scratch/users/USER` exists.
+  Check for exit 0 before submitting a job that needs those inputs.
 - `pull` copies exactly the files in `REMOTE/SHA256SUMS` into a private stage
   beside LOCAL, verifies them, runs the optional validator and renames the stage
   onto LOCAL. With NAME the last component of LOCAL, the stage is
@@ -164,7 +175,7 @@ are refused.
 | 1 | local error: configuration, spec, verification, validator, malformed reply |
 | 2 | usage error |
 | 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, Slurm rejected the job, push or pull on Sherlock |
-| 4 | Sherlock unreachable without a new login: `auth_required` (ask the user to open the master); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop) |
+| 4 | SSH transport or master check unavailable: `auth_required` (ask the user to open the master); `unavailable` with a local permission denial (check the sandbox; request per-command approval in Codex); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop) |
 | 5 | outcome unknown after a dispatched mutation: run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
 | 6 | status ok, but the newest job of a requested name has an anomaly |
 

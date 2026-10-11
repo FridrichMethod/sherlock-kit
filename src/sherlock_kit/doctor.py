@@ -65,10 +65,9 @@ def _masters(
         states[role] = state
         if state != "running":
             hint = executors.master_hint(state, host, data=role == "data")
-            sink.append(
-                f"no usable SSH master for {host} ({role}, {state}: {detail}); "
-                f"ask the user to: {hint}"
-            )
+            if state in {"none", "not_configured"}:
+                hint = f"ask the user to: {hint}"
+            sink.append(f"no usable SSH master for {host} ({role}, {state}: {detail}); {hint}")
     return states
 
 

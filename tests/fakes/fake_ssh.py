@@ -55,6 +55,10 @@ def control(args):
     if state == "unconfigured":
         print('No ControlPath specified for "-O" command', file=sys.stderr)
         return 255
+    if state in {"denied", "blocked"}:
+        detail = "Permission denied" if state == "denied" else "Operation not permitted"
+        print(f"Control socket connect(/synthetic/socket): {detail}", file=sys.stderr)
+        return 255
     print("Master running (pid=4242)", file=sys.stderr)
     return 0
 

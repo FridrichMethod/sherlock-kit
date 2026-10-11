@@ -5,7 +5,7 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 
 # sherlock-kit (`shk`)
 
-`shk` submits and tracks Sherlock jobs by name and moves data through the DTN. Slurm is the only source of truth; `shk` keeps no local state. Every operational command prints one JSON document on stdout; `shk rules` and `shk --version` print text.
+`shk` submits and tracks Sherlock jobs by name and moves data through the DTN. Slurm is the only source of truth; `shk` keeps no local state. Operational results print one JSON document on stdout; `shk rules`, `shk --version` and help print text, and usage errors print text on stderr (exit 2).
 
 ## Setup check
 
@@ -13,16 +13,17 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>` (the dotfiles copy), `source <path>` (a development checkout: never use it for real work) or `unknown`. This skill requires shk 0.4 or newer; with an older one, or when a flag here is missing, follow `shk <cmd> --help` instead.
 3. If no Sherlock rules are loaded in this session, read them first: `shk rules workstation` on a workstation, `shk rules cluster` on Sherlock.
 4. `shk doctor` is read-only and offline (`--remote` adds one read-only call on Sherlock).
+5. In Codex, a sandbox startup failure or local SSH socket `Permission denied` / `Operation not permitted` does not mean a missing master. Request per-command approval for the blocked command, then retry once; never disable the sandbox or grant writes to all of HOME. Even offline `doctor` needs control-socket access; `submit --dry-run` does not. On Sherlock, per-command approval is expected because the Codex sandbox cannot start there.
 
 ## Exit codes
 
 | Code | Meaning | Do |
 |---|---|---|
 | 0 | ok | continue |
-| 1 | local error: config, spec, verification, validator, malformed reply | fix the input; do not retry unchanged |
+| 1 | config, spec, verification, validator, malformed reply | fix input errors before retrying; for `malformed_read`, follow its hint if present (one read retry after 60 s; `shk doctor --remote` checks remote tools) |
 | 2 | usage error | read `shk <cmd> --help` |
 | 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive shk owns, Slurm rejected, push or pull on Sherlock | read the message; change the request, not the guard |
-| 4 | Sherlock unreachable without a new login | `auth_required`: ask the user to run the hint (`ssh sherlock-plain`, or `ssh -fN sherlock-dtn`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Other `unavailable` or `timeout` (hint `run shk doctor`): run `shk doctor`, retry once after about a minute, then stop and tell the user |
+| 4 | SSH transport or master check unavailable | Local permission denial: follow Setup check 5. `auth_required`: ask the user to run the hint (`ssh sherlock-plain`, or `ssh -fN sherlock-dtn`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Other `unavailable` or `timeout` (hint `run shk doctor`): run `shk doctor`, retry once after about a minute, then stop and tell the user |
 | 5 | outcome unknown after a dispatched submit or cancel | run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s); never resubmit blind |
 | 6 | status ok, but the newest job of a name has an anomaly | stop and report it to the user |
 
@@ -56,7 +57,7 @@ shk status --task train-a
 shk status --all
 ```
 
-- At least 60 s between checks; respect `next_check_after` in every submit, status, cancel and occupancy reply. One `shk status --all` (or several `--task` in one call) instead of a loop per task. Never `watch` or poll in a loop.
+- At least 60 s between checks; respect `next_check_after` in every submit, status, cancel and occupancy reply. Read the local UTC clock before the next check instead of estimating elapsed time. One `shk status --all` (or several `--task` in one call) instead of a loop per task. Never `watch` or poll in a loop.
 - `--since DAYS` sets the `sacct` window (default 30, 7 with `--all`). With several `--task`, give `--campaign` once for all of them or once per `--task`.
 - States: `new` (no job), `live` (pending, running or completing; throttle-held array tasks count as pending), `done` (all tasks completed), `failed` (finished, at least one task not completed), `stale` (provenance files but no Slurm rows in the window; treated as `new`).
 - `current` describes the newest job of the name (tasks, exit codes, restarts, cost); older jobs are in `history`. An anomaly such as `unexpected_preemption` or `duplicate_live` gives exit 6: stop and report.
@@ -70,6 +71,7 @@ shk pull /scratch/users/USER/project/runs/NAME/out results/NAME --validate bundl
 ```
 
 - `shk push LOCAL REMOTE` copies into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. Pushed files keep their local modification times, so inputs that are old locally can be purge-eligible on scratch soon after the push: push them shortly before the jobs that read them.
+- REMOTE's parent must already exist. For a new remote root, first push a staging directory containing `inputs/` to the root itself, whose parent exists (for example `shk push staging/ /scratch/users/USER/project`). Check that push exits 0 before submitting a job that reads those inputs.
 - `shk pull REMOTE LOCAL` needs `REMOTE/SHA256SUMS` and an existing parent directory of LOCAL, copies exactly those files into a private stage beside LOCAL (`.NAME.shk-stage` for LOCAL `.../NAME`, with `.NAME.shk-lock`), verifies every hash, runs the validator named by `--validate`, then renames the stage onto LOCAL and writes `.NAME.shk-receipt.json`. An existing LOCAL is kept unless `--replace` (the old copy stays as `.NAME.shk-old-<UTC>`); a rerun resumes the stage.
 - The validator is the project's argv from `[tool.sherlock-kit.validators]`; it runs from the project root with the stage directory as its last argument, exit 0 passes, and it must treat the stage as read-only (what it writes is promoted).
 - The job writes the manifest as its last step: `shk manifest DIR` when shk is available there, else `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`. DIR is the job's output directory (for example `out/` under the run directory), never the run directory itself, which holds `.shk/` and the Slurm logs still being written.

@@ -67,6 +67,11 @@ asks the local control socket:
 - no usable `ControlPath`: exit 4 `unavailable` with a `~/.ssh/config` hint,
   because logging in again would not help;
 - no `ssh`: exit 4 `unavailable`, hint `install OpenSSH`.
+- local socket or process permission denial: exit 4 `unavailable`, state
+  `inaccessible`; check local permissions and, in Codex, request per-command
+  approval. This does not prove that the master is absent;
+- a timed-out or otherwise failed check: exit 4 `unavailable`, state `timeout`
+  or `unavailable`; inspect the failure before requesting a new login.
 
 The dial itself is `ssh -T -oBatchMode=yes -oRemoteCommand=none -oConnectTimeout=N -oConnectionAttempts=1 -oStrictHostKeyChecking=yes -oUpdateHostKeys=no -oControlMaster=no -oPermitLocalCommand=no -oClearAllForwardings=yes -oForwardAgent=no -oProxyCommand=false HOST CMD`, where
 CMD is one `shlex.join` of a literal argv. The check and the dial are separate

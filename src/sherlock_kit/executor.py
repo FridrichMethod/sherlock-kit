@@ -60,6 +60,8 @@ DIAL = (
 UNCONFIGURED = re.compile(
     r"no controlpath specified|controlpath too long|bad configuration option", re.I
 )
+LOCAL_DENIAL = re.compile(r"permission denied|operation not permitted", re.I)
+NO_MASTER = re.compile(r"control socket connect\(.*\): (?:no such file|connection refused)", re.I)
 
 
 @dataclass(frozen=True)
@@ -125,7 +127,8 @@ def _execute(
 def master_status(host: str, ssh: str = "ssh", timeout: float = 10) -> tuple[str, str]:
     """(state, detail) from the local control socket, never a dial; logging in cures only "none".
 
-    The state is running, none, not_configured (no usable ControlPath) or ssh_missing.
+    The state is running, none, not_configured (no usable ControlPath), ssh_missing,
+    inaccessible (local permission denial), timeout or unavailable (another check failure).
     """
     try:
         done = subprocess.run(
@@ -135,14 +138,22 @@ def master_status(host: str, ssh: str = "ssh", timeout: float = 10) -> tuple[str
             timeout=timeout,
             check=False,
         )
-    except OSError as exc:
+    except PermissionError as exc:
+        return "inaccessible", f"cannot run {ssh}: {exc.strerror or exc}"
+    except FileNotFoundError as exc:
         return "ssh_missing", f"cannot run {ssh}: {exc.strerror or exc}"
+    except OSError as exc:
+        return "unavailable", f"cannot run {ssh}: {exc.strerror or exc}"
     except subprocess.TimeoutExpired:
-        return "none", f"ssh -O check {host} timed out"
+        return "timeout", f"ssh -O check {host} timed out"
     detail = _text(done.stderr).strip()[-300:]
     if done.returncode == 0:
         return "running", detail
-    return ("not_configured" if UNCONFIGURED.search(detail) else "none"), detail
+    if LOCAL_DENIAL.search(detail):
+        return "inaccessible", detail
+    if UNCONFIGURED.search(detail):
+        return "not_configured", detail
+    return ("none" if NO_MASTER.search(detail) else "unavailable"), detail
 
 
 def master_hint(state: str, host: str, data: bool = False) -> str:
@@ -152,6 +163,14 @@ def master_hint(state: str, host: str, data: bool = False) -> str:
         return login
     if state == "ssh_missing":
         return "install OpenSSH"
+    if state == "inaccessible":
+        return (
+            "local SSH access is blocked; check sandbox and filesystem permissions; "
+            "in Codex request per-command approval for this shk command, then retry once; "
+            "do not disable the sandbox or reopen the master solely for this error"
+        )
+    if state in {"timeout", "unavailable"}:
+        return "run shk doctor; inspect the local SSH check failure before requesting a new login"
     return (
         f"set ControlMaster auto, ControlPersist yes and ControlPath ~/.ssh/%C for {host} "
         f"in ~/.ssh/config, then run: {login}"
@@ -183,11 +202,16 @@ class SshExecutor:
         """Raise ShkError 4 unless `ssh -O check` finds a running master; nothing is dialled."""
         state, detail = master_status(self.host, self.ssh)
         if state != "running":
+            instruction = (
+                " Ask the user to run the hint in a terminal, then retry once."
+                if state in {"none", "not_configured"}
+                else ""
+            )
             raise ShkError(
                 EXIT_UNREACHABLE,
                 "auth_required" if state == "none" else "unavailable",
-                f"no usable SSH master for {self.host} ({state}: {detail}); shk never logs in. "
-                "Ask the user to run the hint in a terminal, then retry once.",
+                f"no usable SSH master for {self.host} ({state}: {detail}); shk never logs in."
+                f"{instruction}",
                 hint=master_hint(state, self.host, self.data),
             )
 

@@ -226,7 +226,7 @@ class DoctorTests(TempCase):
         code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="none")
         self.assertEqual((code, report["ok"]), (4, False))
         self.assertEqual(report["masters"], {"control": "none", "data": "none"})
-        self.assertTrue(any("ssh sherlock-plain" in p for p in report["problems"]))
+        self.assertTrue(any("ask the user to: ssh sherlock-plain" in p for p in report["problems"]))
         self.assertTrue(any("ssh -fN sherlock-dtn" in w for w in report["warnings"]))
         self.assertEqual(self.fake.calls(), checks)
 
@@ -259,6 +259,16 @@ class DoctorTests(TempCase):
             "--executor", "ssh", "doctor", "--remote", FAKE_SSH_MASTER="none"
         )
         self.assertEqual((code, report["remote"]["status"]), (4, "auth_required"))
+        self.assertTrue(all("-O" in c for c in self.fake.calls()))
+
+    def test_doctor_local_permission_denial(self):
+        code, report = self.doctor(
+            "--executor", "ssh", "doctor", "--remote", FAKE_SSH_MASTER="blocked"
+        )
+        self.assertEqual((code, report["masters"]["control"]), (4, "inaccessible"))
+        self.assertEqual(report["remote"]["status"], "unavailable")
+        self.assertTrue(any("per-command approval" in p for p in report["problems"]))
+        self.assertNotIn("ssh sherlock-plain", report["remote"]["hint"])
         self.assertTrue(all("-O" in c for c in self.fake.calls()))
 
     def test_local_executor_doctor_never_uses_ssh(self):

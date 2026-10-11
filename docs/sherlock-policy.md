@@ -21,9 +21,14 @@ Read on 2026-10-10 (Pacific) from a Sherlock login node, one attended read-only
 | `/etc/agents/software.md` | 2026-10-09 | modules, preference order, Python environments, compiling, licenses |
 | `/etc/agents/storage.md` | 2026-10-06 | filesystems, purge, I/O patterns, transfers, usage |
 
-Human documentation: <https://www.sherlock.stanford.edu/docs/>. Both rules files
-carry "Reviewed 2026-10-10". Re-read the site files before changing the rules
-and update the date and this table.
+Human documentation: <https://www.sherlock.stanford.edu/docs/>. The workstation
+rules were rechecked on 2026-10-11 against the same five site files fetched
+through the attended control master; the cluster rules retain their 2026-10-10
+review. The added workstation sandbox guidance distinguishes local access
+denials from absent SSH masters. The site's Codex guidance still requires
+per-command approval when its sandbox cannot start, without disabling it.
+Re-read the site files before changing the rules and update the review date
+and this record.
 
 ## Where each site rule lands
 
