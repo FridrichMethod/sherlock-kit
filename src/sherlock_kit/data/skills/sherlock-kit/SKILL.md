@@ -42,7 +42,7 @@ shk submit --task train-a --script job.sh --partition normal --cpus 4 --mem 16G 
 - A done or failed task is refused unless `--resubmit "<reason>"` names why it runs again; find the cause of a failure first.
 - Deduplication reads only `squeue` and the last 30 days of `sacct`. A task whose jobs are older than that submits again as new, without `--resubmit`, even when its run directory still exists: check before rerunning old work.
 - Partition, CPUs, memory and walltime are explicit. GPUs only with `--gpus N` on a partition that allows them; `--constraint` instead of excluding nodes. Requeue only on `owners`, whose scripts must checkpoint periodically.
-- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns, in long or short form (`-p`, `-b`, ...): account, exclude, GPUs or gres, partition, array, dependency, begin or job name; heterogeneous jobs (`hetjob`, `packjob`) are refused.
+- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns, in any form sbatch accepts (`-p`, `-Hb`, `--part`, ...): account, exclude, GPUs or gres, partition, array, dependency, begin or job name; heterogeneous jobs (`hetjob`, `packjob`) are refused.
 - Chain stages with `--after-ok JOBID` (repeatable, several ids allowed) instead of polling. Inside a job script never call `shk submit` or start an agent.
 
 ## Arrays

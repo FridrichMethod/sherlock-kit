@@ -45,6 +45,7 @@ DENIED_LONG = (
     "job-name",
 )
 DENIED_SHORT = "AxGpadbJ"  # -b is --begin
+FLAGS_WITHOUT_VALUE = "HhOQsuvVW"  # sbatch short flags that may be bundled before another one
 HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: one name, many jobs
 
 
@@ -183,14 +184,21 @@ def directives(script: bytes) -> list[str]:
 def denied(word: str) -> bool:
     """Whether one #SBATCH word sets an option shk owns or starts a hetjob component.
 
-    For example -p, -pgpu, --partition=gpu and --gpus-per-node=1 are denied.
+    sbatch parses #SBATCH words with getopt_long, so this follows it: -p, -pgpu, -Hp (value-less
+    flags bundle before another), --partition=gpu, --part=gpu (an unambiguous prefix) and
+    --gpus-per-node=1 are all denied.
     """
     if word in HETJOB_SEPARATORS:
         return True
     if word.startswith("--"):
         option = word[2:].partition("=")[0]
-        return option.startswith("gpus") or option in DENIED_LONG
-    return len(word) > 1 and word[0] == "-" and word[1] in DENIED_SHORT
+        if not option:
+            return False
+        return option.startswith("gpus") or any(name.startswith(option) for name in DENIED_LONG)
+    if word.startswith("-"):
+        flags = word[1:].lstrip(FLAGS_WITHOUT_VALUE)
+        return bool(flags) and flags[0] in DENIED_SHORT
+    return False
 
 
 def read_script(path: str) -> bytes:

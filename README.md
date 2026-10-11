@@ -102,7 +102,9 @@ shk manifest DIR
   (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
   `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,
   `-J`/`--job-name`) and a `hetjob` or `packjob` separator: heterogeneous jobs
-  are refused.
+  are refused. Matching follows sbatch's own parsing, so abbreviated long
+  options (`--part=gpu`) and short flags bundled after value-less ones
+  (`-Hp gpu`) count too.
 - `status`: one `squeue` and one `sacct` for all selected names; `--since`
   defaults to 30 days (7 with `--all`). Give `--campaign` once for every
   `--task` or once per `--task`, and `--run-dir` once per `--task` or not at
