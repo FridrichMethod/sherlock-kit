@@ -25,10 +25,10 @@ TAIL = ["--ntasks=1", "--mem=4096M", "--time=90", f"--chdir={RUN}"]
 SINGLE_LOGS = [f"--output={RUN}/slurm-%j.out", f"--error={RUN}/slurm-%j.err"]
 ARRAY_LOGS = [f"--output={RUN}/slurm-%A_%a.out", f"--error={RUN}/slurm-%A_%a.err"]
 EXPORT = f"--export=ALL,SHK_NAME={NAME}"
-DEFAULTS = dict(task="train-a", campaign="default", partition="normal", cpus=2, mem="4G",
-                time="90m", gpus=0, tasks=1, array=None, constraint=None, signal=None,
-                requeue=None, after_ok=[], run_dir=None, courtesy_ack=False, resubmit=None,
-                dry_run=False)
+DEFAULTS = {"task": "train-a", "campaign": "default", "partition": "normal", "cpus": 2,
+            "mem": "4G", "time": "90m", "gpus": 0, "tasks": 1, "array": None, "constraint": None,
+            "signal": None, "requeue": None, "after_ok": [], "run_dir": None,
+            "courtesy_ack": False, "resubmit": None, "dry_run": False}
 
 
 class Case(unittest.TestCase):
@@ -67,9 +67,9 @@ class GrammarTests(Case):
         bad += [(spec.minutes, t) for t in ("0m", "0:00:00", "1:60:00", "1:00", "2d", "1.5h", "")]
         bad += [(spec.array, t) for t in ("1", "1001", "4%0", "4%5", "x", "0-3", "4%", "")]
         for parse, text in bad:
-            with self.subTest(parse=parse.__name__, text=text):
-                with self.assertRaises(ShkError) as caught:
-                    parse(text)
+            with (self.subTest(parse=parse.__name__, text=text),
+                  self.assertRaises(ShkError) as caught):
+                parse(text)
             self.assertEqual((caught.exception.code, caught.exception.token), (1, "spec_invalid"))
 
     def test_other_fields_are_checked_offline(self):

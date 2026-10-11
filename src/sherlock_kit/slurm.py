@@ -117,8 +117,8 @@ def parse_read(stdout: str, tools: Iterable[str]) -> Read:
                        f"query incomplete: end={'SHK_END' in facts}, rc={codes}",
                        hint="retry once after 60 s; shk doctor --remote checks the remote tools")
     specs = {}
-    for name, rest in _grouped(records["SHK_SPEC"]).items():
-        job, _, text = rest[-1].partition("|")
+    for name, found in _grouped(records["SHK_SPEC"]).items():
+        job, _, text = found[-1].partition("|")
         specs[name] = SpecFile(int(job), _task_count(text))
     counts = {name: int(found[-1]) for name, found in _grouped(records["SHK_S"]).items()}
     return Read(user=facts.get("SHK_USER"), host=facts.get("SHK_HOST"), queue=records["SHK_Q"],
@@ -226,7 +226,7 @@ def parse_rows(queue: list[str], acct: list[str], keep: Callable[[str], bool]) -
             if not keep(name):
                 continue
             try:
-                by_name.setdefault(name, []).append(_row(dict(zip(fields, values))))
+                by_name.setdefault(name, []).append(_row(dict(zip(fields, values, strict=True))))
             except ValueError:
                 malformed[name] += 1
     return Rows(by_name, malformed, truncated=len(acct) > MAX_ROWS)
@@ -628,10 +628,9 @@ def _selection(args: argparse.Namespace, ctx: Context) -> list[Selected]:
     run_dirs = args.run_dir or [None] * len(tasks)
     if len(run_dirs) != len(tasks):
         raise ShkError(EXIT_LOCAL, "spec_invalid", "give --run-dir once per --task, or not at all")
-    for task, run_dir in zip(tasks, run_dirs):
+    for task, given in zip(tasks, run_dirs, strict=True):
         config, name = ctx.require("project"), _task_name(ctx, args.campaign, task)
-        if run_dir or config.remote_root:
-            run_dir = spec.run_directory(run_dir, config, name)
+        run_dir = spec.run_directory(given, config, name) if given or config.remote_root else None
         selected.append(Selected(name, run_dir, {"campaign": args.campaign, "task": task}))
     return selected
 
@@ -639,9 +638,10 @@ def _selection(args: argparse.Namespace, ctx: Context) -> list[Selected]:
 def _since(args: argparse.Namespace) -> int:
     if args.since is None:
         return SINCE_DAYS_ALL if args.all else SINCE_DAYS
-    if args.since < 1:
+    since: int = args.since
+    if since < 1:
         raise ShkError(EXIT_LOCAL, "spec_invalid", "--since must be at least 1 day")
-    return args.since
+    return since
 
 
 def _all_names(ctx: Context) -> Callable[[str], bool]:

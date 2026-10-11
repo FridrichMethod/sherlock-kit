@@ -141,7 +141,7 @@ def _selected(state, options):
 def _ranges(indices):
     """[2, 3, 5] -> "2-3,5"."""
     spans, start = [], indices[0]
-    for previous, current in zip(indices, [*indices[1:], None]):
+    for previous, current in zip(indices, [*indices[1:], None], strict=True):
         if current is None or current != previous + 1:
             spans.append(str(start) if start == previous else f"{start}-{previous}")
             start = current
@@ -186,6 +186,11 @@ def _in_controller(job):
     return not finished or time.time() - job["submit"] <= MIN_JOB_AGE
 
 
+def _format_fields(layout, values):
+    """squeue -o "%i|%T|..." with the given field values (widths are ignored)."""
+    return re.sub(r"%\.?[0-9]*([A-Za-z])", lambda match: values.get(match[1], ""), layout)
+
+
 def squeue(state, options):
     lines = []
     for job in filter(_in_controller, _selected(state, options)):
@@ -197,8 +202,7 @@ def squeue(state, options):
                 continue
             values = {"i": job_id, "T": top["state"], "r": top.get("reason", "None"),
                       "P": job["partition"], "j": job["name"]}
-            lines.append(re.sub(r"%\.?[0-9]*([A-Za-z])", lambda m: values.get(m[1], ""),
-                                options["o"]))
+            lines.append(_format_fields(options["o"], values))
     return "".join(line + "\n" for line in lines), "", 0
 
 
@@ -224,10 +228,9 @@ def sacct(state, options):
     days = int(options["S"].removeprefix("now-").removesuffix("days"))
     lines = []
     for job in _selected(state, options):
-        if time.time() - job["submit"] > days * 86400:
-            continue
-        for row in _acct_rows(job, "duplicates" in options):
-            lines.append("|".join(row[field] for field in fields))
+        if time.time() - job["submit"] <= days * 86400:
+            rows = _acct_rows(job, "duplicates" in options)
+            lines.extend("|".join(row[field] for field in fields) for row in rows)
     return "".join(line + "\n" for line in lines), "", 0
 
 

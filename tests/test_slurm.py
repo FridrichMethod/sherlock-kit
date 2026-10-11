@@ -32,13 +32,13 @@ def q(job, state="PENDING", reason="None", partition="normal", name=N):
 
 
 def a(job, state="COMPLETED", restart=0, elapsed=60, cpus=2, tres="cpu=2,mem=4G,node=1",
-      exit="0:0", partition="normal", name=N):
+      exit_code="0:0", partition="normal", name=N):
     return (f"{job}|{state}|{partition}|{elapsed}|{cpus}|{tres}|2026-10-10T12:00:00|{restart}"
-            f"|{exit}|{name}")
+            f"|{exit_code}|{name}")
 
 
 def resolve(queue=(), acct=(), spec_files=0, spec=None):
-    rows = slurm.parse_rows(list(queue), list(acct), lambda name: True)
+    rows = slurm.parse_rows(list(queue), list(acct), lambda _name: True)
     newest = slurm.SpecFile(*spec) if spec else None
     return slurm.resolve_name(rows.by_name.get(N, []), spec_files, newest, rows.malformed[N])
 
@@ -128,7 +128,7 @@ class ResolveTests(unittest.TestCase):
                          (1, {"0:0": 1}, []))
         self.assertEqual((done["max_restart"], done["cost"]),
                          (0, {"cpu_seconds": 120, "gpu_seconds": 0, "final": True}))
-        failed = resolve(acct=[a("100", "FAILED", exit="1:0")])
+        failed = resolve(acct=[a("100", "FAILED", exit_code="1:0")])
         self.assertEqual((failed["state"], failed["current"]["tasks"]["failed"]), ("failed", 1))
         self.assertEqual(failed["current"]["exit_codes"], {"1:0": 1})
         cancelled = resolve(acct=[a("100", "CANCELLED by 123", elapsed=0)])
@@ -139,7 +139,7 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(current(acct=[a("100"), a("100")])["cost"]["cpu_seconds"], 120)
 
     def test_newest_job_is_current_and_older_jobs_are_history(self):
-        result = resolve(acct=[a("100", "FAILED", exit="1:0"), a("200")])
+        result = resolve(acct=[a("100", "FAILED", exit_code="1:0"), a("200")])
         self.assertEqual((result["state"], result["current"]["job_id"]), ("done", "200"))
         history = [{"job_id": "100", "state": "failed", "submitted": "2026-10-10T12:00:00Z"}]
         self.assertEqual(result["history"], history)
@@ -182,7 +182,7 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual((normal["state"], normal["current"]["anomalies"]),
                          ("live", ["unexpected_preemption"]))
         gpu = current(acct=[a("500", "PREEMPTED", partition="gpu", tres="cpu=2,gres/gpu=1",
-                              exit="0:15")])
+                              exit_code="0:15")])
         self.assertEqual((gpu["anomalies"], gpu["cost"]["gpu_seconds"], gpu["tasks"]["failed"]),
                          (["unexpected_preemption"], 60, 1))
         gap = current(acct=[a("500", restart=2, partition="owners")])["tasks"]
