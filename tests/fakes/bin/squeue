@@ -1,0 +1,2 @@
+#!/bin/sh
+exec "${FAKE_SLURM_PYTHON:-python3}" -B "${0%/*}/../fakeslurm.py" squeue "$@"
