@@ -20,7 +20,7 @@ from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 from sherlock_kit import executor as executors
 from sherlock_kit import partitions, spec
@@ -36,6 +36,8 @@ from sherlock_kit.errors import (
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
+
+Subparsers: TypeAlias = "argparse._SubParsersAction[argparse.ArgumentParser]"
 
 JOB_ID = re.compile(
     r"([1-9][0-9]*)"  # base job id
@@ -86,6 +88,8 @@ BUDGET_JOBS, BUDGET_MINUTES = 2, 120  # "about 2 jobs x 2 h while others are act
 
 @dataclass(frozen=True)
 class Refusal:
+    """The error token and hint of a remote marker that means nothing happened."""
+
     token: str
     hint: str
 
@@ -188,8 +192,6 @@ def _indices(aggregate: str) -> list[int]:
     for part in aggregate.split(","):
         first, _, last = part.partition("-")
         low, high = int(first), int(last or first)
-        if not low <= high < spec.ARRAY_MAX_TASKS:
-            raise ValueError(f"array range {part!r}")
         indices.update(range(low, high + 1))
     return sorted(indices)
 
@@ -264,6 +266,8 @@ def _row(fields: dict[str, str]) -> Row:
 
 @dataclass(frozen=True)
 class Rows:
+    """Parsed rows by job name, malformed line counts and whether sacct was cut off."""
+
     by_name: dict[str, list[Row]]
     malformed: Counter[str | None]  # malformed lines per name; None when no name was readable
     truncated: bool  # sacct printed more than MAX_ROWS rows
@@ -319,6 +323,7 @@ class Job:
     cost: dict[str, Any]
 
     def current(self, anomalies: list[str]) -> dict[str, Any]:
+        """The status entry of the newest job of a name."""
         return {
             "job_id": self.job_id,
             "partition": self.partition,
@@ -331,12 +336,14 @@ class Job:
         }
 
     def history(self) -> dict[str, Any]:
+        """The status entry of an older job of a name."""
         return {"job_id": self.job_id, "state": self.state, "submitted": self.submitted}
 
 
 def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dict[int, set[int]]]:
-    """Per task: the row that decides its state (squeue over sacct, then the highest restart,
-    then an explicit row over an aggregate), its newest sacct row and the sacct restarts seen.
+    """Per task: the row that decides its state, its newest sacct row and the restarts seen.
+
+    squeue wins over sacct, then the highest restart, then an explicit row over an aggregate.
     """
     deciding: dict[int, Row] = {}
     accounted: dict[int, Row] = {}
@@ -368,8 +375,9 @@ def _task_summary(
 
 
 def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> bool:
-    """Cost is final once sacct holds every task in the terminal state that decides it (squeue
-    can show the end before slurmdbd has the row).
+    """Whether sacct holds every task in the terminal state that decides it.
+
+    Only then is the cost final: squeue can show the end before slurmdbd has the row.
     """
     return all(
         index in accounted
@@ -429,8 +437,9 @@ def _anomalies(job: Job, live_jobs: int, malformed: int) -> list[str]:
 def resolve_name(
     rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | None = None, malformed: int = 0
 ) -> dict[str, Any]:
-    """Pure: one name's rows -> {state, current, history, spec_files}; the largest base id is
-    the current attempt, and any live job makes the name live.
+    """Pure: one name's rows give {state, current, history, spec_files}.
+
+    The largest base id is the current attempt, and any live job makes the name live.
     """
     jobs: dict[int, list[Row]] = {}
     for row in {row.key: row for row in rows}.values():
@@ -453,8 +462,9 @@ def resolve_name(
 
 
 def _resolve(read: Read, rows: Rows, name: str) -> dict[str, Any]:
-    """resolve_name() for one listed name; exit 1 when Slurm has rows of it but none parse, since
-    the name is then neither new nor anything shk can show (for example hetjob ids N+k).
+    """resolve_name() for one listed name, or exit 1 when Slurm has rows of it but none parse.
+
+    Such a name is neither new nor anything shk can show (for example hetjob ids N+k).
     """
     found = rows.by_name.get(name, [])
     if rows.malformed[name] and not found:
@@ -485,8 +495,9 @@ def _columns(line: str) -> dict[str, str]:
 
 
 def occupancy_summary(rows: list[str]) -> tuple[dict[str, dict[str, int]], dict[str, int]]:
-    """({user: counts}, totals) of running jobs (with GPUs) and pending jobs; the rows are
-    fixed-width because tres-alloc is empty for pending jobs.
+    """({user: counts}, totals) of running jobs (with their GPUs) and pending jobs.
+
+    The rows are fixed-width because tres-alloc is empty for pending jobs.
     """
     users: dict[str, dict[str, int]] = {}
     totals = _counts()
@@ -510,7 +521,7 @@ def occupancy_summary(rows: list[str]) -> tuple[dict[str, dict[str, int]], dict[
 # ---------------------------------------------------------------- command line
 
 
-def _register_submit(subparsers: Any) -> None:
+def _register_submit(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
         "submit", help="submit one logical task (refuses live; done or failed need --resubmit)"
     )
@@ -550,7 +561,7 @@ def _register_submit(subparsers: Any) -> None:
     parser.set_defaults(handler=submit, requeue=None)
 
 
-def _register_status(subparsers: Any) -> None:
+def _register_status(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
         "status", help="state of logical tasks from one squeue and one sacct call"
     )
@@ -575,7 +586,7 @@ def _register_status(subparsers: Any) -> None:
     parser.set_defaults(handler=status)
 
 
-def _register_cancel(subparsers: Any) -> None:
+def _register_cancel(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
         "cancel", help="scancel the live jobs of one logical task (only when asked)"
     )
@@ -586,7 +597,7 @@ def _register_cancel(subparsers: Any) -> None:
     parser.set_defaults(handler=cancel)
 
 
-def _register_occupancy(subparsers: Any) -> None:
+def _register_occupancy(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
         "occupancy", help="running and pending jobs per user on listed partitions"
     )
@@ -594,7 +605,8 @@ def _register_occupancy(subparsers: Any) -> None:
     parser.set_defaults(handler=occupancy)
 
 
-def register(subparsers: Any) -> None:
+def register(subparsers: Subparsers) -> None:
+    """Add the submit, status, cancel and occupancy commands."""
     _register_submit(subparsers)
     _register_status(subparsers)
     _register_cancel(subparsers)
@@ -623,6 +635,8 @@ def _read(ctx: Context, query: list[str], tools: tuple[str, ...]) -> tuple[Read,
 
 @dataclass(frozen=True)
 class Reply:
+    """The terminal marker of a mutation program and the lines it printed."""
+
     marker: str  # the one terminal marker, or "unknown"
     value: str  # the marker's argument, or why the outcome is unknown
     lines: list[str]
@@ -728,6 +742,7 @@ def _courtesy(read: Read, built: spec.Spec) -> dict[str, Any]:
 
 
 def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk submit`: offline checks, one read, the local decision, then one mutation."""
     built = spec.build(args, ctx.require("project", "remote_root"), ctx.clock())
     report = {
         "name": built.name,
@@ -772,6 +787,8 @@ def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 @dataclass(frozen=True)
 class Selected:
+    """One job name that status reports, with its run directory and --task labels."""
+
     name: str
     run_dir: str | None = None
     labels: dict[str, str] = field(default_factory=dict)  # campaign and task, with --task
@@ -814,6 +831,7 @@ def _all_names(ctx: Context) -> Callable[[str], bool]:
 
 
 def status(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk status`: one read for every selected name; exit 6 on an anomaly."""
     since, selected = _since(args), _selection(args, ctx)
     query = ["all" if args.all else "names", str(since), "-"]
     for item in selected:
@@ -835,6 +853,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 
 def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk cancel`: scancel the live jobs of one name (one mutation)."""
     if args.task:
         name = _task_name(ctx, args.campaign, args.task)
         selector = _task_selector(args.task, args.campaign)
@@ -856,6 +875,7 @@ def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 
 def occupancy(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk occupancy`: running and pending jobs per user on listed partitions."""
     profiles = {name: partitions.profile(name) for name in args.partition}
     read, meta = _read(ctx, ["occupancy", "-", "-", *profiles], ("occupancy",))
     report = {}

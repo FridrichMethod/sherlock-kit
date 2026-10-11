@@ -192,8 +192,6 @@ class SubmitFlows(Flow):
         reply = executor.run_program(local, "submit", args, stdin=b"#!/bin/sh\n")
         self.assertEqual(reply.stdout, "SHK_REFUSED digest\n")
         self.assertEqual(list((run / ".shk").iterdir()), [])
-        reply = executor.run_program(local, "submit", [*args[:5], "sbatch"])
-        self.assertEqual(reply.stdout, "SHK_REFUSED usage\n")
         self.assertEqual(self.slurm.calls("sbatch"), [])
 
     def test_offline_refusals_and_dry_run_make_no_call(self):

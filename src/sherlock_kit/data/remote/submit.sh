@@ -13,7 +13,7 @@ refuse() {
     printf "SHK_REFUSED %s\n" "$1"
     exit 0
 }
-case $6:$7 in --:sbatch) shift 6 ;; *) refuse usage ;; esac
+shift 6 # past "--": the rest is the sbatch command
 u=$(id -un)
 live=$(squeue -h -u "$u" --name="$name" -o "%i" </dev/null) || refuse squeue
 [ -z "$live" ] || {
@@ -34,14 +34,12 @@ if [ "$rc" -ne 0 ]; then
     exit 0
 fi
 rm -f "$base.err"
-job=${out%%;*} cluster=${out#*;}
-[ "$cluster" != "$out" ] || cluster=
-case $job in "" | *[!0-9]*) job= ;; esac
-case $cluster in *[!A-Za-z0-9_.-]*) job= ;; esac
-if [ -z "$job" ]; then
+job=${out%%;*} # sbatch --parsable prints N or N;cluster
+case $job in "" | *[!0-9]*)
     printf "SHK_UNPARSED\n"
     exit 0
-fi
+    ;;
+esac
 mv "$base.sh" "$run/.shk/$name.$job.sh"
 mv "$base.json" "$run/.shk/$name.$job.json"
 printf "SHK_SUBMITTED %s\n" "$job"

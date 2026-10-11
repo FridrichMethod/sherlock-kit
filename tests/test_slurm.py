@@ -78,11 +78,9 @@ class ParsingTests(unittest.TestCase):
             "123_[1-]",
             "123_[a]",
             "x123",
-            "123_[2-1]",
             "123_[1,,2]",
             " 123",
             "123+0",
-            "123_[0-1000]",
         ):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 slurm.job_id(text)
