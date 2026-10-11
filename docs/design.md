@@ -24,10 +24,10 @@ script does) stays with the user, the site rules and the project.
 
 `bin/shk` is a stdlib-only entry point: it follows symlinks to the repository,
 puts its `src/` first on `sys.path`, disables bytecode (a dotfiles submodule
-stays clean) and refuses Python older than 3.11. `__version__` comes from the
-source tree's `pyproject.toml` when there is one, else from the installed
-metadata; `shk --version` names the provenance (`git`, `editable`, `submodule`,
-`source` or `unknown`).
+stays clean) and refuses Python older than 3.11. The version is the literal
+`sherlock_kit.__version__`, which `pyproject.toml` reads as its dynamic version, so
+the running code always reports its own version; `shk --version` names the
+provenance (`git`, `editable`, `submodule`, `source` or `unknown`).
 
 ## No state
 

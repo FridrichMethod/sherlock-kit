@@ -16,6 +16,7 @@ import unittest
 from fakes import ROOT, SRC, install_fake_ssh
 
 sys.path.insert(0, str(SRC))
+import sherlock_kit  # noqa: E402
 from sherlock_kit import cli, partitions  # noqa: E402
 
 CONTRACT = {"C1": "src/sherlock_kit/data/rules/workstation.md", "C2": "src/sherlock_kit/data/rules/cluster.md",
@@ -108,10 +109,12 @@ class ContractTests(unittest.TestCase):
             self.assertFalse(git("cat-file", "-p", blob).startswith("/"), f"{path} is an absolute symlink")
 
     def test_one_version(self):
-        version = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+        project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        self.assertEqual(project["project"]["dynamic"], ["version"])
+        self.assertEqual(project["tool"]["setuptools"]["dynamic"]["version"], {"attr": "sherlock_kit.__version__"})
         heading = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
         self.assertIsNotNone(heading, "CHANGELOG.md needs a '## VERSION' heading")
-        self.assertEqual(heading.group(1), version)
+        self.assertEqual(heading.group(1), sherlock_kit.__version__)
 
 
 class RulesFormatTests(unittest.TestCase):

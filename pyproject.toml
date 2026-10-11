@@ -1,16 +1,29 @@
 [build-system]
-requires = ["setuptools>=77"]
+requires = ["setuptools>=80", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "sherlock-kit"
-version = "0.4.0"
-description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
-readme = "README.md"
-requires-python = ">=3.11"
+dynamic = ["version"]
+authors = [{ name = "Zhaoyang Li", email = "zhaoyangli@stanford.edu" }]
 license = "MIT"
 license-files = ["LICENSE"]
+readme = "README.md"
+description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
+requires-python = ">=3.11"
 dependencies = []
+classifiers = [
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Distributed Computing",
+    "Typing :: Typed",
+]
 
 [project.urls]
 Repository = "https://github.com/FridrichMethod/sherlock-kit"
@@ -20,9 +33,18 @@ Issues = "https://github.com/FridrichMethod/sherlock-kit/issues"
 [project.scripts]
 shk = "sherlock_kit.cli:main"
 
+[tool.setuptools.dynamic]
+version = { attr = "sherlock_kit.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = false
 
 [tool.setuptools.package-data]
-sherlock_kit = ["data/*.json", "data/remote/*.sh", "data/rules/*.md", "data/skills/*/SKILL.md"]
+sherlock_kit = [
+    "py.typed",
+    "data/*.json",
+    "data/remote/*.sh",
+    "data/rules/*.md",
+    "data/skills/*/SKILL.md",
+]

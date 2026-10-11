@@ -30,7 +30,7 @@ jobs:
       - name: Create isolated packaging interpreter
         run: |
           python -m venv .venv-build
-          .venv-build/bin/python -m pip install 'setuptools>=77' wheel
+          .venv-build/bin/python -m pip install 'setuptools>=80' wheel
           echo "SHK_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
       - name: Lint remote POSIX sh programs
         run: shellcheck -s sh src/sherlock_kit/data/remote/*.sh

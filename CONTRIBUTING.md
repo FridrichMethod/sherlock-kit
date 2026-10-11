@@ -22,7 +22,7 @@ and real `rsync`. Install `rsync`, `shellcheck` and `dash`, then:
 
 ```sh
 python3 -m venv .venv-build
-.venv-build/bin/python -m pip install 'setuptools>=77' wheel
+.venv-build/bin/python -m pip install 'setuptools>=80' wheel
 SHK_BUILD_PYTHON="$PWD/.venv-build/bin/python" SHK_REQUIRE_ALL=1 python3 -B tests/run_suite.py
 shellcheck -s sh src/sherlock_kit/data/remote/*.sh
 git diff --check

@@ -157,7 +157,7 @@ python3 tests/run_suite.py
 
 The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` and
 `dash`. A skipped test fails the run when `CI` or `SHK_REQUIRE_ALL` is set.
-`SHK_BUILD_PYTHON` (an interpreter with `setuptools>=77` and `wheel`) enables the
+`SHK_BUILD_PYTHON` (an interpreter with `setuptools>=80` and `wheel`) enables the
 sdist, wheel and editable-install checks, which build committed `HEAD`. See
 [CONTRIBUTING.md](CONTRIBUTING.md), [docs/design.md](docs/design.md),
 [docs/sherlock-policy.md](docs/sherlock-policy.md),
