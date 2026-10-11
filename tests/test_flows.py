@@ -216,6 +216,32 @@ class SshFlow(Flow):
         self.assertEqual([call[-2] for call in dials], ["sherlock-plain"] * 3)
 
 
+class BashAsShFlow(Flow):
+    """Sherlock's sh is bash in POSIX mode: the same programs must behave the same there."""
+
+    def setUp(self):
+        super().setUp()
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("needs bash")
+        shim = self.tmp / "bash-as-sh"
+        shim.mkdir()
+        (shim / "sh").symlink_to(bash)
+        self.knobs(PATH=f"{shim}{os.pathsep}{os.environ['PATH']}")
+
+    def test_array_submit_refusal_status_and_cancel(self):
+        self.assertEqual(Path(shutil.which("sh")).resolve(), Path(shutil.which("bash")).resolve())
+        self.knobs(SBATCH_PARTITION="gpu", SLURM_JOB_ID="7")
+        code, out = self.submit("--array", "4%2")
+        self.assertEqual((code, out["action"]), (0, "submitted"))
+        self.assertEqual({k for c in self.slurm.calls() for k in c["env"]}, {"SLURM_TIME_FORMAT"})
+        self.assertEqual(self.submit("--array", "4%2")[1]["error"], "live")
+        self.slurm.set(int(out["job_id"]), "COMPLETED", "RUNNING")
+        tasks = self.entry()["current"]["tasks"]
+        self.assertEqual([tasks[k] for k in ("completed", "running", "pending")], [1, 1, 2])
+        self.assertEqual(self.shk("cancel", "--task", "train-a")[1]["action"], "cancelled")
+
+
 class RemoteProgramTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("shellcheck") and shutil.which("dash"), "needs shellcheck and dash")
     def test_programs_are_posix_sh_without_single_quotes(self):
