@@ -1,12 +1,10 @@
 """Project configuration: [tool.sherlock-kit] in pyproject.toml, else sherlock-kit.toml (frozen 0.4.0).
 
-discover(project_dir=None, cwd=None) -> ProjectConfig | None: with project_dir
-read only that directory (it must exist); otherwise walk up from cwd to the
-root, taking pyproject.toml when it has a [tool.sherlock-kit] table, else
-sherlock-kit.toml (same keys at top level). parse(table, path=None) validates;
-problems raise ShkError(1, "config_invalid") naming the file. ProjectConfig is
-frozen (validators: read-only {name: argv tuple}); DEFAULTS is the no-config value.
-Keys (unknown keys are errors; nothing here is a secret):
+discover(project_dir=None, cwd=None) reads exactly project_dir (explicit, trusted), else
+walks up from cwd until a directory the user does not own (as git's safe.directory);
+None when nothing is found. parse(table, path) validates; bad values, unknown keys and
+unstattable candidates raise ShkError(1, "config_invalid"). ProjectConfig is frozen;
+DEFAULTS is the no-config value. Keys (no secrets):
   project      ^[a-z0-9][a-z0-9-]{0,23}$ (submit/status/cancel)
   remote_root  absolute [A-Za-z0-9_./-]+ without "..", trailing "/" dropped (submit/push/pull)
   control_host "sherlock-plain", data_host "sherlock-dtn": distinct OpenSSH aliases
@@ -16,9 +14,11 @@ Keys (unknown keys are errors; nothing here is a secret):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import takewhile
 import os
 from pathlib import Path
 import re
+import stat
 import tomllib
 from types import MappingProxyType
 
@@ -90,10 +90,19 @@ def parse(table, path: Path | None = None) -> ProjectConfig:
     return found
 
 
+def _stat(path: Path) -> os.stat_result | None:  # Path.is_file() swallows EACCES on 3.13+ only
+    try:
+        return os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as exc:
+        raise ShkError(EXIT_LOCAL, "config_invalid", f"{path}: {exc.strerror or exc}") from None
+
+
 def _in_directory(directory: Path) -> ProjectConfig | None:
     for name in ("pyproject.toml", "sherlock-kit.toml"):
         path = directory / name
-        if not path.is_file():
+        if not stat.S_ISREG(getattr(_stat(path), "st_mode", 0)):
             continue
         try:
             with open(path, "rb") as stream:
@@ -108,8 +117,9 @@ def _in_directory(directory: Path) -> ProjectConfig | None:
 
 def discover(project_dir=None, cwd=None) -> ProjectConfig | None:
     if project_dir is not None:
-        if not Path(project_dir).expanduser().is_dir():
+        if not stat.S_ISDIR(getattr(_stat(Path(project_dir).expanduser()), "st_mode", 0)):
             raise ShkError(EXIT_LOCAL, "config_invalid", f"--project-dir {project_dir} is not a directory")
         return _in_directory(Path(project_dir).expanduser().resolve())
     start = Path(os.getcwd() if cwd is None else cwd).resolve()
-    return next((found for d in (start, *start.parents) if (found := _in_directory(d)) is not None), None)
+    mine = takewhile(lambda d: getattr(_stat(d), "st_uid", None) == os.geteuid(), (start, *start.parents))
+    return next((found for d in mine if (found := _in_directory(d)) is not None), None)
