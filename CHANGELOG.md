@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.1
+
+- Recovery commands after an unknown submit or cancel outcome preserve the
+  original project directory and executor, so the status read still selects
+  the right task after the caller changes directories.
+- SSH master checks distinguish local permission failures, timeouts and other
+  check failures from a missing master. Codex permission failures now point to
+  per-command approval instead of asking the user to reopen the master.
+- The skill and workstation rules explain sandbox failures, the parent
+  directory needed for a first push, checking the UTC clock before status,
+  malformed-read recovery and the text output of help and usage errors.
+- Submission guidance requires status reconciliation after an unknown outcome
+  before considering another submit.
+
 ## 0.4.0
 
 **Breaking.** A lean rewrite: one small standard-library package, `shk`, with

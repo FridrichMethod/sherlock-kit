@@ -16,11 +16,11 @@ with the package (`shk rules workstation`, `shk rules cluster`); Sherlock's own
 
 ## Install
 
-`shk --version` prints `sherlock-kit 0.4.0 (FORM)`, where FORM names the install:
+`shk --version` prints `sherlock-kit 0.4.1 (FORM)`, where FORM names the install:
 
 | Form | How | FORM |
 |---|---|---|
-| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.4.0'`, or a uv source with `tag = "v0.4.0"` | `git <commit>` |
+| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.4.1'`, or a uv source with `tag = "v0.4.1"` | `git <commit>` |
 | Dotfiles submodule | dotfiles carries this repository as a submodule and links its `bin/shk` to `~/.local/bin/shk`; `bin/shk` is a stdlib-only entry point that runs the submodule's source | `submodule <path>` |
 | Editable | `pip install -e <path>` into an environment you choose; it follows that tree | `editable <path>` |
 
@@ -30,7 +30,7 @@ reports `source <path>` and is for development only. A project environment's
 
 ```toml
 [tool.uv.sources]
-sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.4.0" }
+sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.4.1" }
 ```
 
 On Sherlock, run `shk` with Python 3.11 or newer from a module or a `$GROUP_HOME`
