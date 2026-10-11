@@ -34,7 +34,7 @@ JOB_ID = re.compile(
     r"(?:_(?:([0-9]+)"  # N_k: one array task
     r"|\[([0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)(?:%[0-9]+)?\]))?"  # N_[a-b,c%t]: aggregate
 )
-QUEUE_FIELDS = ("JobID", "State", "Reason", "Partition", "JobName")  # query.sh squeue -o
+QUEUE_FIELDS = ("JobID", "State", "Partition", "JobName")  # query.sh squeue -o
 ACCT_FIELDS = ("JobID", "State", "Partition", "ElapsedRaw", "AllocCPUS", "AllocTRES", "Submit",
                "Restarts", "ExitCode", "JobName")  # query.sh sacct --format; JobName stays last
 OCCUPANCY_COLUMNS = (("UserName", 64), ("State", 24), ("tres-alloc", 128))  # squeue -O, live layout

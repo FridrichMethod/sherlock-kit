@@ -42,7 +42,7 @@ while [ $# -ge 2 ]; do
     [ "$2" = - ] || specs "$1" "$2"
     shift 2
 done
-out=$(squeue -h -t all -u "$u" ${names:+"--name=$names"} -o "%i|%T|%r|%P|%j"); rc=$?
+out=$(squeue -h -t all -u "$u" ${names:+"--name=$names"} -o "%i|%T|%P|%j"); rc=$?
 [ -z "$out" ] || printf "%s\n" "$out" | sed "s/^/SHK_Q|/"
 printf "SHK_RC squeue %s\n" "$rc"
 out=$(env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard sacct -n -P --local --allocations --duplicates -u "$u" \

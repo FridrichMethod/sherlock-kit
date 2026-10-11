@@ -14,7 +14,7 @@ READ = "\n".join([
     "SHK_USER zyli",
     "SHK_HOST sh02-ln04.stanford.edu",
     "SHK_NOW 1",
-    "SHK_Q|1|PENDING|None|normal|n",
+    "SHK_Q|1|PENDING|normal|n",
     "SHK_A|x",
     "SHK_S|n|2",
     'SHK_SPEC|n|7|{"resources":{"array":{"count":4,"throttle":null}}}',
@@ -27,8 +27,8 @@ READ = "\n".join([
 ]) + "\n"
 
 
-def q(job, state="PENDING", reason="None", partition="normal", name=N):
-    return f"{job}|{state}|{reason}|{partition}|{name}"
+def q(job, state="PENDING", partition="normal", name=N):
+    return f"{job}|{state}|{partition}|{name}"
 
 
 def a(job, state="COMPLETED", restart=0, elapsed=60, cpus=2, tres="cpu=2,mem=4G,node=1",
@@ -71,7 +71,7 @@ class ParsingTests(unittest.TestCase):
     def test_read_is_complete_only_with_end_and_every_tool(self):
         read = slurm.parse_read(READ, ("squeue", "sacct"))
         self.assertEqual((read.user, read.host), ("zyli", "sh02-ln04.stanford.edu"))
-        self.assertEqual((read.queue, read.acct), (["1|PENDING|None|normal|n"], ["x"]))
+        self.assertEqual((read.queue, read.acct), (["1|PENDING|normal|n"], ["x"]))
         self.assertEqual((read.occupancy, read.spec_files), ({"owners": ["row"]}, {"n": 2}))
         self.assertEqual(read.specs, {"n": slurm.SpecFile(7, 4), "m": slurm.SpecFile(8, None),
                                       "s": slurm.SpecFile(9, 1)})
@@ -118,7 +118,7 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(resolve(), {"state": "new", "current": None, "history": [],
                                      "spec_files": 0})
         self.assertEqual(resolve(spec_files=2)["state"], "stale")
-        live = resolve([q("100", "PENDING", "Priority")])
+        live = resolve([q("100", "PENDING")])
         tasks = live["current"]["tasks"]
         self.assertEqual((live["state"], live["current"]["job_id"], tasks["pending"]),
                          ("live", "100", 1))
@@ -151,7 +151,7 @@ class ResolveTests(unittest.TestCase):
                          ("live", ["duplicate_live"]))
 
     def test_arrays_throttle_aggregates_and_counts(self):
-        live = current([q("300_1", "RUNNING"), q("300_[2-3%2]", "PENDING", "JobArrayTaskLimit")],
+        live = current([q("300_1", "RUNNING"), q("300_[2-3%2]", "PENDING")],
                        [a("300_0"), a("300_1", "RUNNING")], spec=(300, 4))
         tasks = live["tasks"]
         keys = ("count", "completed", "failed", "running", "pending", "missing")

@@ -7,7 +7,7 @@ at $FAKE_SLURM_STATE is {"next", "jobs", "calls"}. A job is {"id", "name", "user
 "submit", "last", "script"}; a restart is {"state", "elapsed", "cpus", "tres", "exit"}.
 
 Live Sherlock facts modelled: array tasks that never started (throttle-held) have no sacct
-row and show in squeue as N_[a-b%t] PENDING JobArrayTaskLimit; started tasks are N_k rows
+row and show in squeue as one N_[a-b%t] PENDING aggregate (reason JobArrayTaskLimit, unread); started tasks are N_k rows
 with distinct JobIDRaw, except the last task to leave the array, which keeps N (query.sh
 does not ask for JobIDRaw, so the quirk cannot confuse the parser); --duplicates prints
 one row per restart (Restarts 0, 1, ...); squeue -t all forgets a finished job after
@@ -161,11 +161,8 @@ def _queue_entries(job):
     entries = [(f"{job['id']}_{i}", top) for i, top in enumerate(newest) if i not in waiting]
     if waiting:
         throttle = job["array"]["throttle"]
-        running = sum(top["state"] in ("RUNNING", "COMPLETING") for top in newest)
-        held = throttle is not None and running >= throttle
         span = _ranges(waiting) + (f"%{throttle}" if throttle else "")
-        reason = "JobArrayTaskLimit" if held else "Priority"
-        entries.append((f"{job['id']}_[{span}]", {**newest[waiting[0]], "reason": reason}))
+        entries.append((f"{job['id']}_[{span}]", newest[waiting[0]]))
     return entries
 
 
@@ -200,8 +197,7 @@ def squeue(state, options):
             if "O" in options:
                 lines.append(_format_columns(job, top, options["O"]))
                 continue
-            values = {"i": job_id, "T": top["state"], "r": top.get("reason", "None"),
-                      "P": job["partition"], "j": job["name"]}
+            values = {"i": job_id, "T": top["state"], "P": job["partition"], "j": job["name"]}
             lines.append(_format_fields(options["o"], values))
     return "".join(line + "\n" for line in lines), "", 0
 
