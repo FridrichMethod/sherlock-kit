@@ -121,6 +121,13 @@ class SubmitFlows(Flow):
         self.knobs(FAKE_SBATCH_SUBMIT_THEN_FAIL="")
         self.assertEqual(self.submit("--resubmit", "retry")[1]["error"], "live")
 
+    def test_failed_needs_a_resubmit_reason(self):
+        self.slurm.set(int(self.submit()[1]["job_id"]), "FAILED")
+        code, out = self.submit()
+        self.assertEqual((code, out["error"], out["hint"]),
+                         (3, "failed", "find the cause, then add --resubmit REASON"))
+        self.assertEqual(self.submit("--resubmit", "fixed the input")[1]["state_before"], "failed")
+
     def test_unparsed_and_hung_replies_are_unknown_and_status_finds_the_job(self):
         self.knobs(FAKE_SBATCH_UNPARSED="1")
         code, out = self.submit(task="c")
@@ -214,6 +221,17 @@ class StatusCancelOccupancyFlows(Flow):
                                  "--campaign", "x", "--campaign", "y", "--campaign", "z")
         self.assertEqual((code, refused["error"]), (1, "spec_invalid"))
 
+    def test_status_all_without_a_config_keeps_every_shk_name(self):
+        (self.tmp / "sherlock-kit.toml").unlink()
+        self.slurm.add("shk.demo.t.0123456789", "RUNNING")
+        self.slurm.add("shk.other.t.0123456789", "COMPLETED")
+        self.slurm.add("not-shk", "RUNNING")
+        self.slurm.add("shk.theirs.t.0123456789", "RUNNING", user="alice")
+        code, report = self.shk("status", "--all")
+        found = [(entry["name"], entry["state"]) for entry in report["names"]]
+        self.assertEqual((code, found), (0, [("shk.demo.t.0123456789", "live"),
+                                             ("shk.other.t.0123456789", "done")]))
+
     def test_jobs_outside_the_sacct_window_are_forgotten(self):
         self.slurm.add(spec.job_name("demo", "default", "old"), "COMPLETED", age_days=40)
         self.assertEqual(self.entry("old")["state"], "new")
@@ -275,6 +293,23 @@ class CannedReplyFlows(Flow):
         patcher = patch.object(executor, "run_program", run_program)
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def test_mutation_markers_map_to_exit_codes(self):
+        empty = "SHK_USER u\nSHK_RC squeue 0\nSHK_RC sacct 0\nSHK_END\n"
+        cases = (("", 5, "unknown"), ("SHK_SUBMITTED 5\nSHK_SUBMITTED 6\n", 5, "unknown"),
+                 ("SHK_UNPARSED\n", 5, "unknown"), ("SHK_REFUSED mkdir\n", 3, "remote_refused"),
+                 ("SHK_LIVE 9\n", 3, "live"), ("SHK_SUBMITTED 7\n", 0, "submitted"))
+        for reply, code, outcome in cases:
+            with self.subTest(reply=reply):
+                self.replies[:] = [empty, reply]
+                found, out = self.submit()
+                self.assertEqual((found, out.get("error", out.get("action")), self.replies),
+                                 (code, outcome, []))
+        self.replies[:] = ["SHK_JOB|7\n"]
+        self.assertEqual(self.shk("cancel", "--task", "train-a"), (5, {
+            "ok": False, "action": "unknown", "name": spec.job_name("demo", "default", "train-a"),
+            "detail": "0 terminal markers",
+            "next": f"shk status --task train-a --campaign default (not before {NEXT})"}))
 
     def test_a_name_with_only_unreadable_rows_is_never_new(self):
         name = spec.job_name("demo", "default", "train-a")
