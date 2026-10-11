@@ -159,13 +159,24 @@ class RealOpenSshTests(unittest.TestCase):
 
 
 def _alive(pid: int) -> bool:
-    """True while pid exists and is not a zombie (a zombie was already killed)."""
+    """True while pid runs; a zombie (killed, not yet reaped) or a vanished pid is not alive.
+
+    /proc alone decides: kill(pid, 0) also succeeds for a zombie, which systemd may reap
+    between two checks. Without procfs a zombie counts as alive until it is reaped.
+    """
     try:
-        os.kill(pid, 0)
-        proc = Path(f"/proc/{pid}/stat")
-        return not proc.exists() or proc.read_text().rsplit(")", 1)[1].split()[0] != "Z"
-    except (ProcessLookupError, FileNotFoundError):
+        if not Path("/proc/self").is_dir():
+            return os.kill(pid, 0) is None
+        return Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0] not in ("Z", "X")
+    except (FileNotFoundError, ProcessLookupError):
         return False
+
+
+def _describe(pid: int) -> str:
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().strip()
+    except OSError as exc:
+        return f"no /proc entry ({exc})"
 
 
 def _kill(pid: int) -> None:
@@ -199,7 +210,7 @@ class LocalExecutorTests(unittest.TestCase):
         deadline = time.monotonic() + 5
         while _alive(grandchild) and time.monotonic() < deadline:
             time.sleep(0.05)
-        self.assertFalse(_alive(grandchild), "sleep outlived the timed-out sh -c")
+        self.assertFalse(_alive(grandchild), f"sleep outlived the timed-out sh -c: {_describe(grandchild)}")
 
     def test_check(self):
         result = executor.Result
