@@ -1,8 +1,7 @@
 """The shk command line: global options, subcommands, JSON output, exit codes (frozen 0.4.0).
 
 Each sherlock_kit.<name> in COMMAND_MODULES has register(subparsers); its subcommands
-set_defaults(handler=fn), fn(args, ctx) -> Outcome; unwritten modules are skipped until
-STRICT_COMMAND_IMPORTS. Context: .config (lazy ProjectConfig | None), .require(*keys)
+set_defaults(handler=fn), fn(args, ctx) -> Outcome. Context: .config (lazy ProjectConfig | None), .require(*keys)
 (else ShkError(1, "config_required")), .executor() / .data_executor() (control host /
 DTN, detected once), .clock() (aware UTC, injectable), .env, .hostname. stdout is the
 payload as JSON or its "text" verbatim; ShkError -> its payload and code; any other
@@ -23,7 +22,6 @@ import traceback
 from sherlock_kit import config as project_config, doctor, executor as executors, version_line
 from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, Outcome, ShkError
 
-STRICT_COMMAND_IMPORTS = False  # SK-INT: set True once slurm, transfer and install are merged.
 COMMAND_MODULES = ("slurm", "transfer", "install")
 _UNSET = object()
 
@@ -68,14 +66,7 @@ class Context:
 
 
 def load_modules(names=COMMAND_MODULES) -> list:
-    loaded = []
-    for name in names:
-        try:
-            loaded.append(importlib.import_module(f"sherlock_kit.{name}"))
-        except ModuleNotFoundError as exc:
-            if STRICT_COMMAND_IMPORTS or exc.name != f"sherlock_kit.{name}":
-                raise
-    return loaded
+    return [importlib.import_module(f"sherlock_kit.{name}") for name in names]
 
 
 def build_parser(modules) -> argparse.ArgumentParser:

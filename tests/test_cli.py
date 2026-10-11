@@ -152,8 +152,9 @@ class FrameTests(TempCase):
 
     def test_command_module_loading(self):
         self.assertEqual(cli.COMMAND_MODULES, ("slurm", "transfer", "install"))
-        self.assertEqual(cli.load_modules(("not_written_yet",)), [])
-        with patch.object(cli, "STRICT_COMMAND_IMPORTS", True), self.assertRaises(ModuleNotFoundError):
+        self.assertEqual([m.__name__ for m in cli.load_modules()],
+                         ["sherlock_kit.slurm", "sherlock_kit.transfer", "sherlock_kit.install"])
+        with self.assertRaises(ModuleNotFoundError):
             cli.load_modules(("not_written_yet",))
         (self.tmp / "broken_dep.py").write_text("import shk_missing_dependency_xyz\n")
         with patch.object(sherlock_kit, "__path__", [*sherlock_kit.__path__, str(self.tmp)]):
