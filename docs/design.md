@@ -141,9 +141,10 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    (nothing ran; exit 3), or `SHK_UNPARSED` (exit 5). A transport failure after
    dispatch or a missing or
    duplicate marker is exit 5: the reply's `next` names the `shk status` command
-   and the time before which not to run it. Running the same `shk submit` again
-   is safe: it sees `live`, `done` or `failed`, or `new` if nothing reached
-   Slurm.
+   and the time before which not to run it. Reconcile with that status read
+   before considering another submit. A deliberate rerun must follow the
+   duplicate and resubmission guards above; the check-then-submit race described
+   below prevents an exactly-once guarantee.
 
 ## Status, cancel and occupancy
 
