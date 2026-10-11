@@ -156,6 +156,8 @@ class SubmitFlows(Flow):
         self.assertEqual((code, out["action"], out["argv"][4]), (0, "dry_run", "--array=0-3%2"))
         self.assertEqual((out["spec"]["argv"], out["spec"]["script"]["sha256"]),
                          (out["argv"], out["script_sha256"]))
+        after = self.submit("--dry-run", "--after-ok", "11", "12_3", "--after-ok", "13")[1]
+        self.assertEqual(after["argv"][-1], "--dependency=afterok:11:12_3:13,singleton")
         (self.tmp / "bad.sh").write_text("#!/bin/sh\n#SBATCH --partition=gpu\necho\n")
         self.assertEqual(self.submit(script="bad.sh")[1]["error"], "sbatch_directive")
         self.assertEqual(self.submit(partition="btrippe")[1]["error"], "courtesy_ack_required")

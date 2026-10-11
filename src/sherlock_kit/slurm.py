@@ -426,7 +426,8 @@ def _register_submit(subparsers: Any) -> None:
     parser.add_argument("--array", metavar="N[%M]", help="N tasks (2-1000), at most M at once")
     parser.add_argument("--constraint")
     parser.add_argument("--signal", help="for example B:USR1@60")
-    parser.add_argument("--after-ok", nargs="+", default=[], metavar="JOBID")
+    parser.add_argument("--after-ok", action="extend", nargs="+", default=[], metavar="JOBID",
+                        help="start after these jobs complete; repeatable")
     parser.add_argument("--run-dir", help="default <remote_root>/runs/<name>")
     parser.add_argument("--courtesy-ack", action="store_true",
                         help="required on borrowed partitions, after shk occupancy")
