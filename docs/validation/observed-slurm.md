@@ -88,9 +88,41 @@ results as the last step. Pilot workloads were synthetic (fuzzing the toolkit's
 own state resolver, fp16 matrix products with checkpoints); no research code or
 data was used, and no result here is a scientific result.
 
+## 0.4.0 live smoke (2026-10-11)
+
+CPU only on `normal`, from lab-ubuntu through the existing control and data
+masters, with `bin/shk` from the release candidate and a scratch project
+(`remote_root` on `$SCRATCH`, removed afterwards). The workload was a 4-task array
+with throttle 2, 1 CPU, 2 GB and a 20-minute limit; each task fuzzed the toolkit's
+own `squeue`/`sacct` row parser and name resolution for 690 CPU seconds
+(about 3.97 million cases in total, no failures) and wrote `SHA256SUMS` with
+`python3 -m sherlock_kit manifest`.
+
+- `shk doctor --remote` dialled once over the running master with the
+  `-oProxyCommand=false` prefix and found `sbatch`, `squeue`, `sacct`,
+  `sha256sum` and a readable `/etc/agents/AGENTS.md` on `sh02-ln04`.
+- `shk push` of the code snapshot through `sherlock-dtn` with
+  `rsync -rlt --protect-args --partial` worked.
+- `shk submit` printed the `--dry-run` argv offline, then submitted once
+  (`--array=0-3%2`, `--no-requeue`, `--time=20`, `--mem=2048M`, no singleton for
+  an array). A second submit 100 s later and a `--resubmit REASON` 85 s after that
+  were both refused with exit 3 `live`.
+- `shk status` at 10:35, 10:44 and 10:58 UTC (minutes apart): first 2 running and
+  the 2 throttle-held tasks counted as pending with none missing; then 2 completed
+  and 2 pending; then `done` with 4 `COMPLETED`, exit codes `0:0` and
+  `cpu_seconds` 2833 marked final. No anomaly, no restart.
+- Array tasks ran on compute nodes named `sh02-02n42.int` and `sh02-02n48.int`
+  with the `python/3.14.2` module loaded by `#!/bin/bash -l`.
+- `shk pull --validate` of each task's output directory read `SHA256SUMS` through
+  the control host, fetched with `--files-from=-` through `sherlock-dtn` (accepted),
+  verified, ran the project validator from the project root and promoted with a
+  receipt. Pulling task 0 again returned `already_present`.
+- After `done`, a plain `shk submit` was refused with exit 3 `done` and the hint
+  to add `--resubmit REASON` once the cause is known.
+
 ## Not observed live
 
 Lost ssh replies, duplicate submissions racing each other, an array task
-requeue, natural preemption, `possu`, and anything on compute-node hostnames
-beyond what `SLURM_JOB_ID` implies. Those rest on offline tests with fake
+requeue, natural preemption, `possu`, a live `shk cancel`, and `shk` itself
+running on Sherlock with the local executor. Those rest on offline tests with fake
 `ssh` and Slurm binaries.
