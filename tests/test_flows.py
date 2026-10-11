@@ -23,7 +23,8 @@ NOW = datetime(2026, 10, 10, 12, 0, tzinfo=timezone.utc)
 NEXT = "2026-10-10T12:01:00Z"
 SCRIPT = "#!/bin/bash -l\n#SBATCH --mail-type=END\necho work\n"
 USER = pwd.getpwuid(os.getuid()).pw_name
-PROGRAMS = [SRC / "sherlock_kit" / "data" / "remote" / f"{name}.sh" for name in ("query", "submit", "cancel")]
+REMOTE = SRC / "sherlock_kit" / "data" / "remote"
+PROGRAMS = [REMOTE / f"{name}.sh" for name in ("query", "submit", "cancel")]
 
 
 class Flow(unittest.TestCase):
@@ -40,7 +41,8 @@ class Flow(unittest.TestCase):
         self.knobs(**self.slurm.env())
 
     def config(self, **extra):
-        lines = ['project = "demo"', f'remote_root = "{self.remote}"', *(f"{k} = {v}" for k, v in extra.items())]
+        lines = ['project = "demo"', f'remote_root = "{self.remote}"']
+        lines += [f"{key} = {value}" for key, value in extra.items()]
         (self.tmp / "sherlock-kit.toml").write_text("\n".join(lines) + "\n")
 
     def knobs(self, **values):
@@ -49,18 +51,20 @@ class Flow(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def shk(self, *argv):
-        ctx = cli.Context(project_dir=self.tmp, executor=self.executor, env={}, hostname="lab-ubuntu", clock=lambda: NOW)
+        ctx = cli.Context(project_dir=self.tmp, executor=self.executor, env={},
+                          hostname="lab-ubuntu", clock=lambda: NOW)
         out = io.StringIO()
         with redirect_stdout(out), redirect_stderr(io.StringIO()):
             code = cli.main(list(argv), modules=[slurm], context=ctx)
         return code, json.loads(out.getvalue())
 
     def submit(self, *extra, task="train-a", partition="normal", script="job.sh"):
-        return self.shk("submit", "--task", task, "--script", str(self.tmp / script), "--partition", partition,
-                        "--cpus", "1", "--mem", "2G", "--time", "20m", *extra)
+        return self.shk("submit", "--task", task, "--script", str(self.tmp / script),
+                        "--partition", partition, "--cpus", "1", "--mem", "2G", "--time", "20m",
+                        *extra)
 
-    def entry(self, task="train-a", code=0):
-        found, report = self.shk("status", "--task", task)
+    def entry(self, task="train-a", code=0, *extra):
+        found, report = self.shk("status", "--task", task, *extra)
         self.assertEqual(found, code)
         return report["names"][0]
 
@@ -70,22 +74,30 @@ class Flow(unittest.TestCase):
 
 class SubmitFlows(Flow):
     def test_submit_stages_files_and_refuses_live_then_done(self):
-        self.knobs(SBATCH_ACCOUNT="leaky", SLURM_MEM_PER_NODE="999", SLURM_CONF="/etc/slurm/slurm.conf")
+        self.knobs(SBATCH_ACCOUNT="leaky", SLURM_MEM_PER_NODE="999",
+                   SLURM_CONF="/etc/slurm/slurm.conf")
         code, out = self.submit()
-        self.assertEqual((code, out["action"], out["next_check_after"], out["executor"]), (0, "submitted", NEXT, "local"))
+        self.assertEqual((code, out["action"], out["next_check_after"], out["executor"]),
+                         (0, "submitted", NEXT, "local"))
         name, job = out["name"], out["job_id"]
-        self.assertEqual(sorted(p.name for p in self.shk_dir().iterdir()), [f"{name}.{job}.json", f"{name}.{job}.sh"])
+        staged = sorted(path.name for path in self.shk_dir().iterdir())
+        self.assertEqual(staged, [f"{name}.{job}.json", f"{name}.{job}.sh"])
         self.assertEqual((self.shk_dir() / f"{name}.{job}.sh").read_text(), SCRIPT)
-        self.assertEqual(json.loads((self.shk_dir() / f"{name}.{job}.json").read_text())["argv"], out["argv"])
+        frozen = json.loads((self.shk_dir() / f"{name}.{job}.json").read_text())
+        self.assertEqual(frozen["argv"], out["argv"])
         sbatch = self.slurm.calls("sbatch")[0]
         self.assertEqual(sbatch["argv"][:-1], out["argv"][1:])
-        self.assertRegex(sbatch["argv"][-1], rf"/\.shk/{name}\.20261010T120000Z-[0-9a-f]{{4}}\.sh\Z")
+        staged_script = rf"/\.shk/{name}\.20261010T120000Z-[0-9a-f]{{4}}\.sh\Z"
+        self.assertRegex(sbatch["argv"][-1], staged_script)
         conf = {"SLURM_CONF": "/etc/slurm/slurm.conf"}
-        self.assertEqual([c["env"] for c in self.slurm.calls()], [conf, {**conf, "SLURM_TIME_FORMAT": "standard"}, conf, conf])
+        sacct_env = {**conf, "SLURM_TIME_FORMAT": "standard"}
+        seen = [call["env"] for call in self.slurm.calls()]  # squeue, sacct, squeue, sbatch
+        self.assertEqual(seen, [conf, sacct_env, conf, conf])
         self.assertEqual(self.slurm.state()["jobs"][0]["script"], SCRIPT)
+        refusal = {"ok": False, "error": "live", "message": f"{name} is live (newest job {job})",
+                   "hint": "wait; check shk status at most once per 60 s"}
         for extra in ((), ("--resubmit", "again")):
-            self.assertEqual(self.submit(*extra)[:2], (3, {"ok": False, "error": "live", "message": f"{name} is live "
-                             f"(newest job {job})", "hint": "wait; check shk status at most once per 60 s"}))
+            self.assertEqual(self.submit(*extra), (3, refusal))
         self.slurm.set(int(job), "COMPLETED")
         self.assertEqual(self.submit()[1]["error"], "done")
         code, again = self.submit("--resubmit", "rerun with more data")
@@ -93,8 +105,10 @@ class SubmitFlows(Flow):
         frozen = json.loads((self.shk_dir() / f"{name}.{again['job_id']}.json").read_text())
         self.assertEqual(frozen["resubmit_reason"], "rerun with more data")
         entry = self.entry()
-        self.assertEqual((entry["state"], entry["current"]["job_id"], entry["spec_files"]), ("live", again["job_id"], 2))
-        self.assertEqual((entry["history"][0]["job_id"], entry["history"][0]["state"]), (job, "done"))
+        self.assertEqual((entry["state"], entry["current"]["job_id"], entry["spec_files"]),
+                         ("live", again["job_id"], 2))
+        history = entry["history"][0]
+        self.assertEqual((history["job_id"], history["state"]), (job, "done"))
 
     def test_rejections_keep_nothing_and_a_queued_failure_stays_live(self):
         self.knobs(FAKE_SBATCH_RC="1")
@@ -124,19 +138,24 @@ class SubmitFlows(Flow):
 
     def test_remote_guards_refuse_before_sbatch(self):
         run, live = self.tmp / "run", self.slurm.add("shk.demo.t.0123456789", "RUNNING")
-        args = ["shk.demo.t.0123456789", str(run), "20261010T120000Z-abcd", "0" * 64, "{}", "--", "sbatch", "--parsable"]
+        args = ["shk.demo.t.0123456789", str(run), "20261010T120000Z-abcd", "0" * 64, "{}", "--",
+                "sbatch", "--parsable"]
         local = executor.LocalExecutor()
-        self.assertEqual(executor.run_program(local, "submit", args, stdin=b"x").stdout, f"SHK_LIVE {live}\n")
+        reply = executor.run_program(local, "submit", args, stdin=b"x")
+        self.assertEqual(reply.stdout, f"SHK_LIVE {live}\n")
         args[0] = "shk.demo.u.0123456789"
-        self.assertEqual(executor.run_program(local, "submit", args, stdin=b"#!/bin/sh\n").stdout, "SHK_REFUSED digest\n")
+        reply = executor.run_program(local, "submit", args, stdin=b"#!/bin/sh\n")
+        self.assertEqual(reply.stdout, "SHK_REFUSED digest\n")
         self.assertEqual(list((run / ".shk").iterdir()), [])
-        self.assertEqual(executor.run_program(local, "submit", args[:5] + ["sbatch"]).stdout, "SHK_REFUSED usage\n")
+        reply = executor.run_program(local, "submit", [*args[:5], "sbatch"])
+        self.assertEqual(reply.stdout, "SHK_REFUSED usage\n")
         self.assertEqual(self.slurm.calls("sbatch"), [])
 
     def test_offline_refusals_and_dry_run_make_no_call(self):
         code, out = self.submit("--dry-run", "--array", "4%2")
-        self.assertEqual((code, out["action"], out["spec"]["argv"], out["argv"][4]), (0, "dry_run", out["argv"], "--array=0-3%2"))
-        self.assertEqual(out["spec"]["script"]["sha256"], out["script_sha256"])
+        self.assertEqual((code, out["action"], out["argv"][4]), (0, "dry_run", "--array=0-3%2"))
+        self.assertEqual((out["spec"]["argv"], out["spec"]["script"]["sha256"]),
+                         (out["argv"], out["script_sha256"]))
         (self.tmp / "bad.sh").write_text("#!/bin/sh\n#SBATCH --partition=gpu\necho\n")
         self.assertEqual(self.submit(script="bad.sh")[1]["error"], "sbatch_directive")
         self.assertEqual(self.submit(partition="btrippe")[1]["error"], "courtesy_ack_required")
@@ -144,13 +163,17 @@ class SubmitFlows(Flow):
         self.assertEqual((self.slurm.calls(), self.remote.exists()), ([], False))
 
     def test_borrowed_submit_reports_occupancy_courtesy_and_budget(self):
-        self.slurm.add("theirs", "RUNNING", user="alice", partition="btrippe", tres="cpu=4,gres/gpu=2")
+        self.slurm.add("theirs", "RUNNING", user="alice", partition="btrippe",
+                       tres="cpu=4,gres/gpu=2")
         for index in range(2):
             self.slurm.add(f"mine-{index}", "PENDING", partition="btrippe")
         code, out = self.submit("--courtesy-ack", partition="btrippe")
         self.assertEqual(code, 0)
-        self.assertEqual(out["occupancy"]["users"]["alice"], {"running_jobs": 1, "running_gpus": 2, "pending_jobs": 0})
-        self.assertEqual((out["courtesy"], len(out["warnings"])), (partitions.profile("btrippe").courtesy, 1))
+        self.assertEqual(out["occupancy"]["users"]["alice"],
+                         {"running_jobs": 1, "running_gpus": 2, "pending_jobs": 0})
+        self.assertEqual(out["courtesy"], partitions.profile("btrippe").courtesy)
+        self.assertEqual(len(out["warnings"]), 1)
+        self.assertIn("about 2 jobs x 2 h", out["warnings"][0])
 
 
 class StatusCancelOccupancyFlows(Flow):
@@ -159,32 +182,46 @@ class StatusCancelOccupancyFlows(Flow):
         job = int(out["job_id"])
         self.slurm.set(job, "COMPLETED", "RUNNING")
         current = self.entry()["current"]
-        self.assertEqual([current["tasks"][k] for k in ("completed", "running", "pending", "missing")], [1, 1, 2, 0])
+        tasks = [current["tasks"][key] for key in ("completed", "running", "pending", "missing")]
+        self.assertEqual(tasks, [1, 1, 2, 0])
         self.assertEqual(current["array"], {"count": 4, "count_known": True})
         self.slurm.set(job, None, "COMPLETED", "COMPLETED", "COMPLETED")
         entry = self.entry()
-        self.assertEqual((entry["state"], entry["current"]["cost"]), ("done", {"cpu_seconds": 240, "gpu_seconds": 0, "final": True}))
+        self.assertEqual((entry["state"], entry["current"]["cost"]),
+                         ("done", {"cpu_seconds": 240, "gpu_seconds": 0, "final": True}))
         self.slurm.add("shk.demo-x.t.0123456789", "RUNNING")
         self.slurm.add("shk.demo.theirs.0123456789", "RUNNING", user="alice")
         code, report = self.shk("status", "--all")
-        self.assertEqual((code, [e["name"] for e in report["names"]], report["truncated"]), (0, [out["name"]], False))
-        self.assertEqual(self.shk("status", "--name", out["name"], "--since", "0")[1]["error"], "spec_invalid")
+        self.assertEqual((code, [e["name"] for e in report["names"]], report["truncated"]),
+                         (0, [out["name"]], False))
+        refused = self.shk("status", "--name", out["name"], "--since", "0")[1]
+        self.assertEqual(refused["error"], "spec_invalid")
+
+    def test_jobs_outside_the_sacct_window_are_forgotten(self):
+        self.slurm.add(spec.job_name("demo", "default", "old"), "COMPLETED", age_days=40)
+        self.assertEqual(self.entry("old")["state"], "new")
+        self.assertEqual(self.entry("old", 0, "--since", "60")["state"], "done")
+        self.assertEqual(self.submit(task="old")[1]["state_before"], "new")
 
     def test_stale_spec_files_submit_like_new_and_anomalies_exit_6(self):
         self.shk_dir("old").mkdir(parents=True)
         name = spec.job_name("demo", "default", "old")
         (self.shk_dir("old") / f"{name}.77.json").write_text('{"resources":{"array":null}}\n')
-        self.assertEqual((self.entry("old")["state"], self.entry("old")["spec_files"]), ("stale", 1))
+        stale = self.entry("old")
+        self.assertEqual((stale["state"], stale["spec_files"]), ("stale", 1))
         self.assertEqual(self.submit(task="old")[1]["state_before"], "stale")
         self.slurm.requeue(int(self.submit(task="pre")[1]["job_id"]))
-        self.assertEqual(self.entry("pre", code=6)["current"]["anomalies"], ["unexpected_preemption"])
+        anomalies = self.entry("pre", code=6)["current"]["anomalies"]
+        self.assertEqual(anomalies, ["unexpected_preemption"])
 
     def test_cancel_is_scoped_to_one_name(self):
         out, other = self.submit()[1], self.submit(task="keep")[1]
         code, cancelled = self.shk("cancel", "--task", "train-a")
-        self.assertEqual((code, cancelled["action"], cancelled["jobs"]), (0, "cancelled", [out["job_id"]]))
+        self.assertEqual((code, cancelled["action"], cancelled["jobs"]),
+                         (0, "cancelled", [out["job_id"]]))
         self.assertEqual((cancelled["next_check_after"], cancelled["executor"]), (NEXT, "local"))
-        self.assertEqual(self.slurm.calls("scancel")[0]["argv"], ["-u", USER, f"--name={out['name']}"])
+        scancel = self.slurm.calls("scancel")[0]["argv"]
+        self.assertEqual(scancel, ["-u", USER, f"--name={out['name']}"])
         states = {job["name"]: job["tasks"][0][-1]["state"] for job in self.slurm.state()["jobs"]}
         self.assertEqual(states, {out["name"]: "CANCELLED", other["name"]: "PENDING"})
         self.assertEqual(self.shk("cancel", "--name", out["name"])[1]["action"], "nothing_live")
@@ -194,13 +231,17 @@ class StatusCancelOccupancyFlows(Flow):
 
     def test_occupancy_works_without_a_config(self):
         (self.tmp / "sherlock-kit.toml").unlink()
-        self.slurm.add("x", "RUNNING", user="alice", partition="owners", tres="cpu=1,gres/gpu:h100=1")
+        self.slurm.add("x", "RUNNING", user="alice", partition="owners",
+                       tres="cpu=1,gres/gpu:h100=1")
         self.slurm.add("y", "PENDING", user="bob", partition="owners")
         code, out = self.shk("occupancy", "--partition", "owners", "--partition", "normal")
         self.assertEqual((code, out["next_check_after"]), (0, NEXT))
-        self.assertEqual(out["partitions"]["owners"]["totals"], {"running_jobs": 1, "running_gpus": 1, "pending_jobs": 1})
-        self.assertEqual((out["partitions"]["normal"]["users"], out["partitions"]["owners"]["profile"]["preemptible"]), ({}, True))
-        self.assertEqual(self.shk("occupancy", "--partition", "mystery")[1]["error"], "unknown_partition")
+        owners, normal = out["partitions"]["owners"], out["partitions"]["normal"]
+        self.assertEqual(owners["totals"],
+                         {"running_jobs": 1, "running_gpus": 1, "pending_jobs": 1})
+        self.assertEqual((normal["users"], owners["profile"]["preemptible"]), ({}, True))
+        self.assertEqual(self.shk("occupancy", "--partition", "mystery")[1]["error"],
+                         "unknown_partition")
 
 
 class SshFlow(Flow):
@@ -234,16 +275,18 @@ class BashAsShFlow(Flow):
         self.knobs(SBATCH_PARTITION="gpu", SLURM_JOB_ID="7")
         code, out = self.submit("--array", "4%2")
         self.assertEqual((code, out["action"]), (0, "submitted"))
-        self.assertEqual({k for c in self.slurm.calls() for k in c["env"]}, {"SLURM_TIME_FORMAT"})
+        seen = {key for call in self.slurm.calls() for key in call["env"]}
+        self.assertEqual(seen, {"SLURM_TIME_FORMAT"})
         self.assertEqual(self.submit("--array", "4%2")[1]["error"], "live")
         self.slurm.set(int(out["job_id"]), "COMPLETED", "RUNNING")
         tasks = self.entry()["current"]["tasks"]
-        self.assertEqual([tasks[k] for k in ("completed", "running", "pending")], [1, 1, 2])
+        self.assertEqual([tasks[key] for key in ("completed", "running", "pending")], [1, 1, 2])
         self.assertEqual(self.shk("cancel", "--task", "train-a")[1]["action"], "cancelled")
 
 
 class RemoteProgramTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("shellcheck") and shutil.which("dash"), "needs shellcheck and dash")
+    @unittest.skipUnless(shutil.which("shellcheck") and shutil.which("dash"),
+                         "needs shellcheck and dash")
     def test_programs_are_posix_sh_without_single_quotes(self):
         for path in PROGRAMS:
             self.assertNotIn("'", path.read_text())
