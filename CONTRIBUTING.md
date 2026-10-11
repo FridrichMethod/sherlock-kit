@@ -8,26 +8,43 @@ explicit path and carry no agent attribution.
 ## Checkouts and worktrees
 
 The owner's development checkout lives at `~/data/repos/sherlock-kit`. It is a
-working copy only: never install from it, link to it or point a project at it;
-installs come from a tag, the dotfiles submodule or an editable install of a tree
-you chose (see the README). Concurrent writers each use their own branch and Git
-worktree (for example `.worktrees/<name>`, ignored by Git); reviewers are
-read-only. Only the lead merges to `main` and tags releases.
+working copy only: apart from its own development environment, never install
+from it, link to it or point a project at it; installs come from a tag, the
+dotfiles submodule or an editable install of a tree you chose (see the README).
+Concurrent writers each use their own branch and Git worktree (for example
+`.worktrees/<name>`, ignored by Git); reviewers are read-only. Only the lead
+merges to `main` and tags releases.
 
 ## Checks
 
 Ordinary tests need no credentials, no Sherlock connection and no GPU. They run
 the real remote `sh` programs locally through a fake `ssh`, fake Slurm binaries
-and real `rsync`. Install `rsync`, `shellcheck` and `dash`, then:
+and real `rsync`. Install `rsync` and `dash`, then set up a development
+environment once (`.venv*/` is ignored by Git):
 
 ```sh
+python3 -m venv .venv
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/pre-commit install
 python3 -m venv .venv-build
 .venv-build/bin/python -m pip install 'setuptools>=80' wheel
+```
+
+Before each commit (the installed hook runs the same checks on staged files):
+
+```sh
+.venv/bin/pre-commit run --all-files
 SHK_BUILD_PYTHON="$PWD/.venv-build/bin/python" SHK_REQUIRE_ALL=1 python3 -B tests/run_suite.py
-shellcheck -s sh src/sherlock_kit/data/remote/*.sh
 git diff --check
 ```
 
+- pre-commit runs ruff (lint and format), mypy on `src/` and `bin/shk`
+  (fully annotated, `[tool.mypy]` in `pyproject.toml`), shellcheck `--shell=sh`
+  and shfmt on the remote programs, mdformat on the documentation (never on
+  package data: the rules and the skill are delivered byte for byte) and the
+  usual file checks. Tests are linted, not type-checked. The `ruff` pin in the
+  `dev` extra equals the ruff-pre-commit `rev`; bump both together.
+- Tests stay on `unittest`; `tests/run_suite.py` runs them all.
 - Run the suite on the oldest and newest supported Pythons (3.11 and 3.14; CI runs
   both). With `CI` or `SHK_REQUIRE_ALL` set, any skip fails the run; without
   `SHK_BUILD_PYTHON` the packaging tests skip, so that run is not a release check.

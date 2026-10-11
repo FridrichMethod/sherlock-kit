@@ -24,7 +24,7 @@ NEXT = "2026-10-10T12:01:00Z"
 SCRIPT = "#!/bin/bash -l\n#SBATCH --mail-type=END\necho work\n"
 USER = pwd.getpwuid(os.getuid()).pw_name
 REMOTE = SRC / "sherlock_kit" / "data" / "remote"
-PROGRAMS = [REMOTE / f"{name}.sh" for name in ("query", "submit", "cancel")]
+PROGRAMS = sorted(REMOTE.glob("*.sh"))
 
 
 class Flow(unittest.TestCase):
@@ -367,13 +367,13 @@ class BashAsShFlow(Flow):
 
 
 class RemoteProgramTests(unittest.TestCase):
-    @unittest.skipUnless(shutil.which("shellcheck") and shutil.which("dash"),
-                         "needs shellcheck and dash")
+    """shellcheck -s sh runs in pre-commit; here dash parses each program."""
+
+    @unittest.skipUnless(shutil.which("dash"), "needs dash")
     def test_programs_are_posix_sh_without_single_quotes(self):
         for path in PROGRAMS:
             self.assertNotIn("'", path.read_text())
             subprocess.run(["dash", "-n", str(path)], check=True)
-        subprocess.run(["shellcheck", "-s", "sh", *map(str, PROGRAMS)], check=True)
 
 
 if __name__ == "__main__":

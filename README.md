@@ -152,7 +152,10 @@ Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
 ## Development
 
 ```sh
-python3 tests/run_suite.py
+python3 -m venv .venv && .venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/pre-commit install
+.venv/bin/pre-commit run --all-files    # ruff, mypy, shellcheck, shfmt, mdformat
+python3 -B tests/run_suite.py
 ```
 
 The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` and
