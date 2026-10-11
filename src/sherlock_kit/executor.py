@@ -12,8 +12,8 @@ ControlPath -> ShkError(4, "unavailable"); -oProxyCommand=false makes a master l
 after the check fail instead of a cold login. master_status() -> (state, detail).
 run_program(ex, name, args) runs ["sh", "-c", data/remote/<name>.sh, "shk-<name>", *args];
 check(result, action) raises ShkError 4, 5 (unknown_outcome) or 1 unless complete.
-detect(): --executor / SHK_EXECUTOR, else local on ^sh\d+-ln\d+$, SLURM_CLUSTER_NAME=sherlock
-or ^sh\d+- in a job (never "sbatch on PATH"), else ssh; data=True on Sherlock always refuses.
+detect(): --executor / SHK_EXECUTOR, else local on ^sh\\d+-ln\\d+$, SLURM_CLUSTER_NAME=sherlock
+or ^sh\\d+- in a job (never "sbatch on PATH"), else ssh; data=True on Sherlock always refuses.
 """
 from __future__ import annotations
 
