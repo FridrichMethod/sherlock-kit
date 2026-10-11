@@ -42,9 +42,10 @@ class ParsingTests(unittest.TestCase):
 
     def test_gpus_from_tres(self):
         cases = {"": 0, "N/A": 0, "cpu=4,mem=32G,node=1": 0, "cpu=4,gres/gpu=2": 2, "gres/gpu:h100=1": 1,
-                 "gres/gpu:a100=1,gres/gpu:h100=2": 3, "cpu=4,gres/gpu=2,gres/gpu:h100=2": 2}
+                 "gres/gpu:a100=1,gres/gpu:h100=2": 3, "cpu=4,gres/gpu=2,gres/gpu:h100=2": 2,
+                 "gres/gpu=3,gres/gpu:h100=1": 3}  # untyped GPUs beside typed ones: the total wins
         self.assertEqual({tres: slurm.gpus(tres) for tres in cases}, cases)
-        for bad in ("gres/gpu=x", "gres/gpu:h100=", "gres/gpu=-1", "gres/gpu", "gres/gpu=3,gres/gpu:h100=1"):
+        for bad in ("gres/gpu=x", "gres/gpu:h100=", "gres/gpu=-1", "gres/gpu"):
             with self.subTest(tres=bad), self.assertRaises(ValueError):
                 slurm.gpus(bad)
 

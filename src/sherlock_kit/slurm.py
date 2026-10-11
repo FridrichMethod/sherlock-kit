@@ -48,16 +48,17 @@ def job_id(text: str) -> tuple:
 
 
 def gpus(tres: str) -> int:
-    """GPUs in a TRES string; Slurm prints gres/gpu=N beside gres/gpu:TYPE=N, so the two are never added."""
-    generic, typed = None, 0
-    for key, sep, value in (part.partition("=") for part in tres.split(",")):
+    """GPUs in a TRES string: gres/gpu=N is the total and gres/gpu:TYPE=N its typed share."""
+    generic, typed = 0, 0
+    for key, _, value in (part.partition("=") for part in tres.split(",")):
         if key == "gres/gpu" or key.startswith("gres/gpu:"):
-            if not sep or not value.isdecimal():
+            if not value.isdecimal():
                 raise ValueError(f"TRES {tres!r}")
-            generic, typed = (int(value), typed) if key == "gres/gpu" else (generic, typed + int(value))
-    if generic is not None and typed and generic != typed:
-        raise ValueError(f"TRES {tres!r}: gres/gpu disagrees with the typed counts")
-    return typed if generic is None else generic
+            if key == "gres/gpu":
+                generic += int(value)
+            else:
+                typed += int(value)
+    return max(generic, typed)
 
 
 def _spec_count(text: str):
@@ -332,7 +333,8 @@ def cancel(args, ctx) -> Outcome:
     if mark == "unknown":
         return _unknown(ctx, name, select, value)
     return Outcome({"action": "cancelled" if mark == "SHK_CANCELLED" else "nothing_live", "name": name,
-                    "jobs": [line[8:] for line in lines if line.startswith("SHK_JOB|")]})
+                    "jobs": [line[8:] for line in lines if line.startswith("SHK_JOB|")],
+                    "executor": ctx.executor().kind, "next_check_after": _iso(ctx.clock() + CADENCE)})
 
 
 def occupancy(args, ctx) -> Outcome:

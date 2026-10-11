@@ -183,6 +183,7 @@ class StatusCancelOccupancyFlows(Flow):
         out, other = self.submit()[1], self.submit(task="keep")[1]
         code, cancelled = self.shk("cancel", "--task", "train-a")
         self.assertEqual((code, cancelled["action"], cancelled["jobs"]), (0, "cancelled", [out["job_id"]]))
+        self.assertEqual((cancelled["next_check_after"], cancelled["executor"]), (NEXT, "local"))
         self.assertEqual(self.slurm.calls("scancel")[0]["argv"], ["-u", USER, f"--name={out['name']}"])
         states = {job["name"]: job["tasks"][0][-1]["state"] for job in self.slurm.state()["jobs"]}
         self.assertEqual(states, {out["name"]: "CANCELLED", other["name"]: "PENDING"})
