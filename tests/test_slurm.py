@@ -98,7 +98,7 @@ class ParsingTests(unittest.TestCase):
 
     def test_occupancy_fixed_width_rows(self):
         def row(user, state, tres):
-            return f"{user:<64}{state:<24}{tres:<128}{'1:00':<24}{'2:00:00':<24}"
+            return f"{user:<64}{state:<24}{tres:<128}"
         users, totals = slurm.occupancy_summary([
             row("alice", "RUNNING", "cpu=4,gres/gpu=2,gres/gpu:h100=2"),
             row("alice", "PENDING", ""),

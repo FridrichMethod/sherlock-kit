@@ -170,10 +170,10 @@ def _queue_entries(job):
 
 
 def _format_columns(job, top, layout):
-    """One fixed-width squeue -O line, e.g. layout "UserName:64,State:24,..."."""
+    """One fixed-width squeue -O line for a layout such as "UserName:64,State:24"."""
     running = top["state"] == "RUNNING"
-    values = {"username": job["user"], "state": top["state"], "timeused": "1:00",
-              "timelimit": "2:00:00", "tres-alloc": top["tres"] if running else ""}
+    values = {"username": job["user"], "state": top["state"],
+              "tres-alloc": top["tres"] if running else ""}
     line = ""
     for column in layout.split(","):
         field, _, width = column.partition(":")

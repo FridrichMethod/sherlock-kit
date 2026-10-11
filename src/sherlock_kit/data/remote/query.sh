@@ -25,7 +25,7 @@ specs() {  # NAME RUN_DIR: count the spec files, print the newest NAME.<jobid>.j
 occupancy() {  # PARTITION...: fixed-width squeue -O rows of every user
     orc=0
     for p in "$@"; do
-        out=$(env LC_ALL=C squeue -h -p "$p" -O "UserName:64,State:24,tres-alloc:128,TimeUsed:24,TimeLimit:24") || orc=$?
+        out=$(env LC_ALL=C squeue -h -p "$p" -O "UserName:64,State:24,tres-alloc:128") || orc=$?
         [ -z "$out" ] || printf "%s\n" "$out" | sed "s/^/SHK_O|$p|/"
     done
     printf "SHK_RC occupancy %s\n" "$orc"
