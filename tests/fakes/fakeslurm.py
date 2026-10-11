@@ -15,8 +15,8 @@ MinJobAge; sbatch --parsable prints N or N;cluster.
 
 Knobs: FAKE_SBATCH_RC, FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued, exit
 1), FAKE_SBATCH_HANG (queued, then sleep that many seconds), FAKE_SBATCH_CLUSTER,
-FAKE_SCANCEL_RC. Every call is recorded with the SBATCH_/SLURM_/SQUEUE_/SACCT_ variables
-it saw. FakeSlurm is the test-side API.
+FAKE_SCANCEL_RC. Every call is recorded with the SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_
+variables it saw. FakeSlurm is the test-side API.
 """
 import fcntl
 import json
@@ -31,7 +31,7 @@ BIN = Path(__file__).resolve().with_name("bin")
 LIVE = {"PENDING", "RUNNING", "SUSPENDED", "COMPLETING", "CONFIGURING", "REQUEUED"}
 VALUE_FLAGS = ("-u", "-t", "-p", "-o", "-O", "-S", "-E")
 MIN_JOB_AGE = 300  # seconds slurmctld keeps a finished job (counted from submission here)
-RECORDED_ENV = ("SBATCH_", "SLURM_", "SQUEUE_", "SACCT_")
+RECORDED_ENV = ("SBATCH_", "SLURM_", "SQUEUE_", "SACCT_", "SCANCEL_")
 
 
 def _user():

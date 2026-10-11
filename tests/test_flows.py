@@ -233,12 +233,14 @@ class StatusCancelOccupancyFlows(Flow):
 
     def test_cancel_is_scoped_to_one_name(self):
         out, other = self.submit()[1], self.submit(task="keep")[1]
+        self.knobs(SCANCEL_STATE="RUNNING", SCANCEL_INTERACTIVE="1")
         code, cancelled = self.shk("cancel", "--task", "train-a")
         self.assertEqual((code, cancelled["action"], cancelled["jobs"]),
                          (0, "cancelled", [out["job_id"]]))
         self.assertEqual((cancelled["next_check_after"], cancelled["executor"]), (NEXT, "local"))
-        scancel = self.slurm.calls("scancel")[0]["argv"]
-        self.assertEqual(scancel, ["-u", USER, f"--name={out['name']}"])
+        scancel = self.slurm.calls("scancel")[0]
+        self.assertEqual((scancel["argv"], scancel["env"]),
+                         (["-u", USER, f"--name={out['name']}"], {}))
         states = {job["name"]: job["tasks"][0][-1]["state"] for job in self.slurm.state()["jobs"]}
         self.assertEqual(states, {out["name"]: "CANCELLED", other["name"]: "PENDING"})
         self.assertEqual(self.shk("cancel", "--name", out["name"])[1]["action"], "nothing_live")

@@ -2,7 +2,7 @@
 # Prints SHK_JOB|<id> lines and exactly one of SHK_CANCELLED, SHK_NONE, SHK_REJECTED <rc>
 # (+ SHK_ERR| lines) or SHK_REFUSED <why>; always exits 0.
 for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
-    case $v in SLURM_CONF) ;; SBATCH_*|SQUEUE_*|SACCT_*|SLURM_*) unset "$v" ;; esac
+    case $v in SLURM_CONF) ;; SBATCH_*|SQUEUE_*|SACCT_*|SCANCEL_*|SLURM_*) unset "$v" ;; esac
 done
 u=$(id -un)
 live=$(squeue -h -u "$u" --name="$1" -o "%i" </dev/null) || { printf "SHK_REFUSED squeue\n"; exit 0; }
