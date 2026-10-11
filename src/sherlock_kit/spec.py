@@ -3,7 +3,8 @@
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
 partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
 the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
-script_unreadable) for bad grammar, an unreadable script or one over 1 MiB.
+script_unreadable) for bad memory, time or array grammar, an unreadable script or one over
+1 MiB. Values Slurm checks itself (--constraint, --signal, --after-ok) go to sbatch unchanged.
 """
 
 from __future__ import annotations
@@ -26,17 +27,11 @@ from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, ShkError
 SCRIPT_LIMIT = 1 << 20  # bytes
 ARRAY_MAX_TASKS = 1000  # Sherlock max_array_tasks (2026-10-10); indices are 0..count-1
 NAME = re.compile(r"shk\.[a-z0-9][a-z0-9-]{0,23}\.[a-z0-9-]{1,20}\.[0-9a-f]{10}")
-TEXT = re.compile(r"[^\x00-\x1f\x7f]{1,128}")  # --task and --campaign
 RUN_DIR = re.compile(r"/[A-Za-z0-9_./-]+")
 MEMORY = re.compile(r"([1-9][0-9]*)([MG])", re.IGNORECASE)
 DURATION = re.compile(r"([1-9][0-9]*)([hm])")
 CLOCK_TIME = re.compile(r"([0-9]+):([0-5][0-9]):([0-5][0-9])")
 ARRAY = re.compile(r"([0-9]+)(?:%([0-9]+))?")
-OPTION_GRAMMAR = {
-    "constraint": re.compile(r"[A-Za-z0-9_.:-]+(?:[&|][A-Za-z0-9_.:-]+)*"),
-    "signal": re.compile(r"(?:B:)?(?:USR1|USR2|TERM)@[1-9][0-9]*"),
-    "after-ok": re.compile(r"[1-9][0-9]*(?:_[0-9]+)?"),
-}
 # #SBATCH options that shk sets on the command line or that would bypass the profile.
 DENIED_LONG = (
     "account",
@@ -50,18 +45,21 @@ DENIED_LONG = (
     "job-name",
 )
 DENIED_SHORT = "AxGpadbJ"  # -b is --begin
-FLAGS_WITHOUT_VALUE = "HhOQsuvVW"  # sbatch short flags that may be bundled before another one
 HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: one name, many jobs
 
 
 @dataclass(frozen=True)
 class Array:
+    """--array N%M: count tasks (indices 0..count-1), at most throttle at a time."""
+
     count: int
     throttle: int | None
 
 
 @dataclass(frozen=True)
 class Resources:
+    """The checked resources of one submission."""
+
     partition: str
     cpus: int
     tasks: int
@@ -77,6 +75,8 @@ class Resources:
 
 @dataclass(frozen=True)
 class Spec:
+    """What submit sends: name, run directory, sbatch argv, script and the frozen document."""
+
     name: str
     run_dir: str
     argv: list[str]
@@ -92,6 +92,7 @@ class Spec:
 
 
 def canonical(value: Any) -> str:
+    """Compact JSON with sorted keys: the job-name hash input and the staged spec."""
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
@@ -100,9 +101,9 @@ def _invalid(message: str) -> ShkError:
 
 
 def checked_text(label: str, value: str) -> str:
-    """A --task or --campaign value: 1-128 printable characters."""
-    if not TEXT.fullmatch(value):
-        raise _invalid(f"--{label} must be 1-128 printable characters")
+    """A --task or --campaign value, which must not be empty (an unset shell variable)."""
+    if not value:
+        raise _invalid(f"--{label} must not be empty")
     return value
 
 
@@ -180,20 +181,16 @@ def directives(script: bytes) -> list[str]:
 
 
 def denied(word: str) -> bool:
-    """Whether one #SBATCH word sets a denylisted option (-pgpu, -Hp, --part=gpu, --gpus=1) or
-    starts a heterogeneous job component.
+    """Whether one #SBATCH word sets an option shk owns or starts a hetjob component.
+
+    For example -p, -pgpu, --partition=gpu and --gpus-per-node=1 are denied.
     """
     if word in HETJOB_SEPARATORS:
         return True
-    if word.startswith("--"):  # getopt_long also accepts unambiguous prefixes such as --part
+    if word.startswith("--"):
         option = word[2:].partition("=")[0]
-        if not option:
-            return False
-        return option.startswith("gpus") or any(name.startswith(option) for name in DENIED_LONG)
-    if word.startswith("-"):
-        flags = word[1:].lstrip(FLAGS_WITHOUT_VALUE)
-        return bool(flags) and flags[0] in DENIED_SHORT
-    return False
+        return option.startswith("gpus") or option in DENIED_LONG
+    return len(word) > 1 and word[0] == "-" and word[1] in DENIED_SHORT
 
 
 def read_script(path: str) -> bytes:
@@ -217,14 +214,6 @@ def read_script(path: str) -> bytes:
     return data
 
 
-def _check_option_grammar(args: argparse.Namespace) -> None:
-    values = [("constraint", args.constraint), ("signal", args.signal)]
-    values += [("after-ok", job) for job in args.after_ok]
-    for flag, value in values:
-        if value is not None and not OPTION_GRAMMAR[flag].fullmatch(value):
-            raise _invalid(f"--{flag} {value!r} does not match {OPTION_GRAMMAR[flag].pattern}")
-
-
 def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resources:
     """Checked resources; GPUs and requeue follow the profile (requeue defaults to it)."""
     if args.cpus < 1 or args.tasks < 1 or args.gpus < 0:
@@ -238,7 +227,6 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
         raise ShkError(
             EXIT_REFUSED, "requeue_not_allowed", f"partition {profile.name} does not allow requeue"
         )
-    _check_option_grammar(args)
     return Resources(
         partition=profile.name,
         cpus=args.cpus,
@@ -317,7 +305,6 @@ def git_state(root: Path | None) -> dict[str, Any] | None:
 def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spec:
     """All offline checks of shk submit, then the sbatch argv and the frozen spec document."""
     project = config.project
-    assert project is not None, "the submit handler requires project before building"
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
     profile = partitions.profile(args.partition)
