@@ -1,5 +1,63 @@
 # Changelog
 
+## 0.4.0
+
+**Breaking.** A lean rewrite: one small standard-library package, `shk`, with
+Slurm as the only source of truth and no local or remote state of its own. Job
+names derive from the logical task (`shk.<project>.<task slug>.<hash>`), so a
+retry reuses the name and deduplication reads `squeue` and `sacct`. Remote work
+runs as fixed POSIX `sh` programs over the existing OpenSSH control masters, and
+`shk` never logs in. Python shrinks from about 3,600 lines to under 1,500.
+
+- Removed: the attempt registry on Sherlock and its `registry_root`, attempt ids,
+  `reconcile` with `--acknowledge-preemption` and `--abandon`, the private
+  configuration file, borrowed-partition grants, the guard hooks and their
+  adapters, the pin, projection and identity machinery (`shk policy`,
+  `build_identity.json`, `SHERLOCK.md`), the frozen launcher and its state root
+  (`SHERLOCK_KIT_STATE_ROOT`, `~/.local/share/sherlock-kit`), the authentication
+  cooldown, the query cache and the JSON fetch manifest with producer digests.
+  0.3.0 names (`shk-<hex>`) cannot collide with 0.4.0 names; 0.4.0 never reads
+  the old registry.
+- New: `[tool.sherlock-kit]` project configuration in `pyproject.toml` (or
+  `sherlock-kit.toml`), discovered upward until a directory you do not own;
+  `shk submit` with `--task`, `--resubmit REASON` and `--dry-run`; `shk status`
+  by task, name or `--all` with `next_check_after`; `shk cancel` for one name;
+  `shk push` and `shk pull` with a `SHA256SUMS` manifest (`shk manifest DIR`), an
+  optional project validator and a receipt beside the destination;
+  `shk rules {workstation,cluster}`; `shk install-skill`; `bin/shk` (mode
+  100755), a stdlib-only entry point that dotfiles links from its submodule.
+- Transport: `ssh -O check` before every dial, exit 4 `auth_required` (open the
+  master) or `unavailable` (fix `~/.ssh/config`) without one; dials are mux-only
+  with `-oProxyCommand=false`. On Sherlock the local executor runs the same
+  programs and `push`/`pull` are refused.
+- Partitions: the ten profiles carry over; listing is the authorization fact,
+  borrowed partitions need `--courtesy-ack`, and the possu window and btrippe
+  budget are courtesy text. `#SBATCH` lines may set anything except the
+  directives `shk` owns (account, exclude, GPUs, partition, array, dependency,
+  begin, job name).
+- Rules and skill: `src/sherlock_kit/data/rules/workstation.md` and `cluster.md`,
+  rewritten from the Sherlock site files read on 2026-10-10 (purge evasion is
+  account termination on the first occurrence; no agent module is named), and
+  one `sherlock-kit` skill for Claude Code and Codex.
+- Documentation: `docs/design.md`, `docs/sherlock-policy.md` and
+  `docs/validation/observed-slurm.md` replace the 0.3.0 guides.
+
+| 0.3.0 | 0.4.0 |
+|---|---|
+| `shk policy`, `shk policy --projection` | `shk rules workstation`, `shk rules cluster` |
+| `shk policy --identity` | `shk --version` |
+| `shk submit --config private.json --spec attempt.json [--apply]` | `shk submit --task T --script FILE --partition P --cpus N --mem SIZE --time DUR [--dry-run]` |
+| retry naming `parent_attempt` | `shk submit ... --resubmit "<reason>"` |
+| `shk status --attempt ID`, `shk reconcile --attempt ID` | `shk status --task T` or `--name NAME` |
+| `shk status --all`, `shk reconcile --all` | `shk status --all` |
+| `reconcile --acknowledge-preemption`, `reconcile --abandon` | none: nothing is recorded; report the anomaly, then `--resubmit` |
+| `shk occupancy --config private.json --partition P` | `shk occupancy --partition P` |
+| `shk fetch ... --manifest M --destination D`, `fetch --local` | `shk pull REMOTE LOCAL [--validate NAME]` |
+| JSON manifest with producer digests | `SHA256SUMS` (`shk manifest DIR` or `sha256sum`) |
+| private configuration, grants | `[tool.sherlock-kit]`, `--courtesy-ack` |
+| `shk guard`, plugin and `sherlock-kit-operate` skills | the `sherlock-kit` skill, `shk install-skill` |
+| pinned frozen install and launcher | a pip install in the project environment, or the dotfiles submodule `bin/shk` |
+
 ## 0.3.0
 
 Slurm as the source of truth, job arrays and the full partition table. The local

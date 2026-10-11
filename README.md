@@ -2,90 +2,165 @@
 
 [![CI](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml)
 
-Shared Sherlock operational policy, bounded OpenSSH transport, read-only
-diagnostics, typed submission/reconciliation on packaged partition profiles
-through an attempt registry on Sherlock, and verified artifact transfer. Python
-3.11+, POSIX for orchestration, OpenSSH, and rsync for transfers.
+`shk` is a small command-line interface for agents (and people) that submit and
+track Slurm jobs, move data and read partition occupancy on Stanford's Sherlock
+cluster, from a workstation over OpenSSH or on Sherlock itself. It is one
+standard-library Python package (3.11+) plus fixed POSIX `sh` programs that run
+on the login node. Slurm is the only source of truth: a job's name is derived
+from its logical task, and `shk` keeps no local state, cache or ledger.
 
-Read [SHERLOCK.md](SHERLOCK.md) before operating Sherlock. The toolkit does not
-authorize resources, infer borrowed access, enforce arbitrary shell scripts or
-certify scientific results.
+`shk` does not authorize resources, infer borrowed access, police what a job
+script does or certify scientific results. The operating rules for agents ship
+with the package (`shk rules workstation`, `shk rules cluster`); Sherlock's own
+`/etc/agents/AGENTS.md` takes precedence over them.
 
-## Install and start
+## Install
 
-Install a reviewed **full 40-character commit**, rather than a moving branch or
-an editable checkout, into a dedicated environment:
+`shk --version` prints `sherlock-kit 0.4.0 (FORM)`, where FORM names the install:
 
-```sh
-python3 -m venv /path/to/sherlock-kit-venv
-/path/to/sherlock-kit-venv/bin/python -m pip install \
-  'git+https://github.com/FridrichMethod/sherlock-kit.git@FULL_COMMIT_SHA'
-/path/to/sherlock-kit-venv/bin/shk policy --identity
-/path/to/sherlock-kit-venv/bin/shk policy
-/path/to/sherlock-kit-venv/bin/shk doctor
+| Form | How | FORM |
+|---|---|---|
+| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.4.0'`, or a uv source with `tag = "v0.4.0"` | `git <commit>` |
+| Dotfiles submodule | dotfiles carries this repository as a submodule and links its `bin/shk` to `~/.local/bin/shk`; `bin/shk` is a stdlib-only entry point that runs the submodule's source | `submodule <path>` |
+| Editable | `pip install -e <path>` into an environment you choose; it follows that tree | `editable <path>` |
+
+A wheel or path install reports `unknown`; a plain checkout run through `bin/shk`
+reports `source <path>` and is for development only. A project environment's
+`shk` takes precedence over the global one while that environment is active.
+
+```toml
+[tool.uv.sources]
+sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.4.0" }
 ```
 
-Replace the environment path and SHA first. Local doctor writes nothing and
-contacts no remote endpoint. `shk doctor --remote` is an explicit bounded read-only
-inventory using existing authenticated connections; it never submits a probe job
-or executes a shell on the DTN. Authenticate manually when requested.
+On Sherlock, run `shk` with Python 3.11 or newer from a module or a `$GROUP_HOME`
+environment; heavier installs belong in an `sh_dev` session.
 
-For existing [dotfiles integration](https://github.com/FridrichMethod/dotfiles/blob/main/docs/sherlock-kit.md),
-use its pinned installer and stable launcher. It projects the same policy into
-both clients' real global instructions. Normal Stow and shell startup do not
-install dependencies.
+## Quick start
 
-## Use
+`shk` never logs in. Open the control and data masters yourself first
+(`ssh sherlock-plain`, `ssh -fN sherlock-dtn`); `~/.ssh/config` needs
+`ControlMaster auto`, `ControlPersist yes` and `ControlPath ~/.ssh/%C` for both
+aliases. Then add the project configuration and work from the project directory:
 
-- [Installation and configuration](docs/installation.md): immutable identity,
-  the local cache root and the registry root, standalone Python API and agent
-  delivery.
-- [Typed operations](docs/orchestration.md): private consumer configuration,
-  partition profiles, single jobs and job arrays, submit preview/apply,
-  status/reconciliation of one attempt or `--all`, acknowledging or abandoning
-  one attempt, partition occupancy and manifest-bound fetch.
-- [Optional guard](docs/guard.md): narrow patterns, one registration owner,
-  actual client trust and failure behavior.
-- [Maintenance](docs/maintenance.md): updates, local and remote runtime state,
-  upgrading from 0.2.0, recovery, artifact retention and release checklist.
-- [Acceptance evidence](docs/validation/acceptance.md): real CPU and GPU pilots
-  and actual client checks; [synthetic consumer](tests/fixtures/consumer/README.md)
-  provides an offline first-day example.
+```toml
+[tool.sherlock-kit]
+project = "demo"
+remote_root = "/scratch/users/USER/demo"
 
-Supported orchestration is one Slurm allocation per attempt, a single job or a
-job array of 2 to 1000 tasks, on a packaged partition profile (`shk policy`
-lists them: public `normal`, `bigmem`, `gpu`, `dev` and `service`, department
-`bioe` and `stat`, borrowed `btrippe` and `possu`, preemptible `owners`). Slurm
-requeue is emitted only where the profile allows it, and a requeued script must
-checkpoint and resume on its own. The only durable attempt state is an attempt
-registry on Sherlock (`registry_root`, shared by every campaign) plus Slurm
-accounting: the registry program travels with every call, so any POSIX
-workstation with the frozen toolkit and the private configuration can operate,
-and the workstation keeps nothing but the authentication cooldown and a 60 s
-query cache under an explicit private root. Distributed controllers and general
-DDP recovery are not supported. Workload source/runtime/input identities,
-authorized storage and the scientific validator are explicit consumer inputs.
-`shk occupancy` reports a borrowed partition's current use before a courtesy
-submission and gates nothing; `status`/`reconcile --all` cover many open attempts
-in one bounded query. An unknown submission outcome is resolved by its job name
-from the registry and accounting, never by an automatic retry; a retry of a
-logical task must name its `parent_attempt` and is admitted only once the parent
-is released. An unexpected preemption on a non-preemptible partition blocks
-until an operator acknowledges it, and an attempt that never reached accounting
-can be abandoned only after a fresh check on the login node. Fetch checks exact
-inventory, bytes and validator identity before atomic promotion and keeps an
-attempt sidecar beside the bundle, so local recovery can finish a durable
-receipt without network access.
+[tool.sherlock-kit.validators]
+bundle = ["python", "-m", "demo.validate_bundle"]
+```
 
-The 0.1.0 CPU pilot, the 0.2.0 owners/btrippe GPU pilot and the 0.3.0 registry
-and array CPU pilot are recorded in the acceptance evidence; lost replies,
-`--abandon` and natural preemption handling remain offline-tested.
+```sh
+shk doctor                  # offline: Python, ssh, rsync, config, both ssh masters
+shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m --dry-run
+shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m
+shk status --task smoke     # at least 60 s apart; the reply says when (next_check_after)
+shk pull /scratch/users/USER/demo/runs/NAME/out results/smoke --validate bundle
+```
 
-Guard and skill adapters call the same installed toolkit. A file's presence does
-not prove active registration, current trust or enforcement; doctor reports those
-properties as unverified. Production hooks remain opt-in.
+The job writes `out/SHA256SUMS` as its last step (`shk manifest out`, or
+`sha256sum` over the files); `shk pull` verifies every file against it before
+the copy appears under `results/`.
 
-Development and checks: [CONTRIBUTING.md](CONTRIBUTING.md). Release changes:
+## Commands
+
+```text
+shk [--project-dir DIR] [--executor auto|ssh|local] <command>
+shk --version
+shk doctor [--remote]
+shk rules {workstation,cluster}
+shk install-skill --project DIR [--client claude|codex|all] [--rules workstation|cluster] [--check] [--force]
+shk occupancy --partition P [--partition P ...]
+shk submit --task T [--campaign C] --script FILE --partition P --cpus N --mem SIZE --time DUR
+           [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--signal S] [--requeue|--no-requeue]
+           [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--dry-run]
+shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all) [--since DAYS]
+shk cancel (--task T [--campaign C] | --name NAME)
+shk push LOCAL REMOTE [--anywhere]
+shk pull REMOTE LOCAL [--validate NAME] [--replace]
+shk manifest DIR
+```
+
+- Operational commands print one JSON document on stdout; `rules` and `--version`
+  print text. `shk <command> --help` is the authoritative flag list.
+- `submit`: the job name is `shk.<project>.<task slug>.<hash of project, campaign,
+  task>`. One read call decides `new`, `live`, `done`, `failed` or `stale`; a live
+  name is always refused, a finished one unless `--resubmit REASON`. Then one
+  mutation call stages the script under `<run-dir>/.shk/` and runs `sbatch`.
+  Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`, `--array
+  N%M` with 2 to 1000 tasks. `--dry-run` is offline.
+- `status`: one `squeue` and one `sacct` for all selected names; `--since`
+  defaults to 30 days (7 with `--all`). `cancel` cancels the jobs of one name.
+- `push` rsyncs through the DTN into an absolute REMOTE under `remote_root`
+  (`--anywhere` lifts that) and never deletes. `pull` copies exactly the files
+  in `REMOTE/SHA256SUMS` into a private stage, verifies them, runs the optional
+  validator and renames the stage onto LOCAL with a receipt beside it.
+- `occupancy` lists current use of partitions; borrowed partitions need it and
+  `--courtesy-ack` before a submission.
+- `install-skill` copies the agent skill into a project (`.claude/skills/` and
+  `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/`;
+  `--check` exits 1 when a copy is missing or stale.
+
+## Configuration
+
+`[tool.sherlock-kit]` in `pyproject.toml`, else the top level of
+`sherlock-kit.toml`, found with `--project-dir DIR` (exactly that directory) or
+by walking up from the working directory until a directory you do not own.
+Unknown keys are errors; nothing secret belongs here.
+
+| Key | Default | Used by |
+|---|---|---|
+| `project` | none; `^[a-z0-9][a-z0-9-]{0,23}$` | `submit`, `status`, `cancel` |
+| `remote_root` | none; absolute, no `..` | `submit`, `push`, `pull` |
+| `control_host` | `sherlock-plain` | every remote call |
+| `data_host` | `sherlock-dtn` | `push`, `pull` |
+| `connect_timeout`, `command_timeout`, `transfer_timeout` | 15, 60, 3600 s | ssh and rsync |
+| `[tool.sherlock-kit.validators]` | none; `NAME = ["argv", ...]` | `pull --validate NAME` (gets the stage directory) |
+
+`doctor`, `rules` and `occupancy` work without a configuration. On Sherlock
+(`sh<N>-ln<N>` login nodes, `SLURM_CLUSTER_NAME=sherlock`, a compute node inside a
+job, or `SHK_EXECUTOR=local`) the same programs run locally and `push` and `pull`
+are refused.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | ok |
+| 1 | local error: configuration, spec, verification, validator, malformed reply |
+| 2 | usage error |
+| 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, Slurm rejected the job, push or pull on Sherlock |
+| 4 | Sherlock unreachable without a new login: `auth_required` (open the master) or `unavailable` (fix `~/.ssh/config`) |
+| 5 | outcome unknown after a dispatched mutation: run `shk status`, at least 60 s later |
+| 6 | status ok, but the newest job of a requested name has an anomaly |
+
+Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
+
+## Agents
+
+- Rules: `src/sherlock_kit/data/rules/workstation.md` (agents on a workstation)
+  and `cluster.md` (agents on Sherlock), at most 7 KiB each, each ending with the
+  partition profiles generated from `data/partitions.json`.
+- Skill: `src/sherlock_kit/data/skills/sherlock-kit/SKILL.md`, for Claude Code and
+  Codex alike.
+- Global delivery: dotfiles links both into `~/.claude/rules/`, `~/.claude/skills/`
+  and `~/.agents/skills/`. Per project: `shk install-skill --project .`.
+
+## Development
+
+```sh
+python3 tests/run_suite.py
+```
+
+The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` and
+`dash`. A skipped test fails the run when `CI` or `SHK_REQUIRE_ALL` is set.
+`SHK_BUILD_PYTHON` (an interpreter with `setuptools>=77` and `wheel`) enables the
+sdist, wheel and editable-install checks, which build committed `HEAD`. See
+[CONTRIBUTING.md](CONTRIBUTING.md), [docs/design.md](docs/design.md),
+[docs/sherlock-policy.md](docs/sherlock-policy.md),
+[observed Slurm behavior](docs/validation/observed-slurm.md) and
 [CHANGELOG.md](CHANGELOG.md).
 
 Licensed under [MIT](LICENSE).

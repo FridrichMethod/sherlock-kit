@@ -1,53 +1,68 @@
 # Contributing
 
-Read [SHERLOCK.md](SHERLOCK.md), [AGENTS.md](AGENTS.md) and the relevant operation
-guide. Keep changes small; preserve user changes and scientific boundaries.
-Concurrent writers use separate Git worktrees/branches. Reviewers are read-only.
-Commits do not include agent attribution.
+Read [AGENTS.md](AGENTS.md), [README.md](README.md) and [docs/design.md](docs/design.md)
+first. Keep changes small and preserve other people's work. Commits use
+conventional messages (`feat:`, `fix:`, `docs:`, `test:`, ...), stage files by
+explicit path and carry no agent attribution.
 
-## Local checks
+## Checkouts and worktrees
 
-Ordinary tests require no credentials, live Sherlock allocation or GPU. They use
-real local processes, filesystem durability and rsync, and they execute the real
-registry program against a temporary registry with fake `sbatch`/`sacct`/`squeue`
-binaries that return explicitly synthetic scheduler responses. Install system
-`rsync`, then create an isolated packaging environment:
+The owner's development checkout lives at `~/data/repos/sherlock-kit`. It is a
+working copy only: never install from it, link to it or point a project at it;
+installs come from a tag, the dotfiles submodule or an editable install of a tree
+you chose (see the README). Concurrent writers each use their own branch and Git
+worktree (for example `.worktrees/<name>`, ignored by Git); reviewers are
+read-only. Only the lead merges to `main` and tags releases.
+
+## Checks
+
+Ordinary tests need no credentials, no Sherlock connection and no GPU. They run
+the real remote `sh` programs locally through a fake `ssh`, fake Slurm binaries
+and real `rsync`. Install `rsync`, `shellcheck` and `dash`, then:
 
 ```sh
 python3 -m venv .venv-build
 .venv-build/bin/python -m pip install 'setuptools>=77' wheel
-SHERLOCK_KIT_BUILD_PYTHON="$PWD/.venv-build/bin/python" \
-  python3 -m unittest discover -s tests -v
+SHK_BUILD_PYTHON="$PWD/.venv-build/bin/python" SHK_REQUIRE_ALL=1 python3 -B tests/run_suite.py
+shellcheck -s sh src/sherlock_kit/data/remote/*.sh
 git diff --check
 ```
 
-Set `SHERLOCK_KIT_BUILD_PYTHON` to include archive/wheel/isolated-install checks.
-Without it the packaging test is skipped, so that run alone is not a release
-check. CI runs the complete suite on supported minimum/current Python versions.
-Python development imports may use `PYTHONPATH=src`; production is frozen.
+- Run the suite on the oldest and newest supported Pythons (3.11 and 3.14; CI runs
+  both). With `CI` or `SHK_REQUIRE_ALL` set, any skip fails the run; without
+  `SHK_BUILD_PYTHON` the packaging tests skip, so that run is not a release check.
+- The packaging tests build committed `HEAD` (`git archive`), not the working tree:
+  commit first, then rerun on the clean revision.
+- Use `python3 -B` (or `PYTHONDONTWRITEBYTECODE=1`) so no `__pycache__` lands in
+  a tree that rsync or the dotfiles submodule would see. `python3 -I` ignores
+  `PYTHONPATH`; use `PYTHONPATH=src python3 -B -m sherlock_kit` for repository code.
 
-The packaging test builds committed `HEAD`, not uncommitted changes. After a
-commit or integration, rerun the complete command on the resulting clean revision.
-A direct wheel build refuses dirty tracked files. Build/install work happens in
-isolated environments, never during shell startup.
+## Boundaries
 
-## Behavioral boundaries
+- Python is standard library only and runs on 3.11 to 3.14 (no newer syntax or
+  APIs). The package stays small: about 1,250 lines of Python, hard cap 1,500
+  (`wc -l src/sherlock_kit/*.py bin/shk`).
+- Remote programs under `src/sherlock_kit/data/remote/` are fixed POSIX `sh`,
+  passed literally and linted with `shellcheck -s sh`; they print only `SHK_`
+  lines and sanitize `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*`.
+- Contract paths: `src/sherlock_kit/data/rules/workstation.md`,
+  `src/sherlock_kit/data/rules/cluster.md`,
+  `src/sherlock_kit/data/skills/sherlock-kit/SKILL.md` and `bin/shk` (mode
+  100755). dotfiles links them; renaming one is a breaking change that needs a
+  coordinated dotfiles change. Symlinks in the repository are relative.
+- The rules files start with an H2, have no front matter, HTML comments, `@`
+  imports or relative links, stay within 7 KiB, and mention only released CLI.
+  The skill's front matter holds `name` and `description` only.
+- `partitions.json` is the only partition source. After changing it, paste the
+  output of
+  `PYTHONPATH=src python3 -B -c "from sherlock_kit.partitions import markdown; print(markdown(), end='')"`
+  over the `### Partition profiles` block at the end of both rules files.
+- Re-read Sherlock's `/etc/agents/*.md` before changing the rules, update the
+  "Reviewed" date and [docs/sherlock-policy.md](docs/sherlock-policy.md).
+- Never commit runtime state, private configuration, credentials, research code
+  or data. Public examples use synthetic paths and names.
+- Live work on Sherlock needs explicit authorization, a named workload and CPU
+  only: never submit GPU work while developing or testing this repository.
 
-Add meaningful tests for changed admission, uncertainty, cost, identity, query
-cadence, registry files, validators or transfer durability. `sherlock_registry`
-is shipped to the login node as its own source: keep it standard-library only,
-free of sibling imports and under 100,000 bytes, and keep its duplicated
-constants equal to `sherlock_orchestration`'s. Preserve the distinction between
-scheduler completion, execution receipts, artifacts and scientific validation.
-Do not claim exactly-once execution or distributed locking. Document unsupported
-capabilities explicitly rather than introducing stub commands.
-
-Never commit runtime state (registries, query caches, cooldown files), private
-configurations/grants, credentials, research source/data or client rollouts.
-Public examples use synthetic paths. Never use real historical campaigns for
-failure injection. New live work requires an explicit workload, namespace and
-authorization, and never a GPU while developing or testing this repository.
-
-Report sensitive issues privately to the repository owner through a trusted
-channel; do not put secrets or private reproductions in public issues.
-Release preparation is described in [maintenance](docs/maintenance.md).
+Report sensitive issues privately to the repository owner; never put secrets or
+private reproductions in public issues.
