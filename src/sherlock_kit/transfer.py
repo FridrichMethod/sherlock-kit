@@ -114,10 +114,6 @@ def parse_manifest(text: str) -> dict[str, str]:
     return entries
 
 
-def _sums_text(pairs: Iterable[tuple[str, str]]) -> str:
-    return "".join(f"{digest}  {name}\n" for digest, name in pairs)
-
-
 def _digest(path: Path) -> str:
     with open(path, "rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -511,7 +507,7 @@ def manifest(args: argparse.Namespace, _ctx: Context) -> Outcome:
         else:
             skipped.append(path)  # symlinks and special files, as `find -type f` leaves them out
     names = sorted(files)
-    text = _sums_text((_digest(root / name), name) for name in names)
+    text = "".join(f"{_digest(root / name)}  {name}\n" for name in names)
     temporary = root / f"{RESERVED_PREFIX}-{SUMS}"
     temporary.write_text(text, encoding="utf-8")
     os.replace(temporary, root / SUMS)
