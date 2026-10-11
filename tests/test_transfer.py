@@ -66,7 +66,7 @@ class ManifestParseTests(unittest.TestCase):
     def test_each_refusal_names_the_broken_rule(self):
         cases = [
             ("", "lists no files"),
-            (f"\\{H}  a\\nb\n", "want '<64 hex"),
+            (f"\\{H}  a\\nb\n", "rename the file"),
             (f"{H}  /abs\n", "absolute"),
             (f"{H}  ../x\n", "'..'"),
             (f"{H}  a/../b\n", "'..'"),

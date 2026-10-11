@@ -82,6 +82,11 @@ def _check_name(where: str, name: str) -> None:
 
 
 def _parse_line(where: str, line: str) -> tuple[str, str]:
+    if line.startswith("\\"):  # sha256sum's escaped form: the fix is the file name, not the line
+        raise _invalid(
+            f"{where}: sha256sum escaped this name because it holds a backslash or a newline; "
+            "rename the file"
+        )
     match = SUMS_LINE.fullmatch(line)
     if match is None:
         raise _invalid(f"{where}: want '<64 hex digits>  <path>' as sha256sum writes it")
