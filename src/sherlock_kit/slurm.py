@@ -225,8 +225,9 @@ def parse_rows(queue: list[str], acct: list[str], keep: Callable[[str], bool]) -
             name = values[-1]
             if not keep(name):
                 continue
+            found = by_name.setdefault(name, [])  # listed even when none of its rows parse
             try:
-                by_name.setdefault(name, []).append(_row(dict(zip(fields, values, strict=True))))
+                found.append(_row(dict(zip(fields, values, strict=True))))
             except ValueError:
                 malformed[name] += 1
     return Rows(by_name, malformed, truncated=len(acct) > MAX_ROWS)
@@ -375,9 +376,16 @@ def resolve_name(rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | N
 
 
 def _resolve(read: Read, rows: Rows, name: str) -> dict[str, Any]:
+    """resolve_name() for one listed name; exit 1 when Slurm has rows of it but none parse, since
+    the name is then neither new nor anything shk can show (for example hetjob ids N+k)."""
+    found = rows.by_name.get(name, [])
+    if rows.malformed[name] and not found:
+        raise ShkError(EXIT_LOCAL, "malformed_read",
+                       f"{name}: none of its {rows.malformed[name]} Slurm rows could be read",
+                       hint="shk cannot tell whether it is new, live or finished; "
+                       "look once with sacct --name and report it")
     malformed = rows.malformed[name] + rows.malformed[None]
-    return resolve_name(rows.by_name.get(name, []), read.spec_files.get(name, 0),
-                        read.specs.get(name), malformed)
+    return resolve_name(found, read.spec_files.get(name, 0), read.specs.get(name), malformed)
 
 
 # ---------------------------------------------------------------- occupancy

@@ -261,6 +261,34 @@ class StatusCancelOccupancyFlows(Flow):
                          "unknown_partition")
 
 
+class CannedReplyFlows(Flow):
+    """Remote replies the fake Slurm cannot produce, handed straight to the handlers."""
+
+    def setUp(self):
+        super().setUp()
+        self.replies = []
+
+        def run_program(*_args, **_kwargs):
+            return executor.Result("complete", self.replies.pop(0))
+        patcher = patch.object(executor, "run_program", run_program)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_name_with_only_unreadable_rows_is_never_new(self):
+        name = spec.job_name("demo", "default", "train-a")
+        hetjob = [f"SHK_A|4242+{k}|COMPLETED|normal|60|2|cpu=2|2026-10-10T12:00:00|0|0:0|{name}"
+                  for k in range(2)]
+        read = "\n".join(["SHK_USER u", *hetjob, "SHK_RC squeue 0", "SHK_RC sacct 0", "SHK_END"])
+        for argv in (("submit", "--task", "train-a", "--script", str(self.tmp / "job.sh"),
+                      "--partition", "normal", "--cpus", "1", "--mem", "2G", "--time", "20m"),
+                     ("status", "--task", "train-a"), ("status", "--all")):
+            with self.subTest(argv=argv[:2]):
+                self.replies[:] = [read]
+                code, out = self.shk(*argv)
+                self.assertEqual((code, out["error"], self.replies), (1, "malformed_read", []))
+                self.assertIn(name, out["message"])
+
+
 class SshFlow(Flow):
     executor = "ssh"
 
