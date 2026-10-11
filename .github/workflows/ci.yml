@@ -23,14 +23,16 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install local transfer dependency
+      - name: Install rsync, shellcheck and dash
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends rsync
+          sudo apt-get install --yes --no-install-recommends rsync shellcheck dash
       - name: Create isolated packaging interpreter
         run: |
           python -m venv .venv-build
           .venv-build/bin/python -m pip install 'setuptools>=77' wheel
-          echo "SHERLOCK_KIT_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
-      - name: Run full offline suite and require packaging checks
+          echo "SHK_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
+      - name: Lint remote POSIX sh programs
+        run: shellcheck -s sh src/sherlock_kit/data/remote/*.sh
+      - name: Run full offline suite (skips fail under CI)
         run: python tests/run_suite.py

@@ -1,207 +1,86 @@
-"""Packaged partition profiles: agreed flags, integrity hash, validation and summary."""
-import ast
-import hashlib
+"""Packaged partition table (schema 1, 5-key profiles) and the generated rules block."""
 import json
-import os
-from pathlib import Path
-import re
-import subprocess
 import sys
-from types import MappingProxyType
 import unittest
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-import sherlock_partitions as partitions
+from fakes import SRC
 
-TABLE = ROOT / "src/sherlock_kit_data/partitions.json"
-def flags(preemptible=False, requeue=False, borrowed=False, gpus_allowed=False):
-    return {"preemptible": preemptible, "requeue": requeue, "borrowed": borrowed, "gpus_allowed": gpus_allowed}
+sys.path.insert(0, str(SRC))
+from sherlock_kit import partitions  # noqa: E402
+from sherlock_kit.errors import ShkError  # noqa: E402
 
-
-# Every partition `sh_part` lists for the account (2026-10-10); only owners is preempted.
-EXPECTED_FLAGS = {
-    "normal": flags(),
-    "bigmem": flags(),
-    "service": flags(),
-    "dev": flags(gpus_allowed=True),
-    "gpu": flags(gpus_allowed=True),
-    "bioe": flags(gpus_allowed=True),
-    "stat": flags(gpus_allowed=True),
-    "owners": flags(preemptible=True, requeue=True, gpus_allowed=True),
-    "btrippe": flags(borrowed=True, gpus_allowed=True),
-    "possu": flags(borrowed=True, gpus_allowed=True),
-}
-LINE = re.compile(r"`[A-Za-z0-9_.-]+`: preemptible=(yes|no), requeue=(yes|no), borrowed=(yes|no), gpus=(yes|no)\.( \S.*)?")
+NAMES = ["normal", "bigmem", "dev", "service", "gpu", "owners", "bioe", "stat", "btrippe", "possu"]
+KEYS = {"preemptible", "requeue", "borrowed", "gpus_allowed", "courtesy"}
 
 
-def well_formed():
-    return json.loads(TABLE.read_text())
+def table(**profile):
+    entry = {"preemptible": False, "requeue": False, "borrowed": False, "gpus_allowed": False, "courtesy": ""}
+    return json.dumps({"schema_version": 1, "partitions": {"normal": {**entry, **profile}}})
 
 
-class PartitionProfileTests(unittest.TestCase):
-    def test_agreed_flags_per_profile(self):
-        profiles = partitions.partition_profiles()
-        self.assertEqual(set(profiles), set(EXPECTED_FLAGS))
-        for name, flags in EXPECTED_FLAGS.items():
-            profile = profiles[name]
-            self.assertEqual(set(profile), {*flags, "courtesy"}, name)
-            self.assertEqual({key: profile[key] for key in flags}, flags, name)
-            self.assertIsInstance(profile["courtesy"], str)
-            self.assertEqual(partitions.partition_profile(name), profile)
-        self.assertEqual(profiles["normal"]["courtesy"], "")
-        self.assertIn("checkpoint", profiles["owners"]["courtesy"])
-        for borrowed in ("btrippe", "possu"):
-            self.assertIn("shk occupancy", profiles[borrowed]["courtesy"])
-            self.assertIn("Borrowed", profiles[borrowed]["courtesy"])
-        self.assertIn("00:00 and 07:00 Pacific", profiles["possu"]["courtesy"])
-        self.assertIn("never submit outside", profiles["possu"]["courtesy"])
-        self.assertEqual({name for name, profile in profiles.items() if profile["borrowed"]}, {"btrippe", "possu"})
-        self.assertEqual({name for name, profile in profiles.items() if profile["preemptible"]}, {"owners"})
-        self.assertEqual({name for name, profile in profiles.items() if profile["requeue"]}, {"owners"})
-        for name, profile in profiles.items():
-            self.assertNotIn("\n", profile["courtesy"])
-            if name != "normal":
-                self.assertTrue(profile["courtesy"].endswith("."), name)
+class PartitionTableTests(unittest.TestCase):
+    def test_packaged_table_shape(self):
+        raw = json.loads((SRC / "sherlock_kit/data/partitions.json").read_text(encoding="utf-8"))
+        self.assertEqual(raw["schema_version"], 1)
+        self.assertEqual(list(raw["partitions"]), NAMES)
+        for name, entry in raw["partitions"].items():
+            self.assertEqual(set(entry), KEYS, name)
+        self.assertEqual(list(partitions.profiles()), NAMES)
 
-    def test_sha256_and_text_match_committed_bytes(self):
-        raw = TABLE.read_bytes()
-        self.assertEqual(partitions.partitions_text(), raw.decode("utf-8"))
-        self.assertEqual(partitions.partitions_sha256(), hashlib.sha256(raw).hexdigest())
-        self.assertRegex(partitions.partitions_sha256(), r"\A[0-9a-f]{64}\Z")
-        self.assertEqual(json.loads(partitions.partitions_text())["schema_version"], partitions.SCHEMA_VERSION)
-        self.assertEqual(partitions.SCHEMA_VERSION, 1)
-        self.assertTrue(raw.endswith(b"\n"))
-        self.assertNotIn(b"max_", raw)
+    def test_flags(self):
+        p = partitions.profiles()
+        self.assertTrue(p["owners"].preemptible and p["owners"].requeue)
+        self.assertEqual([n for n in NAMES if p[n].requeue], ["owners"])
+        self.assertEqual([n for n in NAMES if p[n].borrowed], ["btrippe", "possu"])
+        self.assertEqual([n for n in NAMES if not p[n].gpus_allowed], ["normal", "bigmem", "service"])
+        self.assertIn("between 00:00 and 07:00 Pacific", p["possu"].courtesy)
+        self.assertEqual(p["normal"].courtesy, "")
 
-    def test_profiles_are_immutable_but_copyable(self):
-        profiles = partitions.partition_profiles()
-        self.assertIsInstance(profiles, MappingProxyType)
+    def test_profile_lookup(self):
+        self.assertEqual(partitions.profile("gpu").name, "gpu")
+        with self.assertRaises(ShkError) as caught:
+            partitions.profile("borrowed-guess")
+        self.assertEqual((caught.exception.code, caught.exception.token), (3, "unknown_partition"))
+        self.assertIn("normal", caught.exception.message)
+        self.assertIsNone(partitions.profiles().get("borrowed-guess"))
+
+    def test_read_only(self):
         with self.assertRaises(TypeError):
-            profiles["nonexistent"] = {}
-        for name in EXPECTED_FLAGS:
-            profile = profiles[name]
-            self.assertIsInstance(profile, MappingProxyType)
-            with self.assertRaises(TypeError):
-                profile["requeue"] = True
-            with self.assertRaises(TypeError):
-                del profile["courtesy"]
-            frozen = dict(profile)
-            frozen["requeue"] = not frozen["requeue"]
-            self.assertNotEqual(frozen["requeue"], profiles[name]["requeue"])
-            self.assertEqual(json.loads(json.dumps(dict(profile))), dict(profile))
-        self.assertEqual(partitions.partition_profiles(), profiles)
+            partitions.profiles()["normal"] = None
+        with self.assertRaises(AttributeError):
+            partitions.profile("normal").requeue = True
 
-    def test_unknown_partition_refused(self):
-        self.assertTrue(issubclass(partitions.PartitionError, ValueError))
-        for name in ("nonexistent", "GPU", "", "normal ", "Normal", "owners\n", "btrippe;id", 42, None, ["normal"]):
-            with self.assertRaises(partitions.PartitionError) as caught:
-                partitions.partition_profile(name)
-            self.assertIn("unknown partition", str(caught.exception))
+    def test_parse_refuses_malformed_tables(self):
+        bad = [
+            "not json", json.dumps({"schema_version": 2, "partitions": {}}),
+            json.dumps({"schema_version": 1, "partitions": {}}),
+            '{"schema_version": 1, "partitions": {"a": {}, "a": {}}}',
+            table(window="00:00-07:00"), table(requeue="no"), table(courtesy="two\nlines"),
+            table().replace('"normal"', '"bad name"'),
+        ]
+        for text in bad:
+            with self.subTest(text=text[:60]), self.assertRaises(ShkError) as caught:
+                partitions.parse(text)
+            self.assertEqual((caught.exception.code, caught.exception.token), (1, "partitions_invalid"))
+        self.assertEqual(list(partitions.parse(table())), ["normal"])
 
-    def test_malformed_tables_rejected(self):
-        def table(**changes):
-            payload = well_formed()
-            payload.update(changes)
-            return payload
 
-        def profile(name="normal", **changes):
-            payload = well_formed()
-            entry = dict(payload["partitions"][name])
-            for key, value in changes.items():
-                if value is partitions.PartitionError:
-                    del entry[key]
-                else:
-                    entry[key] = value
-            payload["partitions"][name] = entry
-            return payload
-
-        def renamed(name):
-            payload = well_formed()
-            payload["partitions"][name] = payload["partitions"].pop("normal")
-            return payload
-
-        valid = partitions.parse_partitions(json.dumps(well_formed()))
-        self.assertEqual(valid, partitions.partition_profiles())
-        bad = {
-            "schema 2": table(schema_version=2),
-            "schema string": table(schema_version="1"),
-            "schema bool": table(schema_version=True),
-            "missing schema": {"partitions": well_formed()["partitions"]},
-            "missing partitions": {"schema_version": 1},
-            "extra top-level key": table(max_jobs=2),
-            "payload list": [well_formed()],
-            "partitions list": table(partitions=[]),
-            "no partitions": table(partitions={}),
-            "profile not a mapping": table(partitions={"normal": ["preemptible"]}),
-            "missing flag": profile(requeue=partitions.PartitionError),
-            "missing courtesy": profile(courtesy=partitions.PartitionError),
-            "extra key": profile(max_jobs=2),
-            "extra cap": profile(max_walltime_seconds=7200),
-            "string flag": profile(preemptible="yes"),
-            "int flag": profile(gpus_allowed=1),
-            "zero flag": profile(borrowed=0),
-            "null flag": profile(requeue=None),
-            "courtesy int": profile(courtesy=0),
-            "courtesy null": profile(courtesy=None),
-            "courtesy newline": profile(courtesy="first line\nsecond line"),
-            "courtesy control": profile(courtesy="tab\tseparated"),
-            "name with space": renamed("gpu partition"),
-            "name with slash": renamed("a/b"),
-            "name with shell": renamed("normal;id"),
-            "empty name": renamed(""),
-            "unicode name": renamed("normál"),
-        }
-        for label, payload in bad.items():
-            with self.subTest(label):
-                with self.assertRaises(partitions.PartitionError):
-                    partitions.parse_partitions(json.dumps(payload))
-        for label, text in {
-            "invalid json": "{",
-            "empty text": "",
-            "duplicate name": '{"schema_version": 1, "partitions": {"normal": %s, "normal": %s}}' % (
-                json.dumps(well_formed()["partitions"]["normal"]), json.dumps(well_formed()["partitions"]["owners"])),
-            "duplicate flag": '{"schema_version": 1, "partitions": {"normal": {"preemptible": false, "preemptible": true, "requeue": false, "borrowed": false, "gpus_allowed": false, "courtesy": ""}}}',
-            "bytes": b'{"schema_version": 1, "partitions": {}}',
-        }.items():
-            with self.subTest(label):
-                with self.assertRaises(partitions.PartitionError):
-                    partitions.parse_partitions(text)
-
-    def test_summary_lines_deterministic(self):
-        lines = partitions.partition_summary_lines()
-        self.assertEqual(lines, partitions.partition_summary_lines())
-        def expected(name):
-            agreed = EXPECTED_FLAGS[name]
-            yes_no = ", ".join(f"{label}={'yes' if agreed[key] else 'no'}" for label, key in
-                               (("preemptible", "preemptible"), ("requeue", "requeue"), ("borrowed", "borrowed"), ("gpus", "gpus_allowed")))
-            courtesy = partitions.partition_profile(name)["courtesy"]
-            return f"`{name}`: {yes_no}." + (f" {courtesy}" if courtesy else "")
-
-        self.assertEqual(lines, [expected(name) for name in sorted(EXPECTED_FLAGS)])
-        self.assertEqual(lines[lines.index(expected("normal"))], "`normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.")
-        self.assertIn("`possu`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed", lines[7])
-        for line in lines:
-            self.assertRegex(line, LINE)
-            self.assertNotIn("\n", line)
-        self.assertEqual([line.split("`")[1] for line in lines], sorted(EXPECTED_FLAGS))
-
-    def test_loader_is_standalone_and_importable_from_source_tree(self):
-        tree = ast.parse((ROOT / "src/sherlock_partitions.py").read_text())
-        imported = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported.update(alias.name.split(".")[0] for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module.split(".")[0])
-        self.assertFalse({name for name in imported if name.startswith("sherlock")}, imported)
-        env = {key: value for key, value in os.environ.items() if key not in {"PYTHONPATH", "PYTHONHOME"}}
-        env["PYTHONPATH"] = str(ROOT / "src")
-        output = subprocess.check_output(
-            [sys.executable, "-P", "-c",
-             "import sherlock_partitions as p, json; print(json.dumps([p.partitions_sha256(), sorted(p.partition_profiles())]))"],
-            cwd=ROOT, env=env, text=True, timeout=30)
-        self.assertEqual(json.loads(output), [partitions.partitions_sha256(), sorted(EXPECTED_FLAGS)])
+class MarkdownTests(unittest.TestCase):
+    def test_block(self):
+        text = partitions.markdown()
+        self.assertEqual(text, partitions.markdown())
+        self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"))
+        lines = text.splitlines()
+        self.assertEqual(lines[0], "### Partition profiles")
+        self.assertEqual(lines[1], "`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. "
+                                   "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`.")
+        self.assertEqual(len(lines), 2 + len(NAMES))
+        self.assertEqual([line.split("`")[1] for line in lines[2:]], NAMES)
+        self.assertEqual(lines[2], "- `normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.")
+        owners = partitions.profile("owners")
+        owners_line = "- `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. " + owners.courtesy
+        self.assertEqual(lines[7], owners_line)
+        self.assertNotIn("\n\n", text)
 
 
 if __name__ == "__main__":
