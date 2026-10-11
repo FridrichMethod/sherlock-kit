@@ -1,0 +1,166 @@
+"""Transport: literal argv, master-only preflight, status mapping, detection."""
+import json
+import os
+from pathlib import Path
+import shlex
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from fakes import SRC, install_fake_ssh
+
+sys.path.insert(0, str(SRC))
+from sherlock_kit import config, executor  # noqa: E402
+from sherlock_kit.errors import ShkError  # noqa: E402
+
+PREFIX = ["-T", "-oBatchMode=yes", "-oRemoteCommand=none", "-oConnectTimeout=15", "-oConnectionAttempts=1",
+          "-oStrictHostKeyChecking=yes", "-oUpdateHostKeys=no", "-oControlMaster=no",
+          "-oPermitLocalCommand=no", "-oClearAllForwardings=yes", "-oForwardAgent=no"]
+CHECK = ["-O", "check", "-oBatchMode=yes"]
+ARGV = ["printf", "", "a b", "'quote'", "$(id)", "a;b", "new\nline", "*", "--flag"]
+
+
+class SshExecutorTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.fake = install_fake_ssh(temporary.name)
+        self.ssh = executor.SshExecutor("sherlock-plain", ssh=str(self.fake.path), command_timeout=10)
+        self.dtn = executor.SshExecutor("sherlock-dtn", data=True, ssh=str(self.fake.path))
+
+    def knobs(self, **values):
+        environment = patch.dict(os.environ, self.fake.env(**values))
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def test_literal_argv_exact_prefix_and_banner_removed(self):
+        self.knobs(FAKE_SSH_MODE="echo")
+        result = self.ssh.run(ARGV)
+        self.assertEqual((result.status, result.returncode, result.stderr), ("complete", 0, ""))
+        self.assertEqual(json.loads(result.stdout), ARGV)
+        check, dial = self.fake.calls()
+        self.assertEqual(check, [*CHECK, "sherlock-plain"])
+        self.assertEqual(dial[:-1], [*PREFIX, "sherlock-plain"])
+        self.assertEqual(shlex.split(dial[-1]), ARGV)
+
+    def test_no_master_never_dials(self):
+        self.knobs(FAKE_SSH_MASTER="none")
+        for ex, hint in ((self.ssh, "ssh sherlock-plain"), (self.dtn, "ssh -fN sherlock-dtn")):
+            with self.subTest(host=ex.host), self.assertRaises(ShkError) as caught:
+                ex.run(["hostname"], mutation=True)
+            self.assertEqual((caught.exception.code, caught.exception.token), (4, "auth_required"))
+            self.assertEqual(caught.exception.hint, hint)
+        with self.assertRaises(ShkError):
+            self.dtn.rsync_args("/scratch/x")
+        self.assertTrue(self.fake.calls())
+        self.assertTrue(all(call[:2] == ["-O", "check"] for call in self.fake.calls()))
+
+    def test_missing_ssh_is_unreachable(self):
+        ex = executor.SshExecutor("sherlock-plain", ssh=str(Path(self.fake.bin) / "absent"))
+        with self.assertRaises(ShkError) as caught:
+            ex.run(["hostname"])
+        self.assertEqual((caught.exception.code, caught.exception.token), (4, "unavailable"))
+
+    def test_status_mapping(self):
+        cases = [("auth", False, "auth_required"), ("disconnect", False, "unavailable"),
+                 ("disconnect", True, "unknown"), ("hang", False, "timeout"), ("hang", True, "unknown")]
+        for mode, mutation, status in cases:
+            with self.subTest(mode=mode, mutation=mutation):
+                self.knobs(FAKE_SSH_MODE=mode, FAKE_SSH_HANG="5")
+                self.assertEqual(self.ssh.run(["true"], mutation=mutation, timeout=0.5).status, status)
+        self.knobs(FAKE_SSH_MODE="exec")
+        failed = self.ssh.run(["sh", "-c", "echo boom >&2; exit 3"])
+        self.assertEqual((failed.status, failed.returncode, failed.stderr), ("failed", 3, "boom\n"))
+        dials = [call for call in self.fake.calls() if "-O" not in call]
+        self.assertEqual(len(dials), len(cases) + 1)
+
+    def test_stdin_and_run_program(self):
+        self.knobs(FAKE_SSH_MODE="exec")
+        self.assertEqual(self.ssh.run(["wc", "-c"], stdin=b"abc\ndef").stdout.strip(), "7")
+        self.assertEqual(self.ssh.run(["cat"], stdin="text").stdout, "text")
+        result = executor.run_program(self.ssh, "doctor", [])
+        self.assertEqual(result.status, "complete")
+        self.assertIn("SHK_END", result.stdout.splitlines())
+        words = shlex.split(self.fake.calls()[-1][-1])
+        self.assertEqual((words[:2], words[3]), (["sh", "-c"], "shk-doctor"))
+        self.assertEqual(words[2], executor.program_text("doctor"))
+
+    def test_rsync_args(self):
+        self.knobs()
+        options, target = self.dtn.rsync_args("/scratch/users/u/a b")
+        self.assertEqual(options, ["-e", shlex.join([str(self.fake.path), *PREFIX])])
+        self.assertEqual(target, "sherlock-dtn:/scratch/users/u/a b")
+        for bad in ("relative", "/x\ny", "/x\0y"):
+            with self.subTest(path=bad), self.assertRaises(ShkError):
+                self.dtn.rsync_args(bad)
+
+    def test_invalid_input_is_refused_before_dialing(self):
+        self.knobs()
+        for argv in ("hostname", [], [""], ["-x"], ["a\0"], [1]):
+            with self.subTest(argv=argv), self.assertRaises(ValueError):
+                self.ssh.run(argv)
+        for host in ("-oProxyCommand=x", "a b", "", "host:22"):
+            with self.subTest(host=host), self.assertRaises(ValueError):
+                executor.SshExecutor(host)
+        self.assertEqual(self.fake.calls(), [])
+
+
+class LocalExecutorTests(unittest.TestCase):
+    def test_local_runs_argv_directly(self):
+        ex = executor.LocalExecutor(command_timeout=10)
+        self.assertEqual(ex.kind, "local")
+        self.assertEqual(ex.run(["sh", "-c", 'printf %s "$1"', "x", "a b"]).stdout, "a b")
+        self.assertEqual(ex.run(["sh", "-c", "exit 255"]).status, "failed")
+        self.assertEqual(ex.run(["sh", "-c", "exit 1"], mutation=True).status, "unknown")
+        self.assertEqual(ex.run(["sleep", "5"], timeout=0.3).status, "timeout")
+        self.assertEqual(ex.run(["sleep", "5"], timeout=0.3, mutation=True).status, "unknown")
+        self.assertEqual(ex.run(["definitely-not-a-command-shk"]).status, "unavailable")
+        self.assertIn("SHK_END", executor.run_program(ex, "doctor").stdout)
+        with self.assertRaises(ShkError) as caught:
+            ex.rsync_args("/scratch/x")
+        self.assertEqual(caught.exception.code, 3)
+
+    def test_check(self):
+        result = executor.Result
+        self.assertEqual(executor.check(result("complete", "x"), "read").stdout, "x")
+        for status, code in (("auth_required", 4), ("unavailable", 4), ("timeout", 4), ("unknown", 5), ("failed", 1)):
+            with self.subTest(status=status), self.assertRaises(ShkError) as caught:
+                executor.check(result(status, "", "tail\n", 9), "status")
+            self.assertEqual(caught.exception.code, code)
+        with self.assertRaises(ValueError):
+            result("odd")
+
+
+class DetectionTests(unittest.TestCase):
+    def kind(self, hostname, override=None, **env):
+        return executor.detect(None, override, env, hostname).kind
+
+    def test_detection_order(self):
+        self.assertEqual(self.kind("sh02-ln04.stanford.edu"), "local")
+        self.assertEqual(self.kind("SH03-LN01"), "local")
+        self.assertEqual(self.kind("sh02-ln04", "ssh"), "ssh")
+        self.assertEqual(self.kind("lab-ubuntu", "local"), "local")
+        self.assertEqual(self.kind("lab-ubuntu", "auto", SHK_EXECUTOR="local"), "local")
+        self.assertEqual(self.kind("sh02-ln04", None, SHK_EXECUTOR="ssh"), "ssh")
+        self.assertEqual(self.kind("sh02-12n05.int", SLURM_JOB_ID="1"), "local")
+        self.assertEqual(self.kind("sh02-12n05.int"), "ssh")
+        self.assertEqual(self.kind("anything", SLURM_CLUSTER_NAME="sherlock"), "local")
+        self.assertEqual(self.kind("marlowe-n01", SLURM_JOB_ID="1", SLURM_CLUSTER_NAME="marlowe"), "ssh")
+        self.assertEqual(self.kind("sh02-ln04x"), "ssh")
+        self.assertEqual(self.kind("lab-ubuntu"), "ssh")
+        with self.assertRaises(ShkError):
+            self.kind("lab-ubuntu", SHK_EXECUTOR="remote")
+
+    def test_hosts_and_timeouts_come_from_config(self):
+        cfg = config.parse({"control_host": "c", "data_host": "d", "connect_timeout": 7, "command_timeout": 9}, None)
+        control = executor.detect(cfg, "ssh", {}, "x")
+        data = executor.detect(cfg, "ssh", {}, "x", data=True)
+        self.assertEqual((control.host, control.data, control.connect_timeout, control.command_timeout),
+                         ("c", False, 7, 9))
+        self.assertEqual((data.host, data.data), ("d", True))
+        self.assertEqual(executor.detect(None, "ssh", {}, "x").host, "sherlock-plain")
+
+
+if __name__ == "__main__":
+    unittest.main()
