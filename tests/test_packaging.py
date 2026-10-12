@@ -25,7 +25,7 @@ CONTENT = (
     "skills/sherlock-kit/SKILL.md",
     "partitions.json",
 )
-VERSION = "sherlock-kit 0.4.1 "
+VERSION = "sherlock-kit 0.5.0 "
 
 
 def in_git() -> bool:
@@ -160,7 +160,7 @@ class BuildTests(HeadCase):
             self.assertIn(DATA + rel, names)
         self.assertTrue(self.remote_programs())
         self.assertFalse([
-            n for n in names if not n.startswith(("sherlock_kit/", "sherlock_kit-0.4.1.dist-info/"))
+            n for n in names if not n.startswith(("sherlock_kit/", "sherlock_kit-0.5.0.dist-info/"))
         ])
         with tarfile.open(sdist) as bundle:
             members = {m.name.split("/", 1)[1]: m for m in bundle.getmembers() if "/" in m.name}
