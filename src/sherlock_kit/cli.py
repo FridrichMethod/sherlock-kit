@@ -121,7 +121,9 @@ def _render(payload: dict[str, Any], code: int) -> str:
     if "text" in payload:
         return str(payload["text"])
     body = payload if "ok" in payload else {"ok": code in (EXIT_OK, EXIT_ANOMALY), **payload}
-    return json.dumps(body, indent=2, ensure_ascii=False, default=str) + "\n"
+    return (
+        json.dumps({"schema_version": 1, **body}, indent=2, ensure_ascii=False, default=str) + "\n"
+    )
 
 
 def _run(

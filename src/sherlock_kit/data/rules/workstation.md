@@ -1,6 +1,6 @@
 ## Sherlock from this workstation
 
-These rules apply when an agent here operates Stanford's Sherlock cluster over SSH. Sherlock's `/etc/agents/AGENTS.md` binds remote operation too and takes precedence over this file; only its numbered rules are requirements, the rest is recommended practice. Read it, and the topic file for the task (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it), once per session after `shk doctor` reports the control master running: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md` rides the master and cannot log in. If it fails, inspect the error using Connection below; never retry in a loop. Reviewed 2026-10-11 against the site files.
+These rules apply when an agent here operates Stanford's Sherlock cluster over SSH. Sherlock's `/etc/agents/AGENTS.md` binds remote operation too and takes precedence over this file; only its numbered rules are requirements, the rest is recommended practice. Read it, and the topic file for the task (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it), once per session after `shk doctor` reports the control master running: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md` rides the master and cannot log in. If it fails, inspect the error using Connection below; never retry in a loop. Reviewed 2026-10-12 against the site files.
 
 ### Connection
 - Reach Sherlock only through `shk` or bounded, noninteractive OpenSSH over the user's control masters: `sherlock-plain` for commands, `sherlock-dtn` for transfers. `shk doctor` is read-only: it checks both masters without dialling and exits 4 when the control master is not usable; `shk doctor --remote` adds one read-only call.
@@ -10,11 +10,12 @@ These rules apply when an agent here operates Stanford's Sherlock cluster over S
 - Other exit 4 (`unavailable` or `timeout` with the hint `run shk doctor`, such as a dropped network): run `shk doctor`, retry once after about a minute, then stop and tell the user.
 
 ### Jobs
-- Submit with `shk submit`, never raw `sbatch` over ssh. Give partition, CPUs, memory and walltime explicitly (a toolkit choice; the site requires only the walltime). GPUs only with `--gpus` on a partition that allows them; no `--account` or `--exclude` (use `--constraint`). Many independent tasks go into one array (`--array N%M`).
+- Submit with `shk submit`, never raw `sbatch` over ssh. Give partition, CPUs, memory and walltime explicitly (a toolkit choice; the site requires only the walltime). GPUs only with `--gpus` on a partition that allows them; no `--account` or `--exclude` (use `--constraint`). Many independent tasks go into one array (`--array N[%M]`).
 - The job name derives from project, campaign and task, so a resubmission reuses it: `shk submit` refuses (exit 3) while a job of that name is pending or running, and after it finished unless `--resubmit "<reason>"` is given. Give a reason only after finding the cause of a failure, or to rerun deliberately.
 - Exit 5 means the outcome is unknown after dispatch: run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s), and never resubmit blind.
 - Wait at least 60 s between status checks; one `shk status` over many tasks (`--all`) instead of a loop per task; no `watch` or polling loops; prefer `--after-ok` dependencies. Jobs do at least 10 minutes of useful work, ideally 30: batch short tasks, never pad with `sleep`.
 - Exit 6: status worked but the newest job has an anomaly (for example an unexpected preemption): stop and report it. `shk cancel` only when the user asks.
+- Bounded deterministic compute controllers may submit and poll authorized stages inside a Slurm allocation with `shk --executor local`, no workstation needed. Never schedule future agent/LLM sessions.
 - GPU jobs on `owners` must checkpoint periodically (a requeue gives no usable SIGTERM window). Never submit GPU work while developing or testing sherlock-kit itself.
 - `shk` reads `[tool.sherlock-kit]` from the nearest `pyproject.toml` (or `sherlock-kit.toml`) at or above the working directory; from elsewhere pass `--project-dir DIR`.
 

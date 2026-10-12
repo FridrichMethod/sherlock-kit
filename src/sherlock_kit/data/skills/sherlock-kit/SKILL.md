@@ -5,12 +5,12 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 
 # sherlock-kit (`shk`)
 
-`shk` submits and tracks Sherlock jobs by name and moves data through the DTN. Slurm is the only source of truth; `shk` keeps no local state. Operational results print one JSON document on stdout; `shk rules`, `shk --version` and help print text, and usage errors print text on stderr (exit 2).
+`shk` submits and tracks Sherlock jobs by name and moves data through the DTN. Slurm is the only source of truth; `shk` keeps no local state. Operational results print one JSON document with `schema_version: 1` on stdout; `shk rules`, `shk --version` and help print text, and usage errors print text on stderr (exit 2).
 
 ## Setup check
 
 1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` and `python -m sherlock_kit` in the activated environment), else the global `~/.local/bin/shk`. Not `uv run shk`: it locks and syncs the project environment first. Ask before any `pip install`, upgrade or version switch.
-2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>` (the dotfiles copy), `source <path>` (a development checkout: never use it for real work) or `unknown`. This skill requires shk 0.4 or newer; with an older one, or when a flag here is missing, follow `shk <cmd> --help` instead.
+2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>` (the dotfiles copy), `source <path>` (a development checkout: never use it for real work) or `unknown`. The controller extensions require shk 0.5 or newer; with an older one, or when a flag here is missing, follow `shk <cmd> --help` instead.
 3. If no Sherlock rules are loaded in this session, read them first: `shk rules workstation` on a workstation, `shk rules cluster` on Sherlock.
 4. `shk doctor` is read-only and offline (`--remote` adds one read-only call on Sherlock).
 5. In Codex, a sandbox startup failure or local SSH socket `Permission denied` / `Operation not permitted` does not mean a missing master. Request per-command approval for the blocked command, then retry once; never disable the sandbox or grant writes to all of HOME. Even offline `doctor` needs control-socket access; `submit --dry-run` does not. On Sherlock, per-command approval is expected because the Codex sandbox cannot start there.
@@ -43,12 +43,13 @@ shk submit --task train-a --script job.sh --partition normal --cpus 4 --mem 16G 
 - A done or failed task is refused unless `--resubmit "<reason>"` names why it runs again; find the cause of a failure first.
 - Deduplication reads only `squeue` and the last 30 days of `sacct`. A task whose jobs are older than that submits again as new, without `--resubmit`, even when its run directory still exists: check before rerunning old work.
 - Partition, CPUs, memory and walltime are explicit. GPUs only with `--gpus N` on a partition that allows them; `--constraint` instead of excluding nodes. Requeue only on `owners`, whose scripts must checkpoint periodically.
-- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns, in any form sbatch accepts (`-p`, `-Hb`, `--part`, ...): account, exclude, GPUs or gres, partition, array, dependency, begin or job name; heterogeneous jobs (`hetjob`, `packjob`) are refused.
-- Chain stages with `--after-ok JOBID` (repeatable; several ids separated by spaces, never commas) instead of polling. Inside a job script never call `shk submit` or start an agent.
+- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json` as provenance. `#SBATCH` lines in the script may not set what shk owns, in any form sbatch accepts (`-p`, `-H`, `--part`, ...): account, exclude, GPUs or gres, partition, array, dependency, begin, job name, hold or comment; heterogeneous jobs (`hetjob`, `packjob`) are refused.
+- `--preflight` (mutually exclusive with `--dry-run`) reads Slurm validation using `sbatch --test-only`, creates no job or provenance, and retains returncode/stdout/stderr; quota refusal is exit 3, read failures are never unknown. `--hold` and `--submission-token TOKEN` set a user hold and public Slurm Comment, frozen in the spec.
+- Chain stages with `--after-ok JOBID` (repeatable; several ids separated by spaces, never commas) instead of polling. Bounded deterministic compute controllers inside a Slurm allocation may call `shk --executor local` for authorized later compute stages, without a workstation; never schedule future agent/LLM sessions.
 
 ## Arrays
 
-For many independent tasks submit one array: `--array N%M` runs N tasks (2 to 1000), at most M at a time; each task reads `$SLURM_ARRAY_TASK_ID` (0 to N-1) and logs to `slurm-%A_%a.*`. Size tasks to at least 10 minutes of real work, ideally 30; never pad with `sleep`.
+For many independent tasks submit one array: `--array N[%M]` runs N tasks (2 to 1000), optionally at most M at a time; each task reads `$SLURM_ARRAY_TASK_ID` (0 to N-1) and logs to `slurm-%A_%a.*`. Size tasks to at least 10 minutes of real work, ideally 30; never pad with `sleep`.
 
 ## Status
 
@@ -61,6 +62,13 @@ shk status --all
 - `--since DAYS` sets the `sacct` window (default 30, 7 with `--all`). With several `--task`, give `--campaign` once for all of them or once per `--task`.
 - States: `new` (no job), `live` (pending, running or completing; throttle-held array tasks count as pending), `done` (all tasks completed), `failed` (finished, at least one task not completed), `stale` (provenance files but no Slurm rows in the window; treated as `new`).
 - `current` describes the newest job of the name (tasks, exit codes, restarts, cost); older jobs are in `history`. An anomaly such as `unexpected_preemption` or `duplicate_live` gives exit 6: stop and report.
+
+## Controller evidence and exact mutations
+
+- `shk resources --partition owners` (repeatable partition) reads node state, features and configured minus allocated CPU/memory/GPU capacity. Missing facts are null and `complete: false`; OS FreeMem never substitutes.
+- `shk status --job-id ID --details` (repeatable ID, mutually exclusive selector) reads current UID legacy or shk jobs. `details.queue` and `details.accounting` retain raw records with cluster, DBIndex, physical/array IDs, times, UID, Comment, TRES, nodes, restarts and exits. `details.jobs` retains queued physical `scontrol` identities with original `fields` and `raw` for request verification. Incomplete evidence or missing IDs is explicit; do not treat it as permission to resubmit.
+- `shk release --job-id ID --expect-name NAME --expect-token TOKEN` releases only a verified exact current-UID user-held job. `shk requeue --self --expect-name NAME --expect-token TOKEN` works locally only with real Slurm PID membership in the current physical allocation, identity checks and owners requeue policy. Arrays target the self element. Lost mutation replies remain unknown (exit 5); never retry blind. Checkpoint durability and maximum retries belong to the project controller.
+- A deterministic controller must keep all actions bounded and authorized, batch status reads at least 60 s apart and stay within its allocation. It must not invoke an LLM or schedule a later agent session.
 
 ## Data
 

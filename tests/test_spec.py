@@ -184,14 +184,12 @@ class DirectiveTests(Case):
         "# SBATCH -p gpu",
         "#SBATCH --gres-flags=enforce-binding",
         "#SBATCH -o out.log",
-        "#SBATCH --comment='x y'",
         "#SBATCH --exclusive",
         "#SBATCH -",
         "#SBATCH --",
         "#SBATCH --acctg-freq=task=60",
         "#SBATCH --gpu-bind=closest",
         "#SBATCH -op.log",
-        "#SBATCH -Hc 2",
     )
 
     def test_denylisted_directives_in_the_leading_block_are_refused(self):
@@ -279,6 +277,8 @@ class ProfileAndArgvTests(Case):
             set(doc),
             {
                 "schema",
+                "hold",
+                "submission_token",
                 "name",
                 "project",
                 "campaign",
@@ -317,7 +317,7 @@ class ProfileAndArgvTests(Case):
             },
         )
         self.assertEqual((doc["resubmit_reason"], doc["git"]), ("fixed the input path", None))
-        self.assertTrue(doc["shk"].startswith("sherlock-kit 0.4.1 ("))
+        self.assertTrue(doc["shk"].startswith("sherlock-kit 0.5.0 ("))
 
     def test_git_provenance_of_the_project(self):
         env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}

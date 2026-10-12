@@ -23,8 +23,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+from sherlock_kit import control, details, node_resources, partitions, spec
 from sherlock_kit import executor as executors
-from sherlock_kit import partitions, spec
 from sherlock_kit.errors import (
     EXIT_ANOMALY,
     EXIT_LOCAL,
@@ -224,7 +224,7 @@ def gpus(tres: str) -> int:
 class Row:
     """One squeue or sacct line of a shk job."""
 
-    key: tuple[bool, str, int]  # (from sacct, JobID, Restarts): one row per task and restart
+    key: tuple[Any, ...]  # (from sacct, JobID, Restarts): one row per task and restart
     base: int  # the base job id (the array id for array tasks)
     tasks: tuple[int, ...]  # task indices covered; an aggregate covers several
     from_acct: bool
@@ -237,6 +237,8 @@ class Row:
     gpu_seconds: int
     exit_code: str  # sacct only ("" for squeue rows)
     submitted: str  # sacct only, UTC
+    started: str
+    ended: str
 
 
 def _row(fields: dict[str, str]) -> Row:
@@ -249,7 +251,12 @@ def _row(fields: dict[str, str]) -> Row:
     )
     explicit = indices is None
     return Row(
-        key=("Restarts" in fields, fields["JobID"], restart),
+        key=(
+            "Restarts" in fields,
+            fields["JobID"],
+            restart,
+            *(fields.get(key) for key in ("Cluster", "DBIndex", "JobIDRaw", "Start", "End")),
+        ),
         base=base,
         tasks=tuple(indices) if indices is not None else (task or 0,),
         from_acct="Restarts" in fields,
@@ -262,6 +269,8 @@ def _row(fields: dict[str, str]) -> Row:
         gpu_seconds=elapsed * gpus(fields.get("AllocTRES", "")) if explicit else 0,
         exit_code=fields.get("ExitCode", ""),
         submitted=fields.get("Submit", ""),
+        started=fields.get("Start", ""),
+        ended=fields.get("End", ""),
     )
 
 
@@ -349,7 +358,10 @@ def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dic
     deciding: dict[int, Row] = {}
     accounted: dict[int, Row] = {}
     restarts: dict[int, set[int]] = {}
-    for row in sorted(rows, key=lambda r: (not r.from_acct, r.restart, r.explicit)):
+    for row in sorted(
+        rows,
+        key=lambda r: (not r.from_acct, r.submitted, r.started, r.restart, r.ended, r.explicit),
+    ):
         for index in row.tasks:
             deciding[index] = row
             if row.from_acct:
@@ -553,8 +565,20 @@ def _register_submit(subparsers: Subparsers) -> None:
         help="required on borrowed partitions, after shk occupancy",
     )
     parser.add_argument("--resubmit", metavar="REASON", help="required after done or failed")
-    parser.add_argument(
+    preview = parser.add_mutually_exclusive_group()
+    preview.add_argument(
         "--dry-run", action="store_true", help="offline: print the spec and sbatch argv"
+    )
+    preview.add_argument(
+        "--preflight",
+        action="store_true",
+        help="read-only sbatch --test-only, without staging provenance",
+    )
+    parser.add_argument(
+        "--submission-token", help="public correlation token stored in Slurm Comment"
+    )
+    parser.add_argument(
+        "--hold", action="store_true", help="submit with a user hold until exact release"
     )
     requeue = parser.add_mutually_exclusive_group()
     requeue.add_argument("--requeue", action="store_true", help="default: the partition profile")
@@ -570,6 +594,10 @@ def _register_status(subparsers: Subparsers) -> None:
     which.add_argument("--task", action="append", help="repeatable")
     which.add_argument("--name", action="append", help="repeatable")
     which.add_argument("--all", action="store_true", help="every shk job of this project")
+    which.add_argument(
+        "--job-id", action="append", help="repeatable own-UID N or N_TASK, including legacy jobs"
+    )
+    parser.add_argument("--details", action="store_true", help="retain complete raw Slurm evidence")
     parser.add_argument(
         "--campaign",
         action="append",
@@ -612,6 +640,8 @@ def register(subparsers: Subparsers) -> None:
     _register_status(subparsers)
     _register_cancel(subparsers)
     _register_occupancy(subparsers)
+    node_resources.register(subparsers)
+    control.register(subparsers)
 
 
 # ---------------------------------------------------------------- remote calls
@@ -764,6 +794,8 @@ def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
     }
     if args.dry_run:
         return Outcome({"action": "dry_run", **report, "spec": built.document})
+    if args.preflight:
+        return control.preflight(built, ctx)
     borrowed = built.profile.borrowed
     query = [
         "names",
@@ -844,6 +876,8 @@ def _all_names(ctx: Context) -> Callable[[str], bool]:
 
 def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk status`: one read for every selected name; exit 6 on an anomaly."""
+    if args.job_id or args.details:
+        return details.status(args, ctx)
     since, selected = _since(args), _selection(args, ctx)
     query = ["all" if args.all else "names", str(since), "-"]
     for item in selected:

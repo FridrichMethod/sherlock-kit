@@ -16,7 +16,12 @@ with the package (`shk rules workstation`, `shk rules cluster`); Sherlock's own
 
 ## Install
 
-`shk --version` prints `sherlock-kit 0.4.1 (FORM)`, where FORM names the install:
+This development tree implements the 0.5.0 CLI contract; it does not publish a
+release tag. The install examples below retain the previous published tag;
+0.5.0 integrations must install a verified immutable commit until a release is
+published. Older installs should follow their own `shk <command> --help`.
+
+`shk --version` prints `sherlock-kit 0.5.0 (FORM)`, where FORM names the install:
 
 | Form | How | FORM |
 |---|---|---|
@@ -83,15 +88,18 @@ shk install-skill --project DIR [--client claude|codex|all] [--rules workstation
 shk occupancy --partition P [--partition P ...]
 shk submit --task T [--campaign C] --script FILE --partition P --cpus N --mem SIZE --time DUR
            [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--signal S] [--requeue|--no-requeue]
-           [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--dry-run]
-shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all) [--since DAYS]
+           [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--submission-token TOKEN] [--hold] [--dry-run|--preflight]
+shk resources --partition P [--partition P ...]
+shk release --job-id ID --expect-name NAME --expect-token TOKEN
+shk requeue --self --expect-name NAME --expect-token TOKEN
+shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all | --job-id ID ...) [--since DAYS] [--details]
 shk cancel (--task T [--campaign C] | --name NAME)
 shk push LOCAL REMOTE [--anywhere]
 shk pull REMOTE LOCAL [--validate NAME] [--replace]
 shk manifest DIR
 ```
 
-- Operational results print one JSON document on stdout; `rules`, `--version`
+- Operational results print one JSON document with `schema_version: 1` on stdout; `rules`, `--version`
   and help print text, and usage errors print text on stderr (exit 2).
   `shk <command> --help` is the authoritative flag list. `submit`,
   `status`, `cancel` and `occupancy` report `next_check_after`, 60 s after they
@@ -104,21 +112,41 @@ shk manifest DIR
   stages the script under `<run-dir>/.shk/` and runs `sbatch`; a lost reply is
   exit 5, and the reply's `next` names the `shk status` command and when to run
   it. Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`,
-  `--array N%M` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
+  `--array N[%M]` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
   several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
   writes the `--dependency` string itself, so a `,` or `?` list is refused.
-  `--dry-run` is offline.
+  `--dry-run` is offline. `--preflight` is mutually exclusive and sends the
+  same script/resources to `sbatch --test-only` as a read: no job, run directory
+  or provenance is created. Its `preflight` object retains returncode, stdout
+  and stderr; rejection is exit 3, read failure is never unknown.
+  `--submission-token` accepts 1-128 public characters `[A-Za-z0-9_.:-]` (first
+  alphanumeric), freezes it in the spec and sets Slurm Comment. `--hold` freezes
+  a user hold. Tokens correlate attempts and contain no secrets.
 - The script's leading `#SBATCH` lines may set anything except what `shk` owns
   (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
   `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,
-  `-J`/`--job-name`) and a `hetjob` or `packjob` separator: heterogeneous jobs
+  `-J`/`--job-name`, `-H`/`--hold`, `--comment`) and a `hetjob` or `packjob` separator: heterogeneous jobs
   are refused. Matching follows sbatch's own parsing, so abbreviated long
   options (`--part=gpu`) and short flags bundled after value-less ones
   (`-Hp gpu`) count too.
 - `status`: one `squeue` and one `sacct` for all selected names; `--since`
   defaults to 30 days (7 with `--all`). Give `--campaign` once for every
   `--task` or once per `--task`, and `--run-dir` once per `--task` or not at
-  all. `cancel` cancels the live jobs of one name.
+  all. Repeatable `--job-id N` or `N_TASK` is mutually exclusive with task,
+  name and all selectors; it includes legacy names and only current UID rows.
+  `--details` returns the evidence contract described below. `cancel` cancels
+  the live jobs of one name.
+- `resources` reads node state, partitions, active features and configured/
+  allocated CPU, memory and GPU capacity once. `free_memory_mb` uses CfgTRES
+  minus AllocTRES; OS FreeMem never substitutes. Missing facts are null and
+  `complete: false`. Availability is a snapshot, not a resource reservation.
+- `release` checks one exact ID, current UID, expected name/token and user hold
+  immediately before `scontrol release`. `requeue --self` has no arbitrary ID
+  option: it requires the local physical allocation ID, actual Slurm PID
+  membership, current UID/name/token, RUNNING state, owners and Requeue=1. For
+  arrays it requeues the physical self element. A lost mutation reply is exit 5;
+  Slurm ownership checks still apply, and concurrent user changes can race the
+  identity read. Checkpoint durability and retry limits belong to the caller.
 - `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
   `remote_root` (`--anywhere` lifts that) and never deletes. Pushed files keep
   their local modification times (`rsync -t`, so a re-push skips unchanged
@@ -145,6 +173,32 @@ shk manifest DIR
 - `install-skill` copies the agent skill into a project (`.claude/skills/` and
   `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/` (Codex
   gets a hint instead); `--check` exits 1 when a copy is missing or stale.
+
+## Detailed status contract
+
+`status --details` adds `details = {queue, accounting, jobs, complete, queried_at, history_window_days, missing_job_ids, malformed}`. Queue and
+accounting are lists of full records, before summary deduplication; every
+record includes the original `raw` line. Their normalized fields are
+`job_id`, `job_id_raw`, `cluster`, `db_index`, `state`, `partition`,
+`elapsed_seconds`, `allocated_cpus`, `allocated_tres`, `submitted_at`,
+`started_at`, `ended_at`, `restarts`, `exit_code`, `nodes`, `name`, `comment`
+and `uid`. Missing fields are null, numeric facts are integers, timestamps
+are UTC strings, IDs (including DBIndex) remain strings. Pending queue CPUs,
+start and end are null because squeue supplies requests or predictions there.
+
+`jobs` holds queued physical `scontrol` identities as `{job_id, name, comment, uid, fields, raw}`; `fields` retains original Slurm names and string values,
+including request TRES, Features, TimeLimit, Requeue and array identity. All
+records are restricted to the current UID. Partial tools, missing requested
+IDs, malformed rows or missing accounting cost identity mark evidence
+incomplete, retain available facts and prevent a final cost claim. A complete
+query does not establish unlimited historical coverage: it is bounded by
+`history_window_days`, and array cardinality without provenance is inferred.
+
+A bounded deterministic workflow manager may run inside its allocated Slurm
+job and call `shk --executor local` to submit/poll authorized later compute
+stages at intervals of at least 60 seconds, with no workstation dependency.
+This does not authorize scheduling future agent or LLM sessions. Controllers
+own their bounded retries, checkpointing, scientific validation and accounting.
 
 ## Configuration
 

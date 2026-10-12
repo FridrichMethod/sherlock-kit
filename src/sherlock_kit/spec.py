@@ -46,9 +46,11 @@ DENIED_LONG = (
     "dependency",
     "begin",
     "job-name",
+    "hold",
+    "comment",
 )
-DENIED_SHORT = "AxGpadbJ"  # -b is --begin
-FLAGS_WITHOUT_VALUE = "HhOQsuvVW"  # sbatch short flags that may be bundled before another one
+DENIED_SHORT = "AxGpadbJH"  # -b is --begin
+FLAGS_WITHOUT_VALUE = "hOQsuvVW"  # sbatch short flags that may be bundled before another one
 HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: one name, many jobs
 
 
@@ -341,8 +343,18 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
             hint=f"run shk occupancy --partition {profile.name}, then add --courtesy-ack",
         )
     argv, digest = sbatch_argv(name, run, wanted), hashlib.sha256(script).hexdigest()
+    token = getattr(args, "submission_token", None)
+    if token is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", token):
+        raise _invalid("--submission-token must be 1-128 public characters: A-Z a-z 0-9 _ . : -")
+    hold = getattr(args, "hold", False)
+    if token is not None:
+        argv.append(f"--comment={token}")
+    if hold:
+        argv.append("--hold")
     document = {
         "schema": 1,
+        "submission_token": token,
+        "hold": hold,
         "name": name,
         "project": project,
         "campaign": campaign,

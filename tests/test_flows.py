@@ -118,6 +118,7 @@ class SubmitFlows(Flow):
         self.assertEqual(seen, [conf, sacct_env, conf, conf])
         self.assertEqual(self.slurm.state()["jobs"][0]["script"], SCRIPT)
         refusal = {
+            "schema_version": 1,
             "ok": False,
             "error": "live",
             "message": f"{name} is live (newest job {job})",
@@ -452,6 +453,7 @@ class CannedReplyFlows(Flow):
                 5,
                 {
                     "ok": False,
+                    "schema_version": 1,
                     "action": "unknown",
                     "name": spec.job_name("demo", "default", "train-a"),
                     "detail": "0 terminal markers",

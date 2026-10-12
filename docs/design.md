@@ -1,4 +1,4 @@
-# Design (0.4.0)
+# Design (0.5.0)
 
 `shk` is a thin, stateless interface between an agent and Sherlock's Slurm and
 filesystems. It answers three questions with as little machinery as possible:
@@ -16,7 +16,7 @@ script does) stays with the user, the site rules and the project.
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
 | `partitions.py` | the packaged partition table and the generated rules block |
 | `doctor.py` | read-only checks |
-| `spec.py`, `slurm.py` | resources, job name, sbatch argv; `submit`, `status`, `cancel`, `occupancy` |
+| `spec.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv; `submit`, `status`, `cancel`, `occupancy` |
 | `transfer.py` | `push`, `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
 | `data/remote/*.sh` | the fixed POSIX `sh` programs run on the login node |
@@ -108,7 +108,7 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
    `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
    `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
-   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`) or
+   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`, `-H`/`--hold`, `--comment`) or
    start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
    `--courtesy-ack`. The denylist follows sbatch's getopt parsing: abbreviated
    long options (`--part`) and short flags bundled after value-less ones
@@ -161,6 +161,24 @@ so nothing needs closing: a deliberate `--resubmit` makes a new current job.
 user and name), reporting the job ids and `next_check_after`; a lost reply is
 exit 5 with a `next` like submit's. `occupancy` reads the partition's current use
 with the fixed-width `squeue -O` layout confirmed live in 0.2.0.
+
+## Controller primitives (0.5.0)
+
+Operational JSON has `schema_version=1`, including errors; text and existing
+keys/exits retain their meanings. `details.py` keeps full accounting identities
+(Cluster, DBIndex, physical JobIDRaw, Start/End and Restarts), preserving raw
+rows before deriving compatibility summaries. `status --job-id` selects current
+UID jobs including legacy names; full queued `scontrol` request facts support
+held job verification. Partial evidence is explicit and cannot claim final cost.
+
+`node_resources.py` subtracts Slurm allocations from configured capacity; OS
+FreeMem does not drive admission. `control.py` implements read-only
+`sbatch --test-only`, exact identity-verified user-hold release and local
+allocation-only self requeue with Slurm PID membership. After a mutation is
+issued an ambiguous reply stays unknown, with no retry. Slurm identity reads
+and mutations are not atomic; no exactly-once guarantee is claimed. The public
+submission token is correlation data stored in Slurm Comment and frozen spec,
+not a credential. No project ledger, checkpoint or retry policy enters the kit.
 
 ## Transfer
 

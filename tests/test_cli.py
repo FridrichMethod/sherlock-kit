@@ -23,7 +23,7 @@ from sherlock_kit import cli
 from sherlock_kit.errors import Outcome, ShkError
 
 CHECK = ["-O", "check", "-oBatchMode=yes"]
-VERSION = r"sherlock-kit 0\.4\.1 \((git [0-9a-f]+|editable .+|submodule .+|source .+|unknown)\)\n\Z"
+VERSION = r"sherlock-kit 0\.5\.0 \((git [0-9a-f]+|editable .+|submodule .+|source .+|unknown)\)\n\Z"
 
 
 def command(name, handler):
@@ -59,7 +59,7 @@ class VersionTests(TempCase):
             check=True,
         ).stdout
         self.assertRegex(out, VERSION)
-        self.assertEqual(sherlock_kit.__version__, "0.4.1")
+        self.assertEqual(sherlock_kit.__version__, "0.5.0")
 
     def test_provenance_forms(self):
         tree = self.tmp / "tree"
@@ -103,7 +103,7 @@ class VersionTests(TempCase):
             text=True,
             check=True,
         ).stdout
-        self.assertEqual(out, f"sherlock-kit 0.4.1 (source {repo})\n")
+        self.assertEqual(out, f"sherlock-kit 0.5.0 (source {repo})\n")
         self.assertEqual(list(repo.rglob("__pycache__")), [])
 
     def test_bin_shk_refuses_old_python(self):
@@ -137,11 +137,19 @@ class FrameTests(TempCase):
             command("crash", lambda a, c: 1 / 0),
         ]
         code, out, _ = run(["good"], modules, self.context())
-        self.assertEqual((code, json.loads(out)), (0, {"ok": True, "value": 1}))
+        self.assertEqual(
+            (code, json.loads(out)), (0, {"schema_version": 1, "ok": True, "value": 1})
+        )
         self.assertEqual(json.loads(run(["anomaly"], modules, self.context())[1])["ok"], True)
         self.assertEqual(run(["text"], modules, self.context())[:2], (0, "raw\n"))
         code, out, _ = run(["refuse"], modules, self.context())
-        expected = {"ok": False, "error": "live", "message": "busy", "hint": "wait"}
+        expected = {
+            "schema_version": 1,
+            "ok": False,
+            "error": "live",
+            "message": "busy",
+            "hint": "wait",
+        }
         self.assertEqual((code, json.loads(out)), (3, expected))
         code, out, err = run(["crash"], modules, self.context())
         self.assertEqual((code, json.loads(out)["error"]), (1, "internal_error"))
@@ -197,6 +205,9 @@ class FrameTests(TempCase):
                 "occupancy",
                 "pull",
                 "push",
+                "release",
+                "requeue",
+                "resources",
                 "rules",
                 "status",
                 "submit",

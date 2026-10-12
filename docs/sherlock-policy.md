@@ -30,6 +30,14 @@ per-command approval when its sandbox cannot start, without disabling it.
 Re-read the site files before changing the rules and update the review date
 and this record.
 
+The lead re-read all five files on sh02-ln04 on 2026-10-12 via the existing
+attended control master before the 0.5.0 wording changes. Site rule 1 explicitly
+allows workflow managers that only submit and poll jobs. Rule 10 prohibits
+scheduling future agent sessions. The updated rules distinguish bounded
+deterministic compute controllers inside an allocation, using `--executor local`
+without a workstation dependency, from agent or LLM rescheduling. Site limits,
+login-node restrictions, the 60 s cadence and access controls still bind.
+
 ## Where each site rule lands
 
 | Site rule | Workstation file | Cluster file |
@@ -65,7 +73,7 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,
-  partition, array, dependency, begin, job name) or start a heterogeneous job.
+  partition, array, dependency, begin, job name, hold, comment) or start a heterogeneous job.
 - A live job name is never submitted twice; a finished one only with
   `--resubmit REASON`.
 - `shk cancel` is scoped to one job name and used only when the user asks.

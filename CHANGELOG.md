@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0
+
+- Operational JSON adds `schema_version: 1`; existing result keys and exits,
+  help, rules and version text remain compatible.
+- `status --details` retains queue, accounting and queued `scontrol` identities,
+  including physical IDs, DBIndex, clusters, times, comments, UID and raw lines.
+  Repeatable `--job-id` queries only the current UID and supports legacy names.
+  Distinct accounting identities no longer collapse at `(JobID, Restarts)`.
+- `resources` reports Slurm configured minus allocated node capacity and marks
+  missing or partial evidence explicitly; OS FreeMem is never used.
+- `submit --preflight` runs `sbatch --test-only` without submitting or writing
+  provenance; Slurm refusal remains exit 3. `--hold` and public
+  `--submission-token` are CLI-owned options frozen with the spec.
+- Exact `release` checks UID, name, token and user hold. `requeue --self` requires
+  a local current allocation, verified Slurm PID membership and owners policy.
+  Lost mutation replies remain unknown; checkpoint/retry decisions stay outside
+  the kit.
+- Rules distinguish bounded deterministic compute controllers running in a
+  Slurm allocation with `--executor local` from prohibited future agent
+  sessions. Array grammar is `N[%M]` throughout.
+
 ## 0.4.1
 
 - Recovery commands after an unknown submit or cancel outcome preserve the
