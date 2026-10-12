@@ -286,3 +286,10 @@ class ResolveTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FinalHistoryTests(unittest.TestCase):
+    def test_missing_restart_rows_prevents_final_legacy_cost(self):
+        result = current(acct=[a("500", restart=2, partition="owners")])
+        self.assertEqual(result["tasks"]["incomplete_history"], [0])
+        self.assertFalse(result["cost"]["final"])

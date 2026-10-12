@@ -141,6 +141,16 @@ def _selected(value: str, ids: list[str]) -> bool:
     )
 
 
+def _allocation_complete(data: dict[str, str]) -> bool:
+    """Missing TRES is valid only for an explicitly unstarted pending allocation."""
+    return data["AllocTRES"] not in MISSING or (
+        data["State"] == "PENDING"
+        and data["Start"] in MISSING
+        and data["ElapsedRaw"] == "0"
+        and data["AllocCPUS"] == "0"
+    )
+
+
 def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, Any], Rows]:
     """Keep every full record; derive summaries from the same accounting identities."""
     from sherlock_kit import slurm
@@ -151,6 +161,7 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
         "jobs": [],
         "malformed": [],
         "complete": True,
+        "allocation_evidence_complete": True,
     }
     by_name: dict[str, list[slurm.Row]] = {}
     malformed: Counter[str | None] = Counter()
@@ -184,6 +195,9 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                     )
                 ):
                     report["complete"] = False
+                allocation_complete = label != "accounting" or _allocation_complete(data)
+                report["allocation_evidence_complete"] &= allocation_complete
+                report["complete"] &= allocation_complete
                 legacy = dict(data)
                 if label == "queue":
                     legacy = {key: data[key] for key in slurm.QUEUE_FIELDS}
@@ -211,7 +225,9 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
 
 
 def _jobs(stdout: str, uid: int, report: dict[str, Any]) -> None:
-    expected = {record["job_id_raw"] for record in report["queue"]}
+    expected = {
+        record["job_id_raw"] for record in report["queue"] if record["job_id_raw"] is not None
+    }
     for line in stdout.splitlines():
         if not line.startswith("SHK_J|"):
             continue
@@ -229,6 +245,44 @@ def _jobs(stdout: str, uid: int, report: dict[str, Any]) -> None:
             "fields": data,
             "raw": raw,
         })
+    observed = {record["job_id"] for record in report["jobs"]}
+    report["missing_control_job_ids"] = sorted(expected - observed)
+    report["control_identities_complete"] = not report["missing_control_job_ids"]
+    if not report["control_identities_complete"]:
+        report["complete"] = False
+
+
+def _summary_evidence(
+    names: list[dict[str, Any]], rows: Rows, ids: list[str], report: dict[str, Any]
+) -> None:
+    """Mark history gaps and exact element selections without inventing sibling states."""
+    partial = {
+        str(row.base)
+        for found in rows.by_name.values()
+        for row in found
+        if ids and row.array and str(row.base) not in ids
+    }
+    report["selection"] = {
+        "mode": "job_ids" if ids else "names",
+        "requested_job_ids": ids,
+        "partial_array_ids": sorted(partial, key=int),
+    }
+    report["history_complete"] = not any(
+        entry["current"] and entry["current"]["tasks"]["incomplete_history"] for entry in names
+    )
+    if partial or not report["history_complete"]:
+        report["complete"] = False
+    for entry in names:
+        current = entry["current"]
+        if current is None:
+            continue
+        if current["job_id"] in partial:
+            entry.update(state="unknown", scope="partial_array")
+            current["array"].update(count=None, count_known=False)
+            current["tasks"].update(count=None, missing=None)
+        if not report["complete"]:
+            current["cost"]["final"] = False
+            current["evidence_complete"] = False
 
 
 def status(args: argparse.Namespace, ctx: Context) -> Outcome:
@@ -278,10 +332,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
         for item in listed
     ]
-    for entry in names:
-        if entry["current"] and not report["complete"]:
-            entry["current"]["cost"]["final"] = False
-            entry["current"]["evidence_complete"] = False
+    _summary_evidence(names, rows, ids, report)
     anomaly = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
     payload: dict[str, Any] = {**meta, "names": names, "truncated": False}
     if args.details or ids:

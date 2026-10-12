@@ -367,7 +367,7 @@ class IdentityChronologyFlows(Flow):
             accounting=f"44_2|45|sherlock|100|COMPLETED|owners|1|1|cpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:00:02|0|0:0|sh01|{os.getuid()}|tok|legacy-job\n"
         )
         report = self.shk("status", "--job-id", "45", "--details")[1]
-        self.assertTrue(report["details"]["complete"])
+        self.assertFalse(report["details"]["complete"])
         self.assertEqual(report["details"]["accounting"][0]["job_id"], "44_2")
 
     def test_accounting_state_follows_chronology_not_print_order(self):
@@ -393,3 +393,77 @@ class IdentityChronologyFlows(Flow):
         code, report = self.submit("--preflight")
         self.assertEqual(code, 0)
         self.assertEqual(report["preflight"]["stdout"], "accepted\n\n")
+
+
+class EvidenceCompletenessRegressions(Flow):
+    tool = ExtensionFlows.tool
+    detail_tools = ExtensionFlows.detail_tools
+
+    def accounting(self, *, tres="cpu=1,gres/gpu=1", restarts=0, job="44", physical="44"):
+        return f"{job}|{physical}|sherlock|100|COMPLETED|owners|60|1|{tres}|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:01:01|{restarts}|0:0|sh01|{os.getuid()}|tok|legacy-job\n"
+
+    def test_missing_allocated_tres_prevents_complete_and_final_cost(self):
+        self.detail_tools(accounting=self.accounting(tres=""))
+        report = self.shk("status", "--job-id", "44", "--details")[1]
+        self.assertFalse(report["details"]["complete"])
+        self.assertIsNone(report["details"]["accounting"][0]["allocated_tres"])
+        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+
+    def test_restart_history_gap_prevents_complete_and_final_cost(self):
+        self.detail_tools(accounting=self.accounting(restarts=2))
+        report = self.shk("status", "--job-id", "44", "--details")[1]
+        self.assertFalse(report["details"]["complete"])
+        self.assertEqual(report["names"][0]["current"]["tasks"]["incomplete_history"], [0])
+        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+
+    def test_queue_identity_coverage_required_despite_successful_scontrol(self):
+        self.detail_tools(
+            accounting="",
+            queue=f"44|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{os.getuid()}|tok|legacy-job\n",
+            job="",
+        )
+        report = self.shk("status", "--job-id", "44", "--details")[1]
+        self.assertFalse(report["details"]["complete"])
+        self.assertEqual(report["details"]["missing_control_job_ids"], ["44"])
+        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+
+    def test_exact_array_element_selection_does_not_infer_failed_siblings(self):
+        for selector in ("45", "44_2"):
+            self.detail_tools(accounting=self.accounting(job="44_2", physical="45"))
+            report = self.shk("status", "--job-id", selector, "--details")[1]
+            self.assertFalse(report["details"]["complete"])
+            entry = report["names"][0]
+            self.assertEqual(entry["state"], "unknown")
+            self.assertEqual(entry["scope"], "partial_array")
+            self.assertIsNone(entry["current"]["array"]["count"])
+            self.assertIsNone(entry["current"]["tasks"]["missing"])
+            self.assertFalse(entry["current"]["cost"]["final"])
+            self.assertEqual(report["details"]["selection"]["partial_array_ids"], ["44"])
+
+
+class PendingEvidenceRegressions(Flow):
+    tool = ExtensionFlows.tool
+    detail_tools = ExtensionFlows.detail_tools
+
+    def test_held_pending_unallocated_tres_can_be_structurally_complete(self):
+        uid = os.getuid()
+        self.detail_tools(
+            accounting=f"44|44|sherlock|100|PENDING|owners|0|0||2026-10-10T12:00:00|Unknown|Unknown|0|0:0|None assigned|{uid}|tok|legacy-job\n",
+            queue=f"44|44|PENDING|owners|0:00|4|2026-10-10T12:00:00|Unknown|Unknown|(null)|{uid}|tok|legacy-job\n",
+            job=f"JobId=44 JobName=legacy-job UserId=user({uid}) Comment=tok JobState=PENDING Reason=JobHeldUser Priority=0 ReqTRES=cpu=4,mem=2G Requeue=1\n",
+        )
+        report = self.shk("status", "--job-id", "44", "--details")[1]
+        self.assertTrue(report["details"]["complete"])
+        self.assertTrue(report["details"]["allocation_evidence_complete"])
+        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+
+    def test_history_gap_marks_all_summaries_nonfinal(self):
+        uid = os.getuid()
+        records = "".join(
+            f"{job}|{job}|sherlock|{job}|COMPLETED|owners|60|1|cpu=1,gres/gpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:01:01|{restarts}|0:0|sh01|{uid}|tok|{name}\n"
+            for job, restarts, name in [("44", 0, "a-complete"), ("45", 2, "z-gap")]
+        )
+        self.detail_tools(accounting=records)
+        report = self.shk("status", "--job-id", "44", "--job-id", "45", "--details")[1]
+        self.assertFalse(report["details"]["complete"])
+        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))

@@ -428,7 +428,7 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
         cost={
             "cpu_seconds": sum(row.cpu_seconds for row in rows),
             "gpu_seconds": sum(row.gpu_seconds for row in rows),
-            "final": _final(deciding, accounted, count),
+            "final": not tasks["incomplete_history"] and _final(deciding, accounted, count),
         },
     )
 

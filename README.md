@@ -176,7 +176,7 @@ shk manifest DIR
 
 ## Detailed status contract
 
-`status --details` adds `details = {queue, accounting, jobs, complete, queried_at, history_window_days, missing_job_ids, malformed}`. Queue and
+`status --details` adds `details = {queue, accounting, jobs, complete, queried_at, history_window_days, missing_job_ids, missing_control_job_ids, selection, allocation_evidence_complete, history_complete, control_identities_complete, malformed}`. Queue and
 accounting are lists of full records, before summary deduplication; every
 record includes the original `raw` line. Their normalized fields are
 `job_id`, `job_id_raw`, `cluster`, `db_index`, `state`, `partition`,
@@ -190,8 +190,15 @@ start and end are null because squeue supplies requests or predictions there.
 including request TRES, Features, TimeLimit, Requeue and array identity. All
 records are restricted to the current UID. Partial tools, missing requested
 IDs, malformed rows or missing accounting cost identity mark evidence
-incomplete, retain available facts and prevent a final cost claim. A complete
-query does not establish unlimited historical coverage: it is bounded by
+incomplete, retain available facts and prevent a final cost claim. AllocTRES
+may be absent for an explicitly pending, unstarted allocation with zero CPUs
+and elapsed time; that is structurally complete and still has nonfinal cost.
+Missing allocation TRES after a job started and restart-history gaps are
+incomplete. Queued physical IDs must all have verified control identities.
+An exact array-element selection reports `selection.partial_array_ids`, entry
+`scope: partial_array`, unknown whole-array state/count/missing values, and
+nonfinal cost; sibling states cannot be inferred from a selected element.
+A complete query does not establish unlimited historical coverage: it is bounded by
 `history_window_days`, and array cardinality without provenance is inferred.
 
 A bounded deterministic workflow manager may run inside its allocated Slurm
