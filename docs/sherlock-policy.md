@@ -38,6 +38,14 @@ deterministic compute controllers inside an allocation, using `--executor local`
 without a workstation dependency, from agent or LLM rescheduling. Site limits,
 login-node restrictions, the 60 s cadence and access controls still bind.
 
+The lead re-read the site rules on 2026-10-13 before updating cancellation
+guidance. The numbered ownership rule permits stopping only one's own
+processes and uses scheduler cancellation for jobs. It does not impose
+per-job user consent. Routine exact cancellation inside an authorized task
+therefore retains the task authorization, with a recorded reason; ambiguous,
+unrelated, broad or materially destructive cancellation requires clarification.
+No job was cancelled to test this wording.
+
 ## Where each site rule lands
 
 | Site rule | Workstation file | Cluster file |
@@ -76,7 +84,7 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   partition, array, dependency, begin, job name, hold, comment) or start a heterogeneous job.
 - A live job name is never submitted twice; a finished one only with
   `--resubmit REASON`.
-- `shk cancel` is scoped to one job name and used only when the user asks.
+- `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; record the reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results.
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.

@@ -1,6 +1,6 @@
 ## Sherlock: agent running on Sherlock
 
-The site banner requires reading `/etc/agents/AGENTS.md` first. It and its topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it) override this file; only its numbered rules are requirements, the rest is recommended practice. Reviewed 2026-10-12 against the site files.
+Read `/etc/agents/AGENTS.md` first as the site banner requires. It and its topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it) override this file; only its numbered rules are requirements, the rest is recommended practice. Reviewed 2026-10-13 against the site files.
 
 ### Where you are
 - Run `hostname` and check `$SLURM_JOB_ID` before anything else: login node names contain `-ln` and have no job id.
@@ -24,11 +24,11 @@ The site banner requires reading `/etc/agents/AGENTS.md` first. It and its topic
 - Job scripts: `#!/bin/bash -l` (a non-login shell has no `ml`), `ml purge`, load modules, activate the environment, record versions, `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK`. Do not probe or change system configuration (reading `/etc/agents/` is fine) or add slow startup to `~/.bashrc`. Find agent CLIs and Python with `ml spider`; `shk` needs Python 3.11 or newer.
 
 ### Slurm
-- Prefer `shk submit`, `shk status` and `shk cancel`: the same contract as from a workstation, run by the local executor. Plain `sbatch` follows the same rules and the partition profiles below: explicit `--time`; GPU jobs `-G n` on a GPU partition; `-C` instead of `--exclude`; no `--account`. `sh_part` and `sh_node_feat` (login shell) list partitions and node features.
-- At least 60 s between checks (`squeue --me`, `sacct -j ID -o JobID,State,Elapsed,MaxRSS,ExitCode`, `seff ID`); prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; never resubmit without finding the cause; jobs do at least 10 minutes of work. `shk` exit 5: run the `shk status` command in the reply's `next`, not before the time it names, never a blind resubmit; exit 6: stop and report.
+- Prefer `shk submit`, `shk status` and `shk cancel`: the workstation contract, using the local executor. Plain `sbatch` follows the same rules and the profiles below: explicit `--time`; GPU jobs `-G n` on a GPU partition; `-C` instead of `--exclude`; no `--account`. `sh_part` and `sh_node_feat` (login shell) list partitions and node features.
+- At least 60 s between checks (`squeue --me`, `sacct -j ID -o JobID,State,Elapsed,MaxRSS,ExitCode`, `seff ID`); prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; diagnose before resubmitting; jobs do at least 10 minutes of work. `shk` exit 5: run the `shk status` command in the reply's `next`, not before the time it names, never a blind resubmit; exit 6: stop and report.
 - Never schedule future agent/LLM sessions (`scrontab`, `--begin`, self-resubmitting agents). Bounded deterministic compute controllers may submit and poll authorized stages inside an allocation via `shk --executor local`, no workstation needed.
-- Cancel only your own jobs, with `scancel ID` or `shk cancel`, and only when the user asks; never `scancel -u $USER`; never kill processes on compute nodes.
-- `shk doctor` is read-only. `shk` reads `[tool.sherlock-kit]` from the nearest `pyproject.toml` (or `sherlock-kit.toml`) at or above the working directory; from elsewhere pass `--project-dir DIR`.
+- Cancel only exact verified own jobs with `scancel ID` or UID/name-scoped `shk cancel`. Exact verified own cancellations in an authorized task may proceed; record a reason. Ask for unclear scope/ownership, unrelated work, broad cancellation or material irreversible loss of important progress/results. Never `scancel -u $USER`; never kill processes on compute nodes.
+- `shk doctor` is read-only. Config: `[tool.sherlock-kit]` in the nearest `pyproject.toml` or `sherlock-kit.toml` at/above cwd; elsewhere use `--project-dir DIR`.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`.

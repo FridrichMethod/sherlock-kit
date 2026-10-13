@@ -17,6 +17,7 @@ script does) stays with the user, the site rules and the project.
 | `partitions.py` | the packaged partition table and the generated rules block |
 | `doctor.py` | read-only checks |
 | `spec.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv; `submit`, `status`, `cancel`, `occupancy` |
+| `allocation.py` | local worker PID and allocation/step evidence, strict field parsing and actual resources |
 | `transfer.py` | `push`, `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
 | `data/remote/*.sh` | the fixed POSIX `sh` programs run on the login node |

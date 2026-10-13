@@ -21,12 +21,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
+from sherlock_kit import allocation, doctor, install, slurm, transfer, version_line
 from sherlock_kit import config as project_config
-from sherlock_kit import doctor, install, slurm, transfer, version_line
 from sherlock_kit import executor as executors
 from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, Outcome, ShkError
 
-MODULES: tuple[ModuleType, ...] = (doctor, slurm, transfer, install)
+MODULES: tuple[ModuleType, ...] = (doctor, slurm, transfer, install, allocation)
 
 
 def _utc_now() -> datetime:

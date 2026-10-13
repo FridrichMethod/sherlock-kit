@@ -92,7 +92,7 @@ shk pull /scratch/users/USER/project/runs/NAME/out results/NAME --validate bundl
 
 ## Cancel
 
-`shk cancel --task train-a` (or `--name NAME`) cancels only the live jobs of that one name and reports their ids and `next_check_after`. Cancel only when the user asks.
+`shk cancel --task train-a` (or `--name NAME`) cancels only the live jobs of that one name and reports their ids and `next_check_after`. Routine cancellation of exact verified own jobs in an authorized task may proceed; record the reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results. Keep current UID/name filters and unknown-outcome protection; never cancel all user jobs.
 
 ## On Sherlock
 

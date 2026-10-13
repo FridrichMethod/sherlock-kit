@@ -90,6 +90,7 @@ shk submit --task T [--campaign C] --script FILE --partition P --cpus N --mem SI
            [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--signal S] [--requeue|--no-requeue]
            [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--submission-token TOKEN] [--hold] [--dry-run|--preflight]
 shk resources --partition P [--partition P ...]
+shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION ...]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
 shk requeue --self --expect-name NAME --expect-token TOKEN
 shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all | --job-id ID ...) [--since DAYS] [--details]
@@ -140,6 +141,11 @@ shk manifest DIR
   allocated CPU, memory and GPU capacity once. `free_memory_mb` uses CfgTRES
   minus AllocTRES; OS FreeMem never substitutes. Missing facts are null and
   `complete: false`. Availability is a snapshot, not a resource reservation.
+- `allocation` verifies an explicit local worker PID, own UID, physical job/array
+  identity, current host and optional numeric step membership. It preserves actual
+  resources, topology, raw records and hashes; missing counts remain null and no
+  project resource policy is inferred. It refuses SSH, exited/reused PIDs and
+  ambiguous or contradictory evidence. See [the allocation contract](docs/allocation.md).
 - `release` checks one exact ID, current UID, expected name/token and user hold
   immediately before `scontrol release`. `requeue --self` has no arbitrary ID
   option: it requires the local physical allocation ID, actual Slurm PID
