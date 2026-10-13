@@ -438,6 +438,117 @@ class PullTests(TransferCase):
         self.assertEqual(lists, [{b"nested/log.txt", b"result.json", b"with space", b""}] * 2)
 
 
+class ReadonlyPullTests(TransferCase):
+    def freeze_remote(self):
+        for path in self.remote.rglob("*"):
+            path.chmod(0o555 if path.is_dir() or path.name == "execute.sh" else 0o444)
+        self.remote.chmod(0o555)
+
+    def test_large_files_from_pull_keeps_readonly_file_bytes_and_modes(self):
+        legacy_pull = (
+            "rsync",
+            "-r",
+            "--protect-args",
+            "--checksum",
+            "--partial",
+            "--from0",
+            "--files-from=-",
+        )
+        with patch.object(transfer, "PULL", legacy_pull):
+            self.assertEqual(self.pull()[0], 0)
+        # Multiple file-list batches revisit readonly parents created by earlier batches.
+        names = {
+            f"stages/group-{i % 7}/task-{i:04d}-{'a' * 64}/attempts/1/data-{'b' * 50}.json": str(i)
+            for i in range(1100)
+        }
+        names["stages/z-last/execute.sh"] = "#!/bin/sh\nexit 0\n"
+        self.write(self.remote, names)
+        self.sums()
+        self.freeze_remote()
+        listed = transfer.parse_manifest((self.remote / "SHA256SUMS").read_text())
+        self.assertGreater(sum(len(name.encode()) + 1 for name in listed), 137619)
+        before = {
+            name: ((self.remote / name).read_bytes(), (self.remote / name).stat().st_mode & 0o777)
+            for name in listed
+        }
+        code, body = self.pull("--replace")
+        self.assertEqual((code, body.get("action")), (0, "pulled"), body)
+        after = {
+            name: ((self.dest / name).read_bytes(), (self.dest / name).stat().st_mode & 0o777)
+            for name in listed
+        }
+        self.assertEqual(after, before)
+        self.assertEqual(tree(self.dest), self.expected())
+        commands = [
+            call[-1] for call in self.fake.calls() if "sherlock-dtn" in call and "-O" not in call
+        ]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0], commands[1])
+        self.assertNotIn(
+            "--chmod", commands[1]
+        )  # Receiving-side option must not reach the restricted DTN sender.
+        self.assertEqual((self.remote / "stages").stat().st_mode & 0o777, 0o555)
+
+    def test_resume_prunes_readonly_old_directories_and_keeps_readonly_data(self):
+        self.write(
+            self.stage,
+            {
+                "result.json": '{"value": 42}\n',
+                "nested/.log.txt.partial": "partial",
+                "gone/deep/old": "stale",
+            },
+        )
+        (self.stage / "result.json").chmod(0o444)
+        for path in self.stage.rglob("*"):
+            if path.is_dir():
+                path.chmod(0o555)
+        self.stage.chmod(0o555)
+        (self.remote / "result.json").chmod(0o444)
+        code, body = self.pull()
+        self.assertEqual((code, body.get("action")), (0, "pulled"), body)
+        self.assertEqual(tree(self.dest), self.expected())
+        self.assertEqual((self.dest / "result.json").stat().st_mode & 0o777, 0o444)
+        self.assertFalse((self.dest / "gone").exists())
+
+    def test_stage_root_symlink_is_refused_without_touching_target(self):
+        outside = self.tmp / "outside"
+        self.write(outside, {"keep": "untouched"})
+        outside.chmod(0o555)
+        self.stage.symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(ShkError):
+            transfer._prepare_stage(self.stage, {"result.json": H})
+        self.assertEqual((outside / "keep").read_text(), "untouched")
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
+        self.assertTrue(self.stage.is_symlink())
+
+    def test_child_symlink_is_pruned_without_following_or_chmodding_target(self):
+        outside = self.tmp / "outside"
+        self.write(outside, {"keep": "untouched"})
+        outside.chmod(0o555)
+        self.stage.mkdir()
+        (self.stage / "nested").symlink_to(outside, target_is_directory=True)
+        code, body = self.pull()
+        self.assertEqual(code, 0, body)
+        self.assertEqual(tree(self.dest), self.expected())
+        self.assertEqual((outside / "keep").read_text(), "untouched")
+        self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
+
+    def test_only_owned_stage_directories_are_repaired(self):
+        self.stage.mkdir()
+        real = os.fstat
+
+        def foreign(fd):
+            info = real(fd)
+            values = list(info)
+            values[4] = info.st_uid + 1
+            return os.stat_result(values)
+
+        before = self.stage.stat().st_mode & 0o777
+        with patch.object(os, "fstat", side_effect=foreign), self.assertRaises(ShkError):
+            transfer._prepare_stage(self.stage, {"result.json": H})
+        self.assertEqual(self.stage.stat().st_mode & 0o777, before)
+
+
 class RefusalAndPushTests(TransferCase):
     def test_refused_on_the_local_executor_and_without_a_master(self):
         pull = ["pull", str(self.remote), str(self.dest)]

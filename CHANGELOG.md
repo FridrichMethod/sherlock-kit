@@ -2,6 +2,12 @@
 
 ## 0.5.0
 
+- Pull keeps incoming directories owner-writable across large file-list batches.
+  Interrupted private stages repair owned directory access before resume/pruning,
+  refuse a symlink stage root and never chmod data files or child symlink targets.
+  The directory-only rsync option stays local to the receiver; the restricted DTN
+  sender command, file bytes and file permissions remain unchanged.
+
 - Detailed ID status queries read the current user's queue without expired-ID
   filters, then scope queue/control evidence to the requested IDs. Accounting
   retains exact ID filters, so aged-out single jobs and arrays remain readable

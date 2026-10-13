@@ -17,8 +17,9 @@ treat the stage as read-only, whatever they write is promoted with it), rename t
 
 manifest: write DIR/SHA256SUMS locally (inside jobs, no network), sha256sum-compatible and sorted.
 
-The DTN refuses rsync option forms that change its remote command line (--itemize-changes, --chmod):
-add no options. --files-from=- sends the same remote command as 0.3.0's DTN-proven list file.
+The DTN refuses options that alter its restricted sender command. Pull's --chmod=Du+rwx is
+receiver-local: it keeps incoming directories writable without changing file permissions or the
+remote sender command. --files-from=- sends the DTN-proven list-file command.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ import json
 import os
 import re
 import shutil
+import stat
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -50,7 +52,16 @@ SUMS_LINE = re.compile(r"([0-9a-fA-F]{64}) [ *](.+)")
 TAIL_CHARS = 500
 LINK_LOST = (12, 255)  # rsync: protocol stream broken; ssh: connection failed
 PUSH = ("rsync", "-rlt", "--protect-args", "--partial")
-PULL = ("rsync", "-r", "--protect-args", "--checksum", "--partial", "--from0", "--files-from=-")
+PULL = (
+    "rsync",
+    "-r",
+    "--protect-args",
+    "--checksum",
+    "--partial",
+    "--chmod=Du+rwx",
+    "--from0",
+    "--files-from=-",
+)
 MANIFEST_HINT = (
     "write SHA256SUMS last in the job: shk manifest DIR (or the documented sha256sum one-liner)"
 )
@@ -374,6 +385,45 @@ def _prune(directory: Path, files: set[str], directories: set[str], prefix: str 
             os.unlink(entry.path)
 
 
+def _writable_directories(directory: Path, parent_fd: int | None = None) -> None:
+    """Restore owner access only on this private stage's real, owned directories.
+
+    Opening each child relative to its parent's descriptor with O_NOFOLLOW avoids
+    chmodding a symlink target. Files are never opened or chmodded by this pass.
+    """
+    try:
+        fd = os.open(
+            directory if parent_fd is None else directory.name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=parent_fd,
+        )
+    except OSError as error:
+        raise ShkError(
+            EXIT_REFUSED,
+            "stage_untrusted",
+            f"Cannot open private stage directory {directory}: {error}",
+        ) from None
+    try:
+        info = os.fstat(fd)
+        if info.st_uid != os.geteuid():
+            raise ShkError(
+                EXIT_REFUSED,
+                "stage_untrusted",
+                f"Private stage directory {directory} belongs to another user",
+            )
+        mode = stat.S_IMODE(info.st_mode) | 0o700
+        if parent_fd is None:
+            mode &= ~0o077  # The stage root stays private, even after an interrupted readonly pull.
+        os.fchmod(fd, mode)
+        with os.scandir(fd) as scan:
+            found = list(scan)
+        for entry in found:
+            if entry.is_dir(follow_symlinks=False):
+                _writable_directories(directory / entry.name, fd)
+    finally:
+        os.close(fd)
+
+
 def _prepare_stage(stage: Path, entries: dict[str, str]) -> None:
     """The private stage, keeping what an earlier attempt fetched for this manifest and nothing else.
 
@@ -381,6 +431,7 @@ def _prepare_stage(stage: Path, entries: dict[str, str]) -> None:
     would fail verification forever. The stage belongs to shk, so they go before rsync resumes.
     """
     stage.mkdir(mode=0o700, exist_ok=True)
+    _writable_directories(stage)
     _prune(stage, set(entries), _parents(entries))
 
 

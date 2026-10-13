@@ -197,8 +197,12 @@ the run directory with its `.shk/` and logs. It refuses unsafe entries
 (absolute paths, empty, `.` or `..` components, `.shk` components, duplicates).
 With NAME the last component of LOCAL, it takes a lock on `.NAME.shk-lock`,
 rsyncs exactly the listed files into the private stage `.NAME.shk-stage` beside
-LOCAL (pruning anything the manifest does not list, so a rerun resumes it),
-verifies the inventory and every hash, re-reads the manifest, then runs the
+LOCAL (restoring owner access on its owned real directories before pruning
+anything the manifest does not list, so a rerun resumes it),
+and uses receiver-local `--chmod=Du+rwx` to keep incoming directories writable
+when a readonly source spans multiple file-list batches. File permissions are
+unchanged; the stage root stays private and child symlink targets are never
+followed or chmodded. It verifies the inventory and every hash, re-reads the manifest, then runs the
 validator named by `--validate`, if any: its argv from
 `[tool.sherlock-kit.validators]` plus the stage directory as the last argument,
 from the project root (the directory of the configuration file); exit 0 passes,
