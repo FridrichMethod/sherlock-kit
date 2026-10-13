@@ -53,7 +53,9 @@ substitute for actual step resources. Typed GPU TRES may be summed when no
 generic GPU total exists; typed subsets cannot exceed a stated total. Legacy
 `Gres`, `GRES` and `JOB_GRES` values must agree with one another and with actual
 TRES when populated. Null legacy GRES indicates CPU-only use only when actual
-TRES does not establish another count. Missing actual resource evidence fails;
+TRES does not establish another count. Unknown actual TRES or GRES values fail, including unknown legacy GPU counts.
+Known step CPU/GPU counts cannot exceed the known parent allocation counts.
+Missing actual resource evidence fails;
 missing CPU/node/task counts are retained as null. Only legacy evidence leaves
 actual TRES counts null.
 

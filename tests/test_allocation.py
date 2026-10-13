@@ -267,6 +267,27 @@ class AllocationCLI(unittest.TestCase):
         )
         self.assertNotEqual(self.run_cli()[0], 0)
 
+    def test_unknown_legacy_or_whole_actual_tres_never_authorizes_cpu_only(self):
+        original = self.data["job"]
+        for field in ("Gres", "GRES", "JOB_GRES"):
+            for actual in ("", " AllocTRES=cpu=4,gres/gpu=2"):
+                self.data["job"] = original.split(" AllocTRES=")[0] + actual + f" {field}=Unknown"
+                self.assertNotEqual(self.run_cli()[0], 0)
+        for actual in ("Unknown", "unknown", "UNKNOWN"):
+            self.data["job"] = original.split(" AllocTRES=")[0] + f" AllocTRES={actual} Gres=(null)"
+            self.assertNotEqual(self.run_cli()[0], 0)
+
+    def test_step_actual_resources_cannot_exceed_known_parent(self):
+        original = self.data["step"]
+        for old, new in (("CPUs=2", "CPUs=8"), ("gres/gpu=1", "gres/gpu=3")):
+            self.data["step"] = (
+                original.replace(old, new).replace("cpu=2", "cpu=8")
+                if old == "CPUs=2"
+                else original.replace(old, new).replace("Gres=gpu:a:1", "Gres=gpu:a:3")
+            )
+            code, report = self.run_cli("--step-id", "0")
+            self.assertNotEqual(code, 0, report)
+
     def test_owner_checked_before_process_contents_and_affinity_change(self):
         from types import SimpleNamespace
 

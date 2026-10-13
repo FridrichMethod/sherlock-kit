@@ -616,9 +616,7 @@ def _register_status(subparsers: Subparsers) -> None:
 
 
 def _register_cancel(subparsers: Subparsers) -> None:
-    parser = subparsers.add_parser(
-        "cancel", help="scancel the live jobs of one logical task (only when asked)"
-    )
+    parser = subparsers.add_parser("cancel", help="scancel verified own live jobs of one task/name")
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--task")
     which.add_argument("--name")

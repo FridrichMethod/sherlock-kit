@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 HOST = re.compile(r"[A-Za-z0-9_.-]+")
 HOSTLIST = re.compile(r"[A-Za-z0-9_.\[\],-]+")
 NULL = {"", "(null)", "N/A", "None", "Unknown"}
+ACTUAL_NULL = NULL - {"Unknown"}
 
 
 def invalid(message: str) -> ShkError:
@@ -94,7 +95,9 @@ def hashed(raw: str) -> dict[str, str]:
 
 def tres_counts(value: str | None) -> tuple[int | None, int | None]:
     """Normalize actual CPU/GPU TRES, including totals plus typed GPU subsets."""
-    if value is None or value in NULL:
+    if value is not None and value.lower() == "unknown":
+        raise invalid("unknown actual allocation TRES")
+    if value is None or value in ACTUAL_NULL:
         return None, None
     parsed: dict[str, str] = {}
     for entry in value.split(","):
@@ -127,7 +130,9 @@ def tres_counts(value: str | None) -> tuple[int | None, int | None]:
 
 def gres_count(value: str) -> int:
     """Count legacy actual GRES; annotations containing commas are device metadata."""
-    if value in NULL:
+    if value.lower() == "unknown":
+        raise invalid("unknown actual allocation GRES")
+    if value in ACTUAL_NULL:
         return 0
     if value.count("(") != value.count(")"):
         raise invalid("malformed allocated GRES annotation")
@@ -152,7 +157,7 @@ def resource_counts(fields: dict[str, str], *, step: bool) -> dict[str, int | No
     if cpus is not None and cpu_tres is not None and cpus != cpu_tres:
         raise invalid("allocated CPU fields disagree")
     legacy = [fields[key] for key in ("Gres", "GRES", "JOB_GRES") if key in fields]
-    counts = [gres_count(value) for value in legacy if value not in NULL]
+    counts = [gres_count(value) for value in legacy if value not in ACTUAL_NULL]
     if len(set(counts)) > 1 or (counts and gpu_tres is not None and counts[0] != gpu_tres):
         raise invalid("allocated GPU fields disagree")
     gpus = gpu_tres if gpu_tres is not None else (counts[0] if counts else (0 if legacy else None))
@@ -314,6 +319,10 @@ def step_record(
         raise invalid("step identity or partition differs from allocation")
     if not set(record["nodes"]).issubset(job["nodes"]):
         raise invalid("step nodes are outside parent allocation")
+    for key in ("allocated_cpus", "allocated_gpus"):
+        actual, parent = record[key], job[key]
+        if actual is not None and parent is not None and actual > parent:
+            raise invalid(f"step {key} exceeds parent allocation")
     record.update(
         step_id=step,
         tasks=number(
