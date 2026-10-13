@@ -198,6 +198,7 @@ class FrameTests(TempCase):
         self.assertEqual(
             sorted(commands),
             [
+                "allocation",
                 "cancel",
                 "doctor",
                 "install-skill",

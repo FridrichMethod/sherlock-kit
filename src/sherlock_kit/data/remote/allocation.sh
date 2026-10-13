@@ -14,5 +14,5 @@ listpids) output=$(scontrol listpids "$2") ;;
 *) exit 1 ;;
 esac
 rc=$?
-printf '%s\n' "$output" | sed 's/^/SHK_DATA|/'
-printf 'SHK_RC %s\nSHK_END\n' "$rc"
+printf "%s\n" "$output" | sed "s/^/SHK_DATA|/"
+printf "SHK_RC %s\nSHK_END\n" "$rc"
