@@ -2,6 +2,11 @@
 
 ## 0.5.0
 
+- Detailed ID status queries read the current user's queue without expired-ID
+  filters, then scope queue/control evidence to the requested IDs. Accounting
+  retains exact ID filters, so aged-out single jobs and arrays remain readable
+  without masking genuine queue RPC failures.
+
 - Operational JSON adds `schema_version: 1`; existing result keys and exits,
   help, rules and version text remain compatible.
 - `status --details` retains queue, accounting and queued `scontrol` identities,

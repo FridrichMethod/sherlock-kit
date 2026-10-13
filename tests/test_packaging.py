@@ -6,6 +6,7 @@ command runs with a temporary HOME; no shk command may change it (pip itself may
 user agent runs `rustc --version`, and a rustup shim then writes ~/.rustup).
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ import zipfile
 from pathlib import Path
 
 from fakes import ROOT
+from test_expired_status import assert_expiry_report, expiry_fixture
 
 BUILD_PYTHON = os.environ.get("SHK_BUILD_PYTHON")
 DATA = "sherlock_kit/data/"
@@ -182,6 +184,29 @@ class BuildTests(HeadCase):
         bin_dir = self.venv("wheel-env")
         self.run_ok(bin_dir / "python", "-m", "pip", "install", "--no-deps", wheel)
         self.assert_cli(bin_dir / "shk", "unknown")
+
+    def test_wheel_status_expired_ids(self):
+        wheel, _ = self.build()
+        bin_dir = self.venv("expiry-wheel-env")
+        self.run_ok(bin_dir / "python", "-m", "pip", "install", "--no-deps", wheel)
+        env, state = expiry_fixture(self.tmp)
+        self.env.update(env)
+        report = json.loads(
+            self.run_ok(
+                bin_dir / "shk",
+                "--executor",
+                "local",
+                "status",
+                "--job-id",
+                "44",
+                "--job-id",
+                "66",
+                "--job-id",
+                "55",
+                "--details",
+            )
+        )
+        assert_expiry_report(self, report, state)
 
     def test_editable_install(self):
         bin_dir = self.venv("editable-env")

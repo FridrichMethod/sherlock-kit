@@ -30,8 +30,20 @@ else
     done
     if [ -n "$selector" ]; then set -- "--name=$selector"; else set --; fi
 fi
-out=$(env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 squeue -h --local -t all -u "$u" "$@" -o "%i|%A|%T|%P|%M|%C|%V|%S|%e|%N|%U|%k|%j")
+queue() {
+    # Expired IDs can reject an otherwise valid squeue read. Accounting keeps its exact selector.
+    if [ "$mode" = ids ]; then set -- --array; fi
+    env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 squeue -h --local -t all -u "$u" "$@" -o "%i|%A|%T|%P|%M|%C|%V|%S|%e|%N|%U|%k|%j"
+}
+out=$(queue "$@")
 rc=$?
+if [ "$mode" = ids ]; then
+    # Restrict raw evidence before any scontrol lookup, including physical array element IDs.
+    out=$(printf "%s\n" "$out" | awk -F "|" -v wanted="$selector" -v uid="$uid" \
+        "BEGIN { n=split(wanted, ids, \",\") } \$11 ~ /^[0-9]+$/ && \$11 == uid { \
+        for (i=1; i<=n; i++) if (\$1 == ids[i] || \$2 == ids[i] || \
+        (index(ids[i], \"_\")==0 && index(\$1, ids[i] \"_\")==1)) { print; break } }")
+fi
 [ -z "$out" ] || printf "%s\n" "$out" | sed "s/^/SHK_Q|/"
 printf "SHK_RC squeue %s\n" "$rc"
 # scontrol supplies held request details absent from the portable squeue format.
