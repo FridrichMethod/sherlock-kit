@@ -17,6 +17,11 @@ merges to `main` and tags releases.
 
 ## Checks
 
+Write documentation in English using printable ASCII, tabs and newlines only,
+with no exceptions; [AGENTS.md](AGENTS.md) defines the covered filenames. The
+English documentation hook rejects non-ASCII characters and other control
+characters. The language requirement is also checked during review.
+
 Ordinary tests need no credentials, no Sherlock connection and no GPU. They run
 the real remote `sh` programs locally through a fake `ssh`, fake Slurm binaries
 and real `rsync`. Install `rsync` and `dash`, then set up a development
@@ -42,7 +47,8 @@ git diff --check
   (fully annotated, `[tool.mypy]` in `pyproject.toml`), shellcheck `--shell=sh`
   and shfmt on the remote programs, mdformat on the documentation (never on
   package data: the rules and the skill are delivered byte for byte) and the
-  usual file checks. Tests are linted, not type-checked. The `ruff` and `mypy`
+  usual file checks, plus the English documentation hook. Tests are linted,
+  not type-checked. The `ruff` and `mypy`
   pins in the `dev` extra equal the ruff-pre-commit and mirrors-mypy `rev`s;
   bump each pin together with its hook.
 - Tests stay on `unittest`; `tests/run_suite.py` runs them all.

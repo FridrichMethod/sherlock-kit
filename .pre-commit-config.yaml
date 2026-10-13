@@ -1,4 +1,13 @@
 repos:
+  - repo: local
+    hooks:
+      - id: english-documentation
+        name: English documentation (ASCII only)
+        language: pygrep
+        entry: '[^\x09\x0a\x0d\x20-\x7e]'
+        types: [file]
+        files: '(?i)(\.(md|markdown|mdx|rst|txt)$|(^|/)(README|CHANGELOG|CONTRIBUTING|AUTHORS|LICENSE|NOTICE)(\.[^/]*)?$)'
+
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
