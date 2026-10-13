@@ -11,6 +11,8 @@ from pathlib import Path
 from fakes import SRC
 from test_flows import Flow
 
+from sherlock_kit import executor
+
 FIXTURE = Path(__file__).parent / "fakes/expired_slurm.py"
 
 
@@ -110,6 +112,59 @@ class ExpiredStatusFlows(Flow):
         self.assertFalse(report["details"]["complete"])
         self.assertTrue(report["details"]["accounting"])
         self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+
+    def failing_filter(self):
+        """Replace only the temporary awk dependency with an actual failing process."""
+        command = self.tmp / "expiry-bin/awk"
+        command.write_text("#!/bin/sh\nexit 17\n")
+        command.chmod(0o755)
+
+    def test_filter_failure_does_not_hide_live_job_behind_old_accounting(self):
+        self.failing_filter()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-B",
+                "-m",
+                "sherlock_kit",
+                "--executor",
+                "local",
+                "status",
+                "--job-id",
+                "88",
+                "--details",
+            ],
+            env={**os.environ, "PYTHONPATH": str(SRC)},
+            cwd=self.tmp,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertFalse(report["details"]["complete"])
+        self.assertEqual(report["details"]["queue"], [])
+        self.assertTrue(report["details"]["accounting"])
+        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+
+    def test_filter_failure_preserves_original_queue_rpc_error_code(self):
+        self.failing_filter()
+        data = json.loads(self.state.read_text())
+        data["queue_rc"] = 9
+        self.state.write_text(json.dumps(data))
+        result = subprocess.run(
+            ["sh", "-c", executor.program_text("details"), "shk-details", "ids", "30", "88"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("SHK_RC squeue 9\n", result.stdout)
+        code, report = self.shk("status", "--job-id", "88", "--details")
+        self.assertEqual(code, 0)
+        self.assertFalse(report["details"]["complete"])
 
     def test_source_cli_process_has_the_same_expiry_contract(self):
         result = subprocess.run(

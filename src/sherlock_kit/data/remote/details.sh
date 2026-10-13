@@ -43,6 +43,9 @@ if [ "$mode" = ids ]; then
         "BEGIN { n=split(wanted, ids, \",\") } \$11 ~ /^[0-9]+$/ && \$11 == uid { \
         for (i=1; i<=n; i++) if (\$1 == ids[i] || \$2 == ids[i] || \
         (index(ids[i], \"_\")==0 && index(\$1, ids[i] \"_\")==1)) { print; break } }")
+    filter_rc=$?
+    # Failed scoping cannot prove an empty queue; preserve any original RPC failure.
+    if [ "$rc" -eq 0 ] && [ "$filter_rc" -ne 0 ]; then rc=$filter_rc; fi
 fi
 [ -z "$out" ] || printf "%s\n" "$out" | sed "s/^/SHK_Q|/"
 printf "SHK_RC squeue %s\n" "$rc"
