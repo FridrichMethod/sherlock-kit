@@ -287,9 +287,15 @@ def membership(collector: Collector, pid: int, job: str, step: str | None) -> di
     raw = collector.query("pidinfo", str(pid))
     lines = raw.splitlines()
     match = re.fullmatch(
-        r"Slurm (?:JobId=|job id )([0-9]+)(?:\.(?:batch|extern|[0-9]+))? ends at .+", raw
+        r"Slurm (?:JobId=|job id )([0-9]+)(?:\.(?:batch|extern|[0-9]+))? ends at .+", lines[0]
     )
-    if len(lines) != 1 or not match or match[1] != job:
+    valid_lines = len(lines) == 1 or (
+        len(lines) == 2
+        and re.fullmatch(
+            r"(?:slurm_get_rem_time is [0-9]+|Job remaining time is [0-9]+ seconds)", lines[1]
+        )
+    )
+    if not valid_lines or not match or match[1] != job:
         raise invalid("worker PID is not verified in selected allocation")
     evidence: dict[str, Any] = {"job": {"source": "scontrol pidinfo", **hashed(raw)}, "step": None}
     if step is not None:

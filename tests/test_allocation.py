@@ -252,6 +252,48 @@ class AllocationCLI(unittest.TestCase):
             self.data["listpids"] = changed
             self.assertNotEqual(self.run_cli("--step-id", "0")[0], 0)
 
+    def test_documented_pidinfo_remaining_time_preserves_complete_raw_evidence(self):
+        identities = (
+            "Slurm job id 44.batch ends at Fri Sep 04 15:50:47 2020",
+            "Slurm JobId=44 ends at 2026-10-14T00:00:00",
+        )
+        for identity, auxiliary in (
+            (identities[0], "slurm_get_rem_time is 31535906"),
+            (identities[1], "Job remaining time is 1192 seconds"),
+            (identities[1], "Job remaining time is 0 seconds"),
+        ):
+            with self.subTest(identity=identity, auxiliary=auxiliary):
+                raw = identity + "\n" + auxiliary
+                self.data["pidinfo"] = raw
+                code, report = self.run_cli()
+                self.assertEqual(code, 0, report)
+                self.assertTrue(report["process"]["job_membership_verified"])
+                evidence = report["membership_evidence"]["job"]
+                self.assertEqual(evidence["raw"], raw)
+                self.assertEqual(evidence["sha256"], hashlib.sha256(raw.encode()).hexdigest())
+
+    def test_pidinfo_auxiliary_cannot_hide_ambiguous_identity_or_malformed_output(self):
+        identity = self.data["pidinfo"]
+        auxiliary = "slurm_get_rem_time is 1200"
+        extra_lines = (
+            auxiliary + "\n" + identity,
+            auxiliary + "\n" + identity.replace("JobId=44", "JobId=45"),
+            auxiliary + "\n" + auxiliary,
+            auxiliary + "\nJob remaining time is 1200 seconds",
+            "slurm_get_rem_time is -1",
+            "slurm_get_rem_time is unknown",
+            "slurm_get_rem_time is 1.0",
+            "Job remaining time is -1 seconds",
+            "Job remaining time is 1200",
+            "unrecognized extra output",
+        )
+        for extra in extra_lines:
+            with self.subTest(extra=extra):
+                self.data["pidinfo"] = identity + "\n" + extra
+                self.assertNotEqual(self.run_cli()[0], 0)
+        self.data["pidinfo"] = auxiliary
+        self.assertNotEqual(self.run_cli()[0], 0)
+
     def test_auxiliary_listpids_placeholders_do_not_limit_generic_proof(self):
         self.data["listpids"] = self.data["listpids"].replace(" 0 0 0", " 0 - -1")
         code, report = self.run_cli("--step-id", "0")

@@ -22,6 +22,15 @@ PID belongs to the selected physical job. An optional numeric step additionally
 requires exactly one matching row in `scontrol listpids JOB.STEP`. Environment
 variables alone never prove allocation membership.
 
+A `pidinfo` reply has exactly one job identity line and may include one
+nonnegative remaining-time line: `slurm_get_rem_time is N` (the
+[SchedMD troubleshooting example](https://slurm.schedmd.com/SLUG19/Troubleshooting.pdf),
+page 14), or `Job remaining time is N seconds` (the
+[current SchedMD implementation](https://github.com/SchedMD/slurm/blob/master/src/scontrol/info_job.c)).
+Duplicate/conflicting identity lines, multiple auxiliary lines, malformed
+counters and unrecognized output fail. Both lines remain in the raw evidence
+and its hash; remaining time never substitutes for job identity.
+
 ## JSON schema version 1
 
 Success has `ok: true`, `action: "allocation"`, `executor: "local"`,
