@@ -291,5 +291,23 @@ class FinalHistoryTests(unittest.TestCase):
         self.assertFalse(result["cost"]["final"])
 
 
+class UnknownCountTests(unittest.TestCase):
+    def test_unseen_indices_without_a_known_count_are_neither_failed_nor_missing(self):
+        for indices in ((1, 2, 3), (0, 4, 8)):
+            with self.subTest(indices=indices):
+                result = resolve(acct=[a(f"300_{i}") for i in indices])
+                tasks = result["current"]["tasks"]
+                self.assertEqual(
+                    (result["state"], tasks["count"], tasks["missing"]), ("done", None, None)
+                )
+                self.assertEqual(result["current"]["array"], {"count": None, "count_known": False})
+                self.assertFalse(result["current"]["cost"]["final"])
+        failed = resolve(acct=[a("300_1"), a("300_2", "FAILED", exit_code="1:0")])
+        self.assertEqual((failed["state"], failed["current"]["tasks"]["failed"]), ("failed", 1))
+        self.assertEqual(resolve([q("300_[5-6]")], [a("300_1")])["state"], "live")
+        known = resolve(acct=[a(f"300_{i}") for i in (1, 2, 3)], spec=(300, 4))
+        self.assertEqual((known["state"], known["current"]["tasks"]["missing"]), ("failed", 1))
+
+
 if __name__ == "__main__":
     unittest.main()

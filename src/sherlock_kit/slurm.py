@@ -371,7 +371,7 @@ def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dic
 
 
 def _task_summary(
-    deciding: dict[int, Row], restarts: dict[int, set[int]], count: int
+    deciding: dict[int, Row], restarts: dict[int, set[int]], count: int | None
 ) -> dict[str, Any]:
     kinds = Counter(_kind(row.state) for row in deciding.values())
     gaps = [index for index, seen in sorted(restarts.items()) if seen != set(range(max(seen) + 1))]
@@ -381,18 +381,19 @@ def _task_summary(
         "failed": kinds["failed"],
         "running": kinds["running"],
         "pending": kinds["pending"],
-        "missing": count - len(deciding),
+        "missing": None if count is None else count - len(deciding),
         "by_state": dict(sorted(Counter(row.state for row in deciding.values()).items())),
         "incomplete_history": gaps[:20],
     }
 
 
-def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> bool:
+def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int | None) -> bool:
     """Whether sacct holds every task in the terminal state that decides it.
 
-    Only then is the cost final: squeue can show the end before slurmdbd has the row.
+    Only then is the cost final: squeue can show the end before slurmdbd has the row. An
+    unknown task count never proves that every task was seen.
     """
-    return all(
+    return count is not None and all(
         index in accounted
         and accounted[index].state in TERMINAL
         and accounted[index].state == deciding[index].state
@@ -401,15 +402,26 @@ def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> b
 
 
 def _job(rows: list[Row], known_count: int | None) -> Job:
-    """Summary of one base job; known_count is the task count from its spec file, if any."""
+    """Summary of one base job; known_count is the task count from its spec file, if any.
+
+    Without it an array's count is inferred only when the seen tasks are exactly 0..max (shk's
+    own layout). A 1-based or stepped legacy array, or one whose early tasks left the sacct
+    window, has an unknown count: its state comes from the seen tasks, nothing is missing
+    and the cost is not final.
+    """
     deciding, accounted, restarts = _deciding_rows(rows)
     single = not any(row.array for row in rows)
     width = max(deciding) + 1
-    count = 1 if single else max(known_count or 0, width)
+    if single:
+        count: int | None = 1
+    elif known_count:
+        count = max(known_count, width)
+    else:
+        count = width if len(deciding) == width else None
     tasks = _task_summary(deciding, restarts, count)
     if tasks["running"] or tasks["pending"]:
         state = "live"
-    elif tasks["completed"] == count:
+    elif tasks["completed"] == (len(deciding) if count is None else count):
         state = "done"
     else:
         state = "failed"

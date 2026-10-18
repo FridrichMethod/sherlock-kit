@@ -366,3 +366,21 @@ class JobIdSummaryTests(DetailsFlow):
         self.assertEqual(
             (code, report["names"][0]["current"]["anomalies"]), (6, ["unknown_partition"])
         )
+
+
+class ArrayCountTests(DetailsFlow):
+    """D7: legacy arrays need not be 0-based or contiguous."""
+
+    def test_array_without_task_zero_or_known_count_is_not_failed(self):
+        rows = [
+            account(f"7600_{i}", str(7600 + i), "COMPLETED", name="array.sbatch") for i in (1, 2, 3)
+        ]
+        self.canned(accounting=rows)
+        code, report = self.details("--job-id", "7600")
+        self.assertEqual(code, 0)
+        current = report["names"][0]["current"]
+        self.assertEqual(report["names"][0]["state"], "done")
+        self.assertEqual((current["tasks"]["count"], current["tasks"]["missing"]), (None, None))
+        self.assertEqual((current["array"]["count"], current["tasks"]["completed"]), (None, 3))
+        self.assertFalse(current["cost"]["final"])
+        self.assertTrue(report["details"]["complete"])
