@@ -109,7 +109,8 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
    `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
    `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
-   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`, `-H`/`--hold`, `--comment`) or
+   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`,
+   `-H`/`--hold`, and `--comment` when a submission token sets Comment) or
    start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
    `--courtesy-ack`. The denylist follows sbatch's getopt parsing: abbreviated
    long options (`--part`) and short flags bundled after value-less ones

@@ -81,7 +81,8 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,
-  partition, array, dependency, begin, job name, hold, comment) or start a heterogeneous job.
+  partition, array, dependency, begin, job name, hold, and comment when a
+  submission token sets it) or start a heterogeneous job.
 - A live job name is never submitted twice; a finished one only with
   `--resubmit REASON`.
 - `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; record the reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results.

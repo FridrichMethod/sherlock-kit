@@ -1,12 +1,13 @@
 """Offline submit checks, the job name, the sbatch argv and the frozen job spec.
 
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
-partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
-the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
-script_unreadable) for bad memory, time, array, --after-ok or --submission-token grammar, --hold
-without a token, an unreadable script or one over 1 MiB. --constraint and --signal go to sbatch
-unchanged (Slurm checks them); each --after-ok value must be one job id, since shk joins them into
-its own --dependency string, where a ',' or '?' would add clauses.
+partition, GPUs or requeue its profile forbids, a denylisted option (--comment only with a
+token) or a hetjob separator in the leading #SBATCH block, or a borrowed partition without
+--courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad memory, time, array, --after-ok
+or --submission-token grammar, --hold without a token, an unreadable script or one over 1 MiB.
+--constraint and --signal go to sbatch unchanged (Slurm checks them); each --after-ok value must
+be one job id, since shk joins them into its own --dependency string, where a ',' or '?' would
+add clauses.
 """
 
 from __future__ import annotations
@@ -48,8 +49,8 @@ DENIED_LONG = (
     "begin",
     "job-name",
     "hold",
-    "comment",
 )
+COMMENT = "comment"  # shk owns Slurm Comment only when --submission-token sets it
 DENIED_SHORT = "AxGpadbJH"  # -b is --begin
 FLAGS_WITHOUT_VALUE = "hOQsuvVW"  # sbatch short flags that may be bundled before another one
 HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: one name, many jobs
@@ -187,8 +188,8 @@ def directives(script: bytes) -> list[str]:
     return words
 
 
-def denied(word: str) -> bool:
-    """Whether one #SBATCH word sets an option shk owns or starts a hetjob component.
+def denied(word: str, owned: tuple[str, ...] = DENIED_LONG) -> bool:
+    """Whether one #SBATCH word sets an option shk owns (long names in owned) or starts a hetjob.
 
     sbatch parses #SBATCH words with getopt_long, so this follows it: -p, -pgpu, -Hp (value-less
     flags bundle before another), --partition=gpu, --part=gpu (an unambiguous prefix) and
@@ -200,14 +201,14 @@ def denied(word: str) -> bool:
         option = word[2:].partition("=")[0]
         if not option:
             return False
-        return option.startswith("gpus") or any(name.startswith(option) for name in DENIED_LONG)
+        return option.startswith("gpus") or any(name.startswith(option) for name in owned)
     if word.startswith("-"):
         flags = word[1:].lstrip(FLAGS_WITHOUT_VALUE)
         return bool(flags) and flags[0] in DENIED_SHORT
     return False
 
 
-def read_script(path: str) -> bytes:
+def read_script(path: str, owns_comment: bool = False) -> bytes:
     """The job script bytes: at most 1 MiB, without a denylisted #SBATCH option."""
     try:
         with open(path, "rb") as stream:
@@ -216,14 +217,15 @@ def read_script(path: str) -> bytes:
         raise ShkError(EXIT_LOCAL, "script_unreadable", f"{path}: {exc.strerror or exc}") from None
     if len(data) > SCRIPT_LIMIT:
         raise _invalid(f"{path} is larger than 1 MiB")
-    refused = [word for word in directives(data) if denied(word)]
+    owned = (*DENIED_LONG, COMMENT) if owns_comment else DENIED_LONG
+    refused = [word for word in directives(data) if denied(word, owned)]
     if refused:
         raise ShkError(
             EXIT_REFUSED,
             "sbatch_directive",
             f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
             hint="remove it from the script and use the shk submit command line instead "
-            "(heterogeneous jobs are not supported)",
+            "(--submission-token sets Comment; heterogeneous jobs are not supported)",
         )
     return data
 
@@ -346,7 +348,7 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     profile = partitions.profile(args.partition)
     wanted = resources(args, profile)
     run = run_directory(args.run_dir, config, name)
-    script = read_script(args.script)
+    script = read_script(args.script, owns_comment=args.submission_token is not None)
     if profile.borrowed and not args.courtesy_ack:
         raise ShkError(
             EXIT_REFUSED,

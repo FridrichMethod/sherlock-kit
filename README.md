@@ -127,8 +127,9 @@ shk manifest DIR
 - The script's leading `#SBATCH` lines may set anything except what `shk` owns
   (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
   `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,
-  `-J`/`--job-name`, `-H`/`--hold`, `--comment`) and a `hetjob` or `packjob` separator: heterogeneous jobs
-  are refused. Matching follows sbatch's own parsing, so abbreviated long
+  `-J`/`--job-name`, `-H`/`--hold`, and `--comment` when `--submission-token`
+  sets Comment) and a `hetjob` or `packjob` separator: heterogeneous jobs are
+  refused. Matching follows sbatch's own parsing, so abbreviated long
   options (`--part=gpu`) and short flags bundled after value-less ones
   (`-Hp gpu`) count too.
 - `status`: one `squeue` and one `sacct` for all selected names; `--since`

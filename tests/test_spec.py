@@ -211,6 +211,15 @@ class DirectiveTests(Case):
         unbalanced = spec.directives(b"#SBATCH --comment='unbalanced\n")
         self.assertEqual(unbalanced, ["--comment='unbalanced"])
 
+    def test_a_script_comment_is_refused_only_when_shk_owns_comment(self):
+        comments = ("--comment='exp 42'", "--comment=sweep-lr-0.1", "--comm=bookkeeping-42")
+        for directive in comments:
+            body = f"#!/bin/sh\n#SBATCH {directive}\necho\n".encode()
+            with self.subTest(directive=directive):
+                self.assertNotIn("--comment", " ".join(self.build(body=body).argv))
+                error = self.refused(3, "sbatch_directive", body=body, submission_token="t1")
+                self.assertIn("--submission-token", error.hint)
+
 
 class ProfileAndArgvTests(Case):
     def test_profile_gates(self):
