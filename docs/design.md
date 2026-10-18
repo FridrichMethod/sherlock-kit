@@ -224,9 +224,10 @@ Before pruning it gives owner rwx back only to real stage directories that lack
 it (left by an interrupted pull of a readonly source); an ordinary pull issues
 no chmod, so filesystems that refuse chmod (CIFS) work, and a needed repair that
 fails is exit 1 `stage_unwritable`. Because the stage is promoted onto LOCAL, a
-stage directory another user owns (planted in a shared parent) is refused with
-exit 3 `stage_untrusted`; an id-mapped filesystem that shows another owner needs
-the stage removed by hand. File permissions are unchanged, a symlinked
+stage that already exists and has a directory another user owns (planted in a
+shared parent) is refused with exit 3 `stage_untrusted`; a stage shk has just
+created is not checked, so on an id-mapped filesystem that shows another owner a
+refused resume works again once the stage is removed. File permissions are unchanged, a symlinked
 stage root is refused and a child symlink target is never followed or
 chmodded. It verifies the inventory and every hash, re-reads the manifest, then
 runs the validator named by `--validate`, if any: its argv from

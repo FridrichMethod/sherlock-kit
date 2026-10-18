@@ -414,7 +414,7 @@ def _writable_directories(directory: Path, parent_fd: int | None = None) -> None
                 EXIT_REFUSED,
                 "stage_untrusted",
                 f"Private stage directory {directory} belongs to another user",
-                hint="remove it if it is yours (an id-mapped filesystem can show another owner)",
+                hint="remove it if it is yours (an id-mapped filesystem can show another owner); a new stage is not checked",
             )
         mode = stat.S_IMODE(info.st_mode)
         wanted = mode | 0o700
@@ -443,9 +443,12 @@ def _prepare_stage(stage: Path, entries: dict[str, str]) -> None:
     A killed rsync leaves temp files (.NAME.XXXXXX) and an older manifest leaves unlisted files; both
     would fail verification forever. The stage belongs to shk, so they go before rsync resumes.
     """
-    stage.mkdir(mode=0o700, exist_ok=True)
-    _writable_directories(stage)
-    _prune(stage, set(entries), _parents(entries))
+    try:
+        stage.mkdir(mode=0o700)
+    except FileExistsError:
+        # Only a stage that already existed can be planted or left readonly; a new one is ours.
+        _writable_directories(stage)
+        _prune(stage, set(entries), _parents(entries))
 
 
 def _verify(stage: Path, entries: dict[str, str]) -> int:

@@ -62,7 +62,9 @@
   element also returns its siblings), the current UID and name, RUNNING, a
   partition whose profile allows requeue and Requeue=1; `--expect-token` is
   optional and checked when given. An array element is requeued as
-  `ArrayJobId_ArrayTaskId`, never as the bare array id. Lost mutation replies
+  `ArrayJobId_ArrayTaskId`, never as the bare array id; identity and policy fields
+  come from the record's leading fields, never from free text such as Comment.
+  Lost mutation replies
   remain unknown (exit 5) with Slurm's message; checkpoint/retry decisions stay
   outside the kit.
 

@@ -574,6 +574,21 @@ class ReadonlyPullTests(TransferCase):
         self.stage.chmod(0o700)
         self.assertFalse(self.dest.exists())
 
+    def test_a_new_stage_on_an_id_mapped_filesystem_is_not_refused(self):
+        # NFSv4 idmap falling back to nobody, sshfs, vfat uid=0: stat names another owner even for
+        # the directory shk has just created, which nobody else can have planted.
+        real = os.fstat
+
+        def foreign(fd):
+            values = list(real(fd))
+            values[4] = 65534
+            return os.stat_result(values)
+
+        with patch.object(os, "fstat", side_effect=foreign):
+            code, body = self.pull()
+        self.assertEqual((code, body.get("action")), (0, "pulled"), body)
+        self.assertEqual(tree(self.dest), self.expected())
+
     def test_a_refused_needed_repair_is_a_clear_local_error(self):
         self.stage.mkdir()
         self.stage.chmod(0o500)
