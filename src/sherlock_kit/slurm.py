@@ -84,6 +84,7 @@ RUNNING = frozenset({
 MAX_ROWS = 50_000
 CADENCE = timedelta(seconds=60)
 SINCE_DAYS, SINCE_DAYS_ALL = 30, 7
+MAX_SINCE_DAYS = 31  # Sherlock's slurmdbd refuses wider sacct windows ("Too wide of a date range")
 BUDGET_JOBS, BUDGET_MINUTES = 2, 120  # "about 2 jobs x 2 h while others are active" (btrippe)
 
 
@@ -630,7 +631,7 @@ def _register_status(subparsers: Subparsers) -> None:
         "--since",
         type=int,
         metavar="DAYS",
-        help=f"sacct window (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)",
+        help=f"sacct window, 1 to {MAX_SINCE_DAYS} (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)",
     )
     parser.set_defaults(handler=status)
 
@@ -880,8 +881,13 @@ def _since(args: argparse.Namespace) -> int:
     if args.since is None:
         return SINCE_DAYS_ALL if args.all else SINCE_DAYS
     since: int = args.since
-    if since < 1:
-        raise ShkError(EXIT_LOCAL, "spec_invalid", "--since must be at least 1 day")
+    if not 1 <= since <= MAX_SINCE_DAYS:
+        raise ShkError(
+            EXIT_LOCAL,
+            "spec_invalid",
+            f"--since must be 1 to {MAX_SINCE_DAYS} days",
+            hint=f"Sherlock's slurmdbd refuses sacct windows wider than {MAX_SINCE_DAYS} days",
+        )
     return since
 
 

@@ -416,3 +416,22 @@ class EntryEvidenceTests(DetailsFlow):
         self.assertEqual([job["job_id"] for job in report["details"]["jobs"]], ["7700"])
         self.assertTrue(report["details"]["control_identities_complete"])
         self.assertFalse(report["details"]["complete"])
+
+
+class WindowTests(DetailsFlow):
+    """G5: Sherlock's slurmdbd refuses sacct windows wider than 31 days."""
+
+    def test_since_above_31_days_is_refused_offline(self):
+        self.canned()
+        for argv in (
+            ("--task", "train-a"),
+            ("--task", "train-a", "--details"),
+            ("--job-id", "7900"),
+        ):
+            with self.subTest(argv=argv):
+                code, report = self.shk("status", *argv, "--since", "32")
+                self.assertEqual((code, report["error"]), (1, "spec_invalid"))
+                self.assertIn("31", report["message"])
+        self.assertEqual(self.fake.state()["calls"], [])
+        self.assertEqual(self.details("--job-id", "7900", "--since", "31")[0], 0)
+        self.assertIn("now-31days", self.fake.calls("sacct")[0]["argv"])
