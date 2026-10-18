@@ -234,7 +234,8 @@ class GuardAndEvidenceFlows(Flow):
         uid = os.getuid()
         script = self.tool(
             "scontrol",
-            f'case "$*" in "listpids 44") printf "%s 44 batch 0 0\\n" "$PPID" ;; "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
+            # listpids lists every process of the job: each ancestor (bash adds a subshell).
+            f'case "$*" in "listpids 44") p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do printf "%s 44 batch 0 0\\n" "$p"; p=$(ps -o ppid= -p "$p" | tr -d " "); done ;; "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
         )
         code, report = self.shk(
             "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"
@@ -264,7 +265,7 @@ class GuardAndEvidenceFlows(Flow):
         # Membership is read by the physical id; the element is shown and requeued as 44_2.
         self.tool(
             "scontrol",
-            f'case "$*" in "listpids 45") printf "%s 45 batch 0 0\\n" "$PPID" ;; "show job 44_2 --oneliner") printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44_2") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
+            f'case "$*" in "listpids 45") p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do printf "%s 45 batch 0 0\\n" "$p"; p=$(ps -o ppid= -p "$p" | tr -d " "); done ;; "show job 44_2 --oneliner") printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44_2") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
         )
         code, report = self.shk(
             "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"

@@ -4,7 +4,8 @@ Records follow the Slurm 25.11.8 `scontrol show job --oneliner` shape observed o
 with synthetic ids, users and hosts. An array's meta physical id (the element that keeps
 JobId == ArrayJobId) answers `show job <id>` with its own record AND every sibling, while
 `show job <ArrayJobId>_<ArrayTaskId>` returns exactly one record; `scontrol listpids` takes
-only a physical id and prints the physical JOBID.
+only a physical id and prints the physical JOBID, listing every process of the job, so the fake
+lists every ancestor of itself (bash adds a command-substitution subshell that dash does not).
 """
 
 import json
@@ -31,7 +32,20 @@ reply = replies.get(argv)
 if reply is None:
     sys.stderr.write(f"fake scontrol: unexpected argv {argv}\\n")
     sys.exit(97)
-sys.stdout.write(reply.get("out", "").replace("@PPID@", str(os.getppid())))
+out = reply.get("out", "")
+if "@PPID@" in out:
+    import subprocess
+    # Each process between this fake and the test, which is where control.sh runs.
+    ancestors, pid = [], os.getppid()
+    while pid > 1 and pid != int(os.environ["FAKE_SCONTROL_ROOT"]):
+        ancestors.append(str(pid))
+        ps = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True)
+        pid = int(ps.stdout) if ps.stdout.strip().isdecimal() else 0
+    out = "".join(
+        "".join(line.replace("@PPID@", own) for own in ancestors) if "@PPID@" in line else line
+        for line in out.splitlines(keepends=True)
+    )
+sys.stdout.write(out)
 sys.stderr.write(reply.get("err", ""))
 sys.exit(reply.get("rc", 0))
 """
@@ -96,6 +110,7 @@ class ControlFlow(Flow):
             PATH=f"{self.tools}{os.pathsep}{os.environ['PATH']}",
             FAKE_SCONTROL=str(self.tmp / "scontrol.json"),
             FAKE_SCONTROL_CALLS=str(self.calls_file),
+            FAKE_SCONTROL_ROOT=str(os.getpid()),
         )
         self.allocation()
 
