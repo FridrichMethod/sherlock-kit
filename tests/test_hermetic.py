@@ -1,6 +1,7 @@
 """The suite stays offline inside a Sherlock job: importing fakes (both entry points do) scrubs
 the inherited scheduler environment, puts blocking Slurm clients on PATH behind the per-test
-fakes, and refuses a TMPDIR that cannot execute the fakes written there."""
+fakes, and refuses a TMPDIR that cannot execute the fakes written there; run_suite.py fails a
+run in which a test reached the tripwire."""
 
 import json
 import os
@@ -129,6 +130,25 @@ class HermeticSuite(unittest.TestCase):
         path = FakeSlurm(self.tmp).env()["PATH"]
         self.assertEqual(shutil.which("squeue", path=path), str(BIN / "squeue"))
         self.assertEqual(shutil.which("scontrol", path=path), str(TRIPWIRE / "scontrol"))
+
+    def test_run_suite_fails_a_run_that_reached_the_tripwire(self):
+        # A fail-closed test passes on the stub's nonzero exit; only run_suite's hit check fails it.
+        code = (
+            "import subprocess, sys, unittest\n"
+            "import run_suite\n"
+            "class Leak(unittest.TestCase):\n"
+            "    def test_fail_closed(self):\n"
+            "        argv = ['sh', '-c', 'scancel -u someone --name=x']\n"
+            "        self.assertNotEqual(subprocess.run(argv, check=False).returncode, 0)\n"
+            "suite = unittest.TestSuite([Leak('test_fail_closed')])\n"
+            "unittest.defaultTestLoader.discover = lambda *args, **kwargs: suite\n"
+            "sys.exit(run_suite.main())\n"
+        )
+        result = child(code)
+        self.assertIn("OK", result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("reached the Slurm tripwire instead of a fake:\n", result.stderr)
+        self.assertIn("  scancel -u someone --name=x\n", result.stderr)
 
     def test_a_tmpdir_that_cannot_execute_is_refused(self):
         cases = [("simulated", NOEXEC, {})]
