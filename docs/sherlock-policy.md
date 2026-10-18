@@ -42,8 +42,9 @@ The lead re-read the site rules on 2026-10-13 before updating cancellation
 guidance. The numbered ownership rule permits stopping only one's own
 processes and uses scheduler cancellation for jobs. It does not impose
 per-job user consent. Routine exact cancellation inside an authorized task
-therefore retains the task authorization, with a recorded reason; ambiguous,
-unrelated, broad or materially destructive cancellation requires clarification.
+therefore retains the task authorization, and the agent tells the user why;
+ambiguous, unrelated, broad or materially destructive cancellation requires
+clarification.
 No job was cancelled to test this wording.
 
 ## Where each site rule lands
@@ -87,7 +88,7 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   submission token sets it) or start a heterogeneous job.
 - A live job name is never submitted twice; a finished one only with
   `--resubmit REASON`.
-- `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; record the reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results.
+- `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; tell the user why, since `shk cancel` records no reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results.
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.
