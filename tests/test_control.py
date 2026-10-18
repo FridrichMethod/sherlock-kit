@@ -292,7 +292,7 @@ class SelfRequeue(ControlFlow):
 
     def test_requeue_follows_the_profile_requeue_flag(self):
         table = {
-            name: partitions.Profile(name, False, name == "normal", False, False, "")
+            name: partitions.Profile(name, False, name == "normal", False, False, True, "")
             for name in ("normal", "owners")
         }
         self.allocation("44")
