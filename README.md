@@ -145,7 +145,9 @@ shk manifest DIR
   identity, current host and optional numeric step membership. It preserves actual
   resources, topology, raw records and hashes; missing counts remain null and no
   project resource policy is inferred. It refuses SSH, exited/reused PIDs and
-  ambiguous or contradictory evidence. See [the allocation contract](docs/allocation.md).
+  ambiguous or contradictory evidence; a scheduler that does not answer is a
+  retryable read failure, never non-membership. See
+  [the allocation contract](docs/allocation.md).
 - `release` checks one exact ID, current UID, expected name/token and user hold
   immediately before `scontrol release`. `requeue --self` has no arbitrary ID
   option: it requires the local allocation (`SLURM_JOB_ID`), actual Slurm PID

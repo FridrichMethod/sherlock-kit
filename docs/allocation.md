@@ -13,9 +13,9 @@ collection. Ownership is checked before reading process contents. A dead,
 zombie, replaced or changing process cannot produce complete success.
 
 The command reads actual Slurm job, optional numeric step and local node
-records with fixed POSIX shell programs. Each query is limited to 20 seconds;
-the complete collection has a 60-second deadline. Every reply line is one
-record, parsed strictly: malformed or duplicate fields fail. A reply may hold several records:
+records with fixed POSIX shell programs, all within the configured
+`command_timeout` (default 60 seconds). Every reply line is one record, parsed
+strictly: malformed or duplicate fields fail. A reply may hold several records:
 `scontrol show job N` for the array element that keeps the array's meta record
 (`JobId` equal to `ArrayJobId`) also returns every sibling element. The proof
 keeps only the one record whose `JobId` is the selected `N`, or whose
@@ -48,8 +48,17 @@ substitutes for job identity.
 Success has `ok: true`, `action: "allocation"`, `executor: "local"`,
 `complete: true` and a UTC `queried_at`. Failure produces the ordinary error
 object, never a partially successful allocation proof. Unsupported SSH
-execution exits 3 (`local_only`); invalid or unavailable evidence exits 1
-(`allocation_invalid`); invalid exact job selectors use `spec_invalid`.
+execution exits 3 (`local_only`); invalid exact job selectors use
+`spec_invalid`. Invalid or contradictory evidence exits 1
+(`allocation_invalid`), including a query that Slurm answers with an error,
+such as an unknown job or a PID outside every job; the message carries Slurm's
+own text. A Slurm controller that does not answer exits 1 (`malformed_read`)
+with the hint to retry once after 60 seconds; the recognized messages are
+`Unable to contact slurm controller`,
+`Socket timed out on send/recv operation` and
+`Zero Bytes were transmitted or received`. A collection that exceeds
+`command_timeout` exits 4 (`timeout`), like every other read. Neither means the
+PID is outside the job.
 
 | Object | Fields |
 |---|---|

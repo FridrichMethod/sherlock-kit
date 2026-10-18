@@ -275,7 +275,7 @@ class AllocationCLI(unittest.TestCase):
         code, report = self.run_cli(job="44_2")
         self.assertEqual(code, 0, report)
         self.assertEqual((report["job"]["job_id"], report["job"]["array_task_id"]), ("45", "2"))
-        self.assertRefused(self.run_cli(job="44_3"), "invalid or failed job scheduler reply")
+        self.assertRefused(self.run_cli(job="44_3"), "Invalid job id specified")
         self.data["job"]["44_3"] = self.data["job"]["44_2"]
         self.assertRefused(self.run_cli(job="44_3"), "exactly one matching scheduler record")
 
@@ -412,6 +412,25 @@ class AllocationCLI(unittest.TestCase):
                 self.data["pidinfo"][str(self.worker.pid)] = self.pidinfo(f"44{suffix}")
                 code, report = self.run_cli()
                 self.assertEqual(code, 0, report)
+
+    def test_scheduler_rpc_failures_are_retryable_reads_not_non_membership(self):
+        for action in ("job", "pidinfo", "node"):
+            with self.subTest(action=action):
+                self.data["error"] = {
+                    action: "slurm_load_jobs error: Socket timed out on send/recv operation\n"
+                }
+                self.assertRefused(
+                    self.run_cli(), "Socket timed out on send/recv operation", "malformed_read"
+                )
+        self.data["error"] = {"pidinfo": "slurm_pid2jobid error: Invalid job id specified\n"}
+        found, report = self.run_cli()
+        self.assertRefused((found, report), "slurm_pid2jobid error: Invalid job id specified")
+        self.assertIsNone(report["hint"])
+
+    def test_scheduler_timeout_is_a_read_timeout(self):
+        (self.tmp / "sherlock-kit.toml").write_text("command_timeout = 2\n")
+        self.data["delay"] = {"pidinfo": 10}
+        self.assertRefused(self.run_cli(), "allocation", "timeout", 4)
 
     def test_documented_pidinfo_remaining_time_preserves_complete_raw_evidence(self):
         for identity, auxiliary in (

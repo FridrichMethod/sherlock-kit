@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import control, details, executor
-from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, Outcome, ShkError
+from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNREACHABLE, Outcome, ShkError
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
@@ -156,28 +156,36 @@ class Collector:
     """Bound all read-only queries to one overall deadline and validate framing."""
 
     def __init__(self, ctx: Context) -> None:
-        """Use the already verified local executor."""
+        """Use the already verified local executor and its configured command timeout."""
         self.ex = ctx.executor()
-        self.deadline = time.monotonic() + 60
+        self.deadline = time.monotonic() + self.ex.command_timeout
         self.hostlists: list[dict[str, Any]] = []
 
     def query(self, action: str, target: str) -> str:
-        """Run only a fixed program operation, refusing tool failure or missing proof."""
+        """Run one fixed read; a slow or unreachable scheduler is never non-membership."""
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
-            raise invalid("allocation evidence deadline exceeded")
-        result = executor.run_program(
-            self.ex, "allocation", [action, target], timeout=min(20, remaining)
-        )
-        if result.status != "complete":
-            raise invalid(f"allocation {action} read failed: {result.status}")
-        lines = result.stdout.splitlines()
+            raise ShkError(
+                EXIT_UNREACHABLE,
+                "timeout",
+                "allocation: evidence deadline exceeded",
+                hint="run shk doctor",
+            )
+        result = executor.run_program(self.ex, "allocation", [action, target], timeout=remaining)
+        lines = executor.check(result, f"allocation {action}").stdout.splitlines()
         if (
-            len(lines) < 3
-            or lines[-2:] != ["SHK_RC 0", "SHK_END"]
+            len(lines) < 2
+            or lines[-1] != "SHK_END"
+            or not lines[-2].startswith("SHK_RC ")
             or any(not line.startswith("SHK_DATA|") for line in lines[:-2])
         ):
-            raise invalid(f"invalid or failed {action} scheduler reply")
+            raise invalid(f"malformed {action} scheduler reply")
+        code = lines[-2].removeprefix("SHK_RC ")
+        if code != "0":
+            stderr = result.stderr.strip()[-2000:]
+            raise control.transient(f"allocation {action}", stderr) or invalid(
+                f"{action} scheduler query failed (exit {code}): {stderr}"
+            )
         raw = "\n".join(line.removeprefix("SHK_DATA|") for line in lines[:-2]).strip()
         if not raw:
             raise invalid(f"missing {action} evidence")
