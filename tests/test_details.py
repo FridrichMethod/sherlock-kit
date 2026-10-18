@@ -198,6 +198,9 @@ class ControlTimeTests(DetailsFlow):
         for tool in ("squeue", "sacct", "scontrol"):
             env = self.fake.calls(tool)[0]["env"]
             self.assertEqual((env.get("TZ"), env.get("SLURM_TIME_FORMAT")), ("UTC", "standard"))
+        # Slurm cuts pending task expressions such as N_[1,3,5-9] at 64 bytes by default.
+        for tool in ("squeue", "sacct"):
+            self.assertEqual(self.fake.calls(tool)[0]["env"].get("SLURM_BITSTR_LEN"), "0")
 
 
 class NeverAllocatedTests(DetailsFlow):

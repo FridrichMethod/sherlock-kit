@@ -13,7 +13,7 @@ of field values, or strings split at "|", in details.sh column order; jobs are s
 
 Any other argv exits 2, so a changed remote program cannot pass by accident. The state knobs
 "queue_rc" and "sacct_rc" fail a tool like an unreachable controller or database. Every call
-is recorded with the TZ, LC_ALL and SLURM_TIME_FORMAT it saw.
+is recorded with the TZ, LC_ALL, SLURM_TIME_FORMAT and SLURM_BITSTR_LEN it saw.
 """
 
 import json
@@ -47,7 +47,7 @@ ACCOUNTING = (
 )
 WINDOW = re.compile(r"now-([0-9]+)days")
 MAX_WINDOW_DAYS = 31
-RECORDED_ENV = ("TZ", "LC_ALL", "SLURM_TIME_FORMAT")
+RECORDED_ENV = ("TZ", "LC_ALL", "SLURM_TIME_FORMAT", "SLURM_BITSTR_LEN")
 STATE = "FAKE_CANNED_SLURM"
 USER = pwd.getpwuid(os.getuid()).pw_name
 
