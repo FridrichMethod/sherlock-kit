@@ -295,6 +295,33 @@ def _summary_evidence(
             current["evidence_complete"] = False
 
 
+def _by_job(rows: Rows) -> list[dict[str, Any]]:
+    """--job-id: one entry per base job, in job id order.
+
+    Legacy jobs often share a script name, so a name is no task identity there: only shk
+    names keep the duplicate_live (across the selected jobs) and unknown_partition checks.
+    """
+    from sherlock_kit import slurm, spec
+
+    entries = []
+    for name, found in rows.by_name.items():
+        jobs: dict[int, list[slurm.Row]] = {}
+        for row in found:
+            jobs.setdefault(row.base, []).append(row)
+        shk = spec.NAME.fullmatch(name) is not None
+        malformed = rows.malformed[name] + rows.malformed[None]
+        resolved = [
+            {"name": name, **slurm.resolve_name(group, malformed=malformed, invariants=shk)}
+            for group in jobs.values()
+        ]
+        live = [entry["current"] for entry in resolved if entry["state"] == "live"]
+        if shk and len(live) > 1:
+            for current in live:
+                current["anomalies"] = sorted([*current["anomalies"], "duplicate_live"])
+        entries.extend(resolved)
+    return sorted(entries, key=lambda entry: int(entry["current"]["job_id"]))
+
+
 def _returncodes(lines: list[str]) -> dict[str, int | None]:
     """The SHK_RC exit status of each tool, or None when the program never reported it."""
     found = {}
@@ -346,11 +373,14 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         **slurm._cadence(ctx),
     }
     report.update(queried_at=meta["queried_at"], history_window_days=since)
-    listed = selected or [slurm.Selected(name) for name in sorted(rows.by_name)]
-    names = [
-        {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
-        for item in listed
-    ]
+    if ids:
+        names = _by_job(rows)
+    else:
+        listed = selected or [slurm.Selected(name) for name in sorted(rows.by_name)]
+        names = [
+            {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
+            for item in listed
+        ]
     _summary_evidence(names, rows, ids, report)
     if not ended or codes["squeue"] != 0 or codes["sacct"] != 0:
         # Like plain status: states derived from a failed queue or accounting read could

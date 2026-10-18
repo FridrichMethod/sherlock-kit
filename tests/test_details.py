@@ -300,3 +300,69 @@ class FreeTextTests(DetailsFlow):
         self.assertEqual((code, report["names"][0]["name"]), (0, "seed=1|lr=0.1"))
         self.assertEqual(report["details"]["queue"][0]["comment"], "x|y")
         self.assertTrue(report["details"]["complete"])
+
+
+class JobIdSummaryTests(DetailsFlow):
+    """D6, D28: --job-id summarizes each base job; shk name invariants apply to shk names."""
+
+    def test_legacy_jobs_sharing_a_script_name_are_separate_entries(self):
+        self.canned(
+            queue=[
+                queue("7500", "7500", "RUNNING", nodes="sh01-01n01", name="train.sh"),
+                queue("7501", "7501", "PENDING", name="train.sh", partition="normal,owners"),
+                queue(
+                    "7502", "7502", "RUNNING", nodes="sh01-01n02", name="lab.sh", partition="mylab"
+                ),
+            ],
+            jobs=[
+                record("7500", name="train.sh", state="RUNNING"),
+                record("7501", name="train.sh"),
+                record("7502", name="lab.sh", state="RUNNING"),
+            ],
+        )
+        code, report = self.details("--job-id", "7500", "--job-id", "7501", "--job-id", "7502")
+        self.assertEqual(code, 0)
+        found = [
+            (e["name"], e["current"]["job_id"], e["state"], e["history"]) for e in report["names"]
+        ]
+        self.assertEqual(
+            found,
+            [
+                ("train.sh", "7500", "live", []),
+                ("train.sh", "7501", "live", []),
+                ("lab.sh", "7502", "live", []),
+            ],
+        )
+        self.assertEqual([e["current"]["anomalies"] for e in report["names"]], [[], [], []])
+
+    def test_shk_names_keep_their_invariants_in_job_id_mode(self):
+        self.canned(
+            queue=[
+                queue("7510", "7510", "RUNNING", nodes="sh01-01n01"),
+                queue("7511", "7511", "PENDING"),
+            ],
+            jobs=[record("7510", state="RUNNING"), record("7511")],
+        )
+        code, report = self.details("--job-id", "7510", "--job-id", "7511")
+        self.assertEqual(code, 6)
+        anomalies = [entry["current"]["anomalies"] for entry in report["names"]]
+        self.assertEqual(anomalies, [["duplicate_live"], ["duplicate_live"]])
+
+    def test_preemption_on_a_non_preemptible_partition_exits_6(self):
+        self.canned(
+            accounting=[
+                account("7520", "7520", "PREEMPTED", name="legacy", db="9001"),
+                account("7520", "7520", "COMPLETED", name="legacy", db="9002", restarts="1"),
+            ]
+        )
+        code, report = self.details("--job-id", "7520")
+        self.assertEqual(
+            (code, report["names"][0]["current"]["anomalies"]), (6, ["unexpected_preemption"])
+        )
+
+    def test_shk_name_on_an_unknown_partition_exits_6(self):
+        self.canned(accounting=[account("7530", "7530", "COMPLETED", partition="mystery")])
+        code, report = self.details("--task", "train-a")
+        self.assertEqual(
+            (code, report["names"][0]["current"]["anomalies"]), (6, ["unknown_partition"])
+        )

@@ -433,26 +433,33 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
     )
 
 
-def _anomalies(job: Job, live_jobs: int, malformed: int) -> list[str]:
+def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> list[str]:
+    """invariants: shk names, where one name is one task on a packaged partition."""
     profile = partitions.profiles().get(job.partition)
     found = []
-    if live_jobs > 1:
+    if invariants and live_jobs > 1:
         found.append("duplicate_live")
     if malformed:
         found.append("malformed_rows")
     if profile is None:
-        found.append("unknown_partition")
+        if invariants:
+            found.append("unknown_partition")
     elif not profile.preemptible and (job.preempted or job.max_restart > 0):
         found.append("unexpected_preemption")
     return sorted(found)
 
 
 def resolve_name(
-    rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | None = None, malformed: int = 0
+    rows: list[Row],
+    spec_files: int = 0,
+    newest_spec: SpecFile | None = None,
+    malformed: int = 0,
+    invariants: bool = True,
 ) -> dict[str, Any]:
     """Pure: one name's rows give {state, current, history, spec_files}.
 
     The largest base id is the current attempt, and any live job makes the name live.
+    Without invariants (a legacy name) duplicate_live and unknown_partition do not apply.
     """
     jobs: dict[int, list[Row]] = {}
     for row in {row.key: row for row in rows}.values():
@@ -468,7 +475,7 @@ def resolve_name(
     live = [job for job in summaries.values() if job.state == "live"]
     return {
         "state": "live" if live else newest.state,
-        "current": newest.current(_anomalies(newest, len(live), malformed)),
+        "current": newest.current(_anomalies(newest, len(live), malformed, invariants)),
         "history": [job.history() for job in summaries.values() if job is not newest],
         "spec_files": spec_files,
     }
