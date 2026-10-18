@@ -62,7 +62,8 @@ class MarkdownTests(unittest.TestCase):
         self.assertEqual(
             lines[1],
             "`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. "
-            "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`.",
+            "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job "
+            "held there counts as submitting it (same occupancy check, budget and time window).",
         )
         self.assertEqual(len(lines), 2 + len(NAMES))
         self.assertEqual([line.split("`")[1] for line in lines[2:]], NAMES)

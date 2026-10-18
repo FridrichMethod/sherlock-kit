@@ -77,7 +77,9 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   authorization fact, and scheduler visibility never is.
 - Borrowed partitions (`btrippe`, `possu`) need `shk occupancy` and
   `--courtesy-ack`; their budgets and the possu 00:00-07:00 Pacific window are
-  the owner's courtesy terms, carried as text.
+  the owner's courtesy terms, carried as text. Releasing a job held there counts
+  as submitting it (same occupancy check, budget and window); `shk release`
+  itself checks neither occupancy nor the clock.
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,

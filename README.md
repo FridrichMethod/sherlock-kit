@@ -179,7 +179,8 @@ shk manifest DIR
   `possu`) need it and `--courtesy-ack` before a submission, and such a
   submission reports their occupancy and courtesy text, with a warning when
   others are running there and you already have 2 jobs there or ask for more
-  than 2 h.
+  than 2 h. Releasing a job held there counts as submitting it: `release`
+  checks neither occupancy nor the clock, so check both first.
 - `install-skill` copies the agent skill into a project (`.claude/skills/` and
   `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/` (Codex
   gets a hint instead); `--check` exits 1 when a copy is missing or stale.

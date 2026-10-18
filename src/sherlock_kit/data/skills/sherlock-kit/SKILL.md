@@ -88,7 +88,8 @@ shk pull /scratch/users/USER/project/runs/NAME/out results/NAME --validate bundl
 ## Occupancy and borrowed partitions
 
 - `shk occupancy --partition btrippe` shows who uses a partition now. Run it before every submission to a borrowed partition (`borrowed=yes` in the rules' partition profiles), read the courtesy text, then submit with `--courtesy-ack`. The submit reply repeats the occupancy and courtesy text and warns, without refusing, when others are running there and you already have 2 jobs there or ask for more than 2 h.
-- `btrippe`: about 2 jobs x 2 h while others are active. `possu`: submit only between 00:00 and 07:00 Pacific, a few short jobs. Unlisted partitions are refused; scheduler visibility is never authorization.
+- Releasing a job held on a borrowed partition counts as submitting it: `shk release` checks neither occupancy nor the clock, so run `shk occupancy` first and release only within the budget and window that a submission would need.
+- `btrippe`: about 2 jobs x 2 h while others are active. `possu`: submit or release only between 00:00 and 07:00 Pacific, a few short jobs. Unlisted partitions are refused; scheduler visibility is never authorization.
 
 ## Cancel
 

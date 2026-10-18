@@ -22,7 +22,8 @@ from sherlock_kit.errors import EXIT_REFUSED, ShkError
 
 INTRO = (
     "`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. "
-    "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`."
+    "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held "
+    "there counts as submitting it (same occupancy check, budget and time window)."
 )
 
 
