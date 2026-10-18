@@ -69,6 +69,12 @@ class ResourcesFlows(Flow):
         self.scontrol(node("cn01", "IDLE", "gpu"), rc=1, stderr=error)
         code, report = self.shk("resources", "--partition", "gpu")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
+        # A healthy read that matches no node is an empty answer, not an outage.
+        self.scontrol(node("cn02", "IDLE", "normal"))
+        code, report = self.shk("resources", "--partition", "gpu")
+        self.assertEqual(
+            (code, report["ok"], report["complete"], report["nodes"]), (0, True, False, [])
+        )
 
     def test_partition_filter_reads_partitions_lists_and_lists_a_node_once(self):
         self.scontrol(
@@ -91,6 +97,7 @@ class ResourcesFlows(Flow):
             node("cn01", "MIXED", "stat,owners"),
             node("cn02", "IDLE", "normal"),
             node("cn03", "IDLE", "gpu,owners"),
+            node("cn04", "IDLE", "hns_gpu,statx"),
         )
         local = executor.LocalExecutor(command_timeout=30)
         reply = executor.run_program(local, "resources", ["gpu", "stat"])
