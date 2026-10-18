@@ -114,9 +114,10 @@ def normalized(values: dict[str, str], raw: str) -> dict[str, Any]:
             record[label] = value
     if "Elapsed" in values:
         record["elapsed_seconds"] = _elapsed(values["Elapsed"])
-    # Pending squeue CPUs and start/end times are requests/estimates, not allocation facts.
+    # squeue prints requested CPUs, and a placeholder start, for a job without nodes (pending,
+    # or cancelled before any allocation); pending end times are estimates.
     if "Elapsed" in values:
-        if values.get("State") == "PENDING":
+        if values.get("State") == "PENDING" or values.get("NodeList", "") in MISSING:
             record.update(allocated_cpus=None, started_at=None)
         if values.get("State") not in {
             "COMPLETED",
@@ -142,12 +143,13 @@ def _selected(value: str, ids: list[str]) -> bool:
 
 
 def _allocation_complete(data: dict[str, str]) -> bool:
-    """Missing TRES is valid only for an explicitly unstarted pending allocation."""
+    """Missing TRES is valid only for a job that never had an allocation, in any state.
+
+    Pending, held and cancelled-before-start rows print AllocCPUS 0, ElapsedRaw 0, no Start
+    and no AllocTRES; a started job without AllocTRES is incomplete evidence.
+    """
     return data["AllocTRES"] not in MISSING or (
-        data["State"] == "PENDING"
-        and data["Start"] in MISSING
-        and data["ElapsedRaw"] == "0"
-        and data["AllocCPUS"] == "0"
+        data["Start"] in MISSING and data["ElapsedRaw"] == "0" and data["AllocCPUS"] == "0"
     )
 
 

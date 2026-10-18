@@ -198,3 +198,44 @@ class ControlTimeTests(DetailsFlow):
         for tool in ("squeue", "sacct", "scontrol"):
             env = self.fake.calls(tool)[0]["env"]
             self.assertEqual((env.get("TZ"), env.get("SLURM_TIME_FORMAT")), ("UTC", "standard"))
+
+
+class NeverAllocatedTests(DetailsFlow):
+    """D4, G4: jobs cancelled while held or pending never had an allocation."""
+
+    def cancelled_while_held(self):
+        self.canned(
+            queue=[
+                queue("7300", "7300", "CANCELLED", name="held-single"),
+                queue("7301", "7301", "CANCELLED", name="held-array"),
+            ],
+            accounting=[
+                account("7300", "7300", f"CANCELLED by {UID}", name="held-single"),
+                account("7301_[0-1]", "7301", f"CANCELLED by {UID}", name="held-array"),
+            ],
+            jobs=[
+                record("7300", name="held-single", state="CANCELLED"),
+                record(
+                    "7301", name="held-array", state="CANCELLED", array="7301", task="4294967294"
+                ),
+            ],
+        )
+        return self.details("--job-id", "7300", "--job-id", "7301")
+
+    def test_cancelled_never_allocated_jobs_are_complete_with_final_zero_cost(self):
+        code, report = self.cancelled_while_held()
+        self.assertEqual(code, 0)
+        self.assertTrue(report["details"]["allocation_evidence_complete"])
+        self.assertTrue(report["details"]["complete"])
+        entries = {entry["name"]: entry for entry in report["names"]}
+        for name, count in (("held-single", 1), ("held-array", 2)):
+            current = entries[name]["current"]
+            self.assertEqual(entries[name]["state"], "failed")
+            self.assertEqual(current["tasks"]["count"], count)
+            self.assertEqual(current["cost"], {"cpu_seconds": 0, "gpu_seconds": 0, "final": True})
+
+    def test_cancelled_queue_rows_carry_no_allocation_facts(self):
+        records = self.cancelled_while_held()[1]["details"]["queue"]
+        self.assertEqual([row["allocated_cpus"] for row in records], [None, None])
+        self.assertEqual([row["started_at"] for row in records], [None, None])
+        self.assertEqual([row["ended_at"] for row in records], ["2026-10-10T12:02:26Z"] * 2)
