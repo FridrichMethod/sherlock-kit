@@ -147,44 +147,67 @@ class ControlFlow(Flow):
 
 class SelfRequeue(ControlFlow):
     def test_meta_array_element_requeues_only_its_own_task(self):
-        # The last task keeps the meta record: SLURM_JOB_ID == SLURM_ARRAY_JOB_ID.
+        # The last task keeps the meta record: SLURM_JOB_ID == SLURM_ARRAY_JOB_ID, and the
+        # physical id answers with every sibling too, in either order.
         self.allocation("50", "50", "1")
         own = job_record("50", array="50", task="1")
         sibling = job_record("51", array="50", task="0")
-        self.scontrol({
-            "listpids 50": {"out": listpids("50")},
-            "show job 50 --oneliner": {"out": f"{own}\n{sibling}\n"},
-            "show job 50_1 --oneliner": {"out": own + "\n"},
-            "requeue 50_1": {},
-        })
-        code, report = self.requeue("--expect-token", "tok-1")
-        self.assertEqual(
-            (code, report.get("action"), report.get("job_id")), (0, "requeued", "50_1")
-        )
-        self.assertEqual(
-            self.calls(),
-            [["listpids", "50"], ["show", "job", "50_1", "--oneliner"], ["requeue", "50_1"]],
-        )
+        for order, records in enumerate((f"{own}\n{sibling}\n", f"{sibling}\n{own}\n")):
+            with self.subTest(order=order):
+                self.calls_file.unlink(missing_ok=True)
+                self.scontrol({
+                    "listpids 50": {"out": listpids("50")},
+                    "show job 50 --oneliner": {"out": records},
+                    "requeue 50_1": {},
+                })
+                code, report = self.requeue("--expect-token", "tok-1")
+                self.assertEqual(
+                    (code, report.get("action"), report.get("job_id")), (0, "requeued", "50_1")
+                )
+                self.assertEqual(
+                    self.calls(),
+                    [["listpids", "50"], ["show", "job", "50", "--oneliner"], ["requeue", "50_1"]],
+                )
 
-    def test_split_array_element_is_shown_and_requeued_as_its_task(self):
+    def test_split_array_element_is_requeued_as_its_task(self):
         self.allocation("51", "50", "0")
         self.scontrol({
             "listpids 51": {"out": listpids("51")},
-            "show job 50_0 --oneliner": {"out": job_record("51", array="50", task="0") + "\n"},
+            "show job 51 --oneliner": {"out": job_record("51", array="50", task="0") + "\n"},
             "requeue 50_0": {},
         })
         code, report = self.requeue("--expect-token", "tok-1")
         self.assertEqual((code, report.get("job_id")), (0, "50_0"))
         self.assertEqual(self.calls()[-1], ["requeue", "50_0"])
 
-    def test_array_record_must_be_this_physical_allocation(self):
-        self.allocation("51", "50", "0")
+    def test_inherited_array_variables_do_not_retarget_a_plain_job(self):
+        # A plain sbatch run inside array task 70_3 inherits SLURM_ARRAY_*; Slurm's record of
+        # the physical job, which has no ArrayJobId, decides the target.
+        self.allocation("80", "70", "3")
         self.scontrol({
-            "listpids 51": {"out": listpids("51")},
-            "show job 50_0 --oneliner": {"out": job_record("52", array="50", task="0") + "\n"},
+            "listpids 80": {"out": listpids("80")},
+            "show job 80 --oneliner": {"out": job_record("80") + "\n"},
+            "requeue 80": {},
         })
-        code, report = self.requeue("--expect-token", "tok-1")
-        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED physical"))
+        code, report = self.requeue()
+        self.assertEqual((code, report.get("job_id")), (0, "80"), report)
+        self.assertEqual(
+            self.calls(),
+            [["listpids", "80"], ["show", "job", "80", "--oneliner"], ["requeue", "80"]],
+        )
+
+    def test_record_must_be_this_physical_allocation(self):
+        # Only the record whose JobId is the PID-verified physical id is ever acted on.
+        self.allocation("51", "50", "0")
+        own = job_record("51", array="50", task="0")
+        for case, records in enumerate((job_record("52", array="50", task="0"), f"{own}\n{own}")):
+            with self.subTest(case=case):
+                self.scontrol({
+                    "listpids 51": {"out": listpids("51")},
+                    "show job 51 --oneliner": {"out": records + "\n"},
+                })
+                code, report = self.requeue("--expect-token", "tok-1")
+                self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED ambiguous"))
         self.assertNotIn("requeue", [call[0] for call in self.calls()])
 
     def test_token_is_optional_but_checked_when_given(self):
@@ -241,8 +264,9 @@ class SelfRequeue(ControlFlow):
         for job, array, task, target in (
             ("44", None, None, "50"),
             ("44", None, None, "44_0"),
-            ("51", "50", "0", "51"),
-            ("50", "50", "1", "50"),
+            ("51", "50", "0", "50_0"),
+            ("50", "50", "1", "50_1"),
+            (None, None, None, "44"),
         ):
             with self.subTest(job=job, array=array, task=task, target=target):
                 self.allocation(job, array, task)
@@ -259,7 +283,7 @@ class SelfRequeue(ControlFlow):
         code, report = self.requeue()
         self.assertEqual((code, report["error"]), (3, "self_only"))
         self.executor = "local"
-        for job, array, task in ((None, None, None), ("44_1", None, None), ("51", "50", None)):
+        for job, array, task in ((None, None, None), ("44_1", None, None), ("4x", "50", "0")):
             with self.subTest(job=job, array=array, task=task):
                 self.allocation(job, array, task)
                 code, report = self.requeue()

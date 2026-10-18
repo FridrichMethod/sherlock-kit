@@ -153,13 +153,14 @@ shk manifest DIR
   option: it requires the local allocation (`SLURM_JOB_ID`), actual Slurm PID
   membership in that physical job, current UID and name, the token only when
   `--expect-token` is given, RUNNING state, a partition whose profile allows
-  requeue (today `owners`) and Requeue=1. An array element is verified and
-  requeued as `ArrayJobId_ArrayTaskId`, never the bare array ID, which would
-  requeue every element. A refusal is exit 3 and keeps Slurm's message when a
-  query failed; a lost or failed mutation reply is exit 5 with Slurm's message in
-  `detail`. Slurm ownership checks still apply, and concurrent user changes can
-  race the identity read. Checkpoint durability and retry limits belong to the
-  caller.
+  requeue (today `owners`) and Requeue=1. These are read from Slurm's record of
+  that physical job, which also names the target: an array element is requeued
+  as its `ArrayJobId_ArrayTaskId`, never the bare array ID, which would requeue
+  every element; inherited `SLURM_ARRAY_*` variables are not trusted. A refusal
+  is exit 3 and keeps Slurm's message when a query failed; a lost or failed
+  mutation reply is exit 5 with Slurm's message in `detail`. Slurm ownership
+  checks still apply, and concurrent user changes can race the identity read.
+  Checkpoint durability and retry limits belong to the caller.
 - `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
   `remote_root` (`--anywhere` lifts that) and never deletes. Pushed files keep
   their local modification times (`rsync -t`, so a re-push skips unchanged

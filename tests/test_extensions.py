@@ -249,7 +249,7 @@ class GuardAndEvidenceFlows(Flow):
             ("JobState=RUNNING", "JobState=PENDING", "state"),
             (f"({uid})", f"({uid + 1})", "uid"),
             ("Comment=token", "Comment=changed", "token"),
-            ("JobId=44", "JobId=45", "id"),
+            ("JobId=44", "JobId=45", "ambiguous"),
         ]:
             script.write_text(original.replace(old, new))
             record.unlink(missing_ok=True)
@@ -262,10 +262,10 @@ class GuardAndEvidenceFlows(Flow):
     def test_array_self_requeues_physical_element_not_parent(self):
         self.knobs(SLURM_JOB_ID="45", SLURM_ARRAY_JOB_ID="44", SLURM_ARRAY_TASK_ID="2")
         record = self.tmp / "requeue-call"
-        # Membership is read by the physical id; the element is shown and requeued as 44_2.
+        # Membership and the record are read by the physical id; the element is requeued as 44_2.
         self.tool(
             "scontrol",
-            f'case "$*" in "listpids 45") p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do printf "%s 45 batch 0 0\\n" "$p"; p=$(ps -o ppid= -p "$p" | tr -d " "); done ;; "show job 44_2 --oneliner") printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44_2") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
+            f'case "$*" in "listpids 45") p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do printf "%s 45 batch 0 0\\n" "$p"; p=$(ps -o ppid= -p "$p" | tr -d " "); done ;; "show job 45 --oneliner") printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44_2") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
         )
         code, report = self.shk(
             "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"

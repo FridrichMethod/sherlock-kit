@@ -119,7 +119,7 @@ def _change(action: str, job: str, args: argparse.Namespace, ctx: Context, *extr
         return _unknown(ctx, args.expect_name, f"--job-id {job} --details", reply.value)
     return Outcome({
         "action": "released" if action == "release" else "requeued",
-        "job_id": job,
+        "job_id": reply.value,
         "name": args.expect_name,
         "submission_token": token,
         "executor": ctx.executor().kind,
@@ -133,10 +133,11 @@ def release(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 
 def requeue(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """Requeue the current allocation only; the shell verifies Slurm PID membership.
+    """Requeue the current physical allocation only; the shell verifies Slurm PID membership.
 
-    An array element is addressed as ArrayJobId_ArrayTaskId: the bare id of the element that
-    keeps the array's meta record would show and requeue every element of the array.
+    The shell reads Slurm's record of SLURM_JOB_ID and requeues an array element as its
+    ArrayJobId_ArrayTaskId: the bare id of the element that keeps the array's meta record would
+    requeue every element, and inherited SLURM_ARRAY_* variables can name another job.
     """
     if ctx.executor().kind != "local":
         raise ShkError(
@@ -145,9 +146,7 @@ def requeue(args: argparse.Namespace, ctx: Context) -> Outcome:
             "self requeue requires --executor local inside the allocation",
         )
     physical = os.environ.get("SLURM_JOB_ID", "")
-    array, task = os.environ.get("SLURM_ARRAY_JOB_ID"), os.environ.get("SLURM_ARRAY_TASK_ID")
-    target = physical if array is None and task is None else f"{array}_{task}"
-    if "_" in physical or not spec.JOB_ID.fullmatch(physical) or not spec.JOB_ID.fullmatch(target):
+    if "_" in physical or not spec.JOB_ID.fullmatch(physical):
         raise ShkError(EXIT_REFUSED, "self_only", "no physical current allocation id")
     allowed = ",".join(name for name, found in partitions.profiles().items() if found.requeue)
-    return _change("requeue", target, args, ctx, allowed)
+    return _change("requeue", physical, args, ctx, allowed)
