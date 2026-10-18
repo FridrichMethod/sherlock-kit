@@ -2,8 +2,13 @@
 
 import os
 import shlex
+import sys
 
+from fakes import SRC
 from test_flows import Flow
+
+sys.path.insert(0, str(SRC))
+from sherlock_kit import executor
 
 
 def node(
@@ -64,6 +69,20 @@ class ResourcesFlows(Flow):
         code, report = self.shk("resources", "--partition", "gpu")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
 
+    def test_remote_program_ships_only_the_requested_partitions(self):
+        self.scontrol(
+            node("cn01", "MIXED", "stat,owners"),
+            node("cn02", "IDLE", "normal"),
+            node("cn03", "IDLE", "gpu,owners"),
+        )
+        local = executor.LocalExecutor(command_timeout=30)
+        reply = executor.run_program(local, "resources", ["gpu", "stat"])
+        shipped = [
+            line.split()[0] for line in reply.stdout.splitlines() if line.startswith("SHK_N|")
+        ]
+        self.assertEqual(shipped, ["SHK_N|NodeName=cn01", "SHK_N|NodeName=cn03"])
+        self.assertEqual(reply.stdout.splitlines()[-2:], ["SHK_RC scontrol 0", "SHK_END"])
+
     def test_schedulable_follows_state_flags_and_free_capacity_stays_arithmetic(self):
         states = {
             "MIXED": True,
@@ -110,3 +129,16 @@ class ResourcesFlows(Flow):
         self.assertEqual(code, 0)
         self.assertIsNone(report["nodes"][0]["schedulable"])
         self.assertFalse(report["complete"])
+
+    def test_verdict_and_cadence_precede_nodes_and_provenance_is_printed_once(self):
+        self.scontrol(node("cn01", "IDLE", "normal"), node("cn02", "IDLE", "normal"))
+        code, report = self.shk("resources", "--partition", "normal")
+        self.assertEqual(code, 0)
+        keys = list(report)
+        self.assertEqual(keys[-1], "nodes")
+        for key in ("complete", "malformed", "next_check_after", "provenance"):
+            self.assertLess(keys.index(key), keys.index("nodes"))
+        self.assertEqual(report["provenance"]["memory"], "CfgTRES minus AllocTRES")
+        self.assertIn("DRAIN", report["provenance"]["schedulable"])
+        self.assertTrue(all("provenance" not in entry for entry in report["nodes"]))
+        self.assertTrue(all("CfgTRES=" in entry["raw"] for entry in report["nodes"]))

@@ -37,6 +37,12 @@ UNSCHEDULABLE = frozenset([
     "POWERED_DOWN",
     "POWERING_DOWN",
 ])
+PROVENANCE = {
+    "cpus": "CPUEfctv or CPUTot minus CPUAlloc",
+    "memory": "CfgTRES minus AllocTRES",
+    "gpus": "CfgTRES minus AllocTRES",
+    "schedulable": f"State has none of {', '.join(sorted(UNSCHEDULABLE))}",
+}
 
 
 def register(subparsers: Subparsers) -> None:
@@ -103,11 +109,6 @@ def _node(raw: str) -> dict[str, Any]:
         "allocated_gpus": used_gpu,
         "configured_tres": data.get("CfgTRES"),
         "allocated_tres": data.get("AllocTRES"),
-        "provenance": {
-            "cpus": "CPUEfctv or CPUTot minus CPUAlloc",
-            "memory": "CfgTRES minus AllocTRES",
-            "gpus": "CfgTRES minus AllocTRES",
-        },
         "raw": raw,
     }
 
@@ -115,7 +116,8 @@ def _node(raw: str) -> dict[str, Any]:
 def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
     """Read the partitions' Slurm node facts once; a failed read is exit 1, missing facts null."""
     wanted = {partitions.profile(name).name for name in args.partition}
-    result = executor.check(executor.run_program(ctx.executor(), "resources"), "resources")
+    program = executor.run_program(ctx.executor(), "resources", sorted(wanted))
+    result = executor.check(program, "resources")
     lines = result.stdout.splitlines()
     rc = next((line.split()[-1] for line in lines if line.startswith("SHK_RC scontrol ")), None)
     if "SHK_END" not in lines or rc != "0":
@@ -134,19 +136,19 @@ def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
         raw = line.removeprefix("SHK_N|")
         try:
             node = _node(raw)
-            if wanted.intersection(node["partitions"]):
-                nodes.append(node)
-                complete = complete and all(
-                    node[key] is not None
-                    for key in ("name", "state", "free_cpus", "free_memory_mb", "free_gpus")
-                )
+            nodes.append(node)
+            complete = complete and all(
+                node[key] is not None
+                for key in ("name", "state", "free_cpus", "free_memory_mb", "free_gpus")
+            )
         except ValueError:
             malformed.append(raw)
             complete = False
     return Outcome({
-        "nodes": nodes,
         "complete": bool(complete and nodes),
         "malformed": malformed,
         "executor": ctx.executor().kind,
         **slurm._cadence(ctx),
+        "provenance": PROVENANCE,
+        "nodes": nodes,
     })
