@@ -322,3 +322,46 @@ class ExactRelease(ControlFlow):
         self.assertEqual((code, report["action"]), (5, "unknown"))
         self.assertIn("scontrol release exit 1", report["detail"])
         self.assertIn("Access/permission denied for job 44", report["detail"])
+
+
+class PreflightClassification(ControlFlow):
+    def sbatch(self, stderr, rc):
+        message = self.tmp / "sbatch.err"
+        message.write_text(stderr)
+        tool = self.tools / "sbatch"
+        tool.write_text(
+            "#!/bin/sh\n"
+            'for last in "$@"; do :; done\n'
+            '[ "$last" = --test-only ] || { echo "fake sbatch: not a test-only call" >&2; exit 97; }\n'
+            "cat >/dev/null\n"
+            f'cat "{message}" >&2\n'
+            f"exit {rc}\n"
+        )
+        tool.chmod(0o755)
+
+    def test_controller_transport_failures_are_retryable_reads(self):
+        for stderr in (
+            "allocation failure: Unable to contact slurm controller (connect failure)\n",
+            "allocation failure: Socket timed out on send/recv operation\n",
+            "allocation failure: Zero Bytes were transmitted or received\n",
+        ):
+            with self.subTest(stderr=stderr):
+                self.sbatch(stderr, 1)
+                code, report = self.submit("--preflight")
+                self.assertEqual((code, report["error"]), (1, "malformed_read"))
+                self.assertIn(
+                    stderr.strip().removeprefix("allocation failure: "), report["message"]
+                )
+                self.assertIn("retry once", report["hint"])
+        self.assertFalse(self.remote.exists())
+
+    def test_slurm_policy_rejection_stays_a_refusal_with_evidence(self):
+        stderr = (
+            "sbatch: error: QOSMaxSubmitJobPerUserLimit\n"
+            "allocation failure: Job violates accounting/QOS policy "
+            "(job submit limit, user's size and/or time limits)\n"
+        )
+        self.sbatch(stderr, 1)
+        code, report = self.submit("--preflight")
+        self.assertEqual((code, report["ok"], report["action"]), (3, False, "preflight"))
+        self.assertEqual(report["preflight"], {"returncode": 1, "stdout": "", "stderr": stderr})

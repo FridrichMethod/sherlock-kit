@@ -15,6 +15,23 @@ if TYPE_CHECKING:
     from sherlock_kit.slurm import Subparsers
 
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+# Slurm client messages for a controller that did not answer: the read failed, nothing decided.
+TRANSIENT = re.compile(
+    r"Unable to contact slurm controller|Socket timed out on send/recv operation"
+    r"|Zero Bytes were transmitted or received"
+)
+
+
+def transient(action: str, stderr: str) -> ShkError | None:
+    """A retryable read failure when Slurm reports a controller transport error, else None."""
+    if not TRANSIENT.search(stderr):
+        return None
+    return ShkError(
+        EXIT_LOCAL,
+        "malformed_read",
+        f"{action}: Slurm controller unavailable: {stderr.strip()[-2000:]}",
+        hint="retry once after 60 s",
+    )
 
 
 def checked_id(value: str) -> str:
@@ -42,7 +59,7 @@ def register(subparsers: Subparsers) -> None:
 
 
 def preflight(built: spec.Spec, ctx: Context) -> Outcome:
-    """Use sbatch --test-only as a read; a quota refusal is exit 3, never unknown."""
+    """Use sbatch --test-only as a read: a Slurm refusal is exit 3, a controller failure exit 1."""
     from sherlock_kit.slurm import _cadence
 
     result = executor.check(
@@ -65,6 +82,8 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
             raise ShkError(
                 EXIT_LOCAL, "malformed_read", "invalid preflight output encoding"
             ) from None
+    if code and (failure := transient("preflight", evidence["stderr"])):
+        raise failure
     return Outcome(
         {
             "ok": code == 0,
