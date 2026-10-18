@@ -24,8 +24,15 @@ characters. The language requirement is also checked during review.
 
 Ordinary tests need no credentials, no Sherlock connection and no GPU. They run
 the real remote `sh` programs locally through a fake `ssh`, fake Slurm binaries
-and real `rsync`. Install `rsync` and `dash`, then set up a development
-environment once (`.venv*/` is ignored by Git):
+and real `rsync`. The suite stays hermetic even inside a Slurm job: importing
+`tests/fakes` (both `tests/run_suite.py` and `python3 -m unittest discover -s tests`
+do) removes inherited `SLURM_*`, `SBATCH_*`, `SQUEUE_*`, `SACCT_*`, `SCANCEL_*`,
+`SHK_*` (except `SHK_BUILD_PYTHON` and `SHK_REQUIRE_ALL`) and `SHERLOCK_KIT_*`
+variables and exported shell functions, and puts blocking stubs for every Slurm
+client on `PATH` behind each test's fakes and ahead of the system ones. A run in
+which a test reaches a stub fails, and a `TMPDIR` that cannot execute files (the
+tests write their fakes there) is refused. Install `rsync` and `dash`, then set
+up a development environment once (`.venv*/` is ignored by Git):
 
 ```sh
 python3 -m venv .venv
