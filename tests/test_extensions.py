@@ -347,14 +347,19 @@ class NativeFormatFlows(Flow):
         self.assertEqual(report["nodes"][0]["free_gpus"], 0)
 
     def test_control_details_ignore_unrelated_own_job(self):
+        uid = os.getuid()
         self.detail_tools(
-            queue=f"44|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{os.getuid()}|tok|legacy-job\n",
+            queue=f"44_1|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{uid}|tok|legacy-job\n",
             accounting="",
-            jobs=[f"JobId=45 JobName=unrelated UserId=user({os.getuid()}) Comment=tok"],
+            # show job 44 also prints element 0, which started after the queue read.
+            jobs=[
+                f"JobId=44 ArrayJobId=44 ArrayTaskId=1 JobName=legacy-job UserId=user({uid}) Comment=tok",
+                f"JobId=45 ArrayJobId=44 ArrayTaskId=0 JobName=legacy-job UserId=user({uid}) Comment=tok",
+            ],
         )
         report = self.shk("status", "--job-id", "44", "--details")[1]
-        self.assertEqual(report["details"]["jobs"], [])
-        self.assertFalse(report["details"]["complete"])
+        self.assertEqual([job["job_id"] for job in report["details"]["jobs"]], ["44"])
+        self.assertTrue(report["details"]["complete"])
 
 
 class IdentityChronologyFlows(Flow):

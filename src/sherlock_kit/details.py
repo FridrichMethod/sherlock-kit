@@ -225,27 +225,33 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
 
 
 def _jobs(stdout: str, uid: int, report: dict[str, Any]) -> None:
+    """Keep the own control records of the queued physical IDs; other records are not evidence.
+
+    show job ARRAY_ID also prints sibling elements that the selection or the queue read
+    did not include; they are ignored, while every queued physical ID needs its record.
+    """
     expected = {
         record["job_id_raw"] for record in report["queue"] if record["job_id_raw"] is not None
     }
+    observed: set[str | None] = set()
     for line in stdout.splitlines():
         if not line.startswith("SHK_J|"):
             continue
         raw = line.removeprefix("SHK_J|")
         data = fields(raw)
         own = re.fullmatch(r"[^()]*\(([0-9]+)\)", data.get("UserId", ""))
-        if not own or int(own[1]) != uid or data.get("JobId") not in expected:
-            report["complete"] = False
+        job = data.get("JobId")
+        if not own or int(own[1]) != uid or job not in expected or job in observed:
             continue
+        observed.add(job)
         report["jobs"].append({
-            "job_id": data.get("JobId"),
+            "job_id": job,
             "name": data.get("JobName"),
             "comment": data.get("Comment"),
             "uid": uid,
             "fields": data,
             "raw": raw,
         })
-    observed = {record["job_id"] for record in report["jobs"]}
     report["missing_control_job_ids"] = sorted(expected - observed)
     report["control_identities_complete"] = not report["missing_control_job_ids"]
     if not report["control_identities_complete"]:
@@ -294,6 +300,8 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     selected = slurm._selection(args, ctx)
     mode = "ids" if ids else ("all" if args.all else "names")
     query = [mode, str(since), *ids]
+    if args.all:
+        query.append(slurm._all_prefix(ctx))
     for item in selected:
         query.extend((item.name, item.run_dir or "-"))
     result = executor.check(executor.run_program(ctx.executor(), "details", query), "details")

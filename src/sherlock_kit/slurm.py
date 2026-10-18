@@ -865,10 +865,14 @@ def _since(args: argparse.Namespace) -> int:
     return since
 
 
-def _all_names(ctx: Context) -> Callable[[str], bool]:
+def _all_prefix(ctx: Context) -> str:
     """--all keeps shk.<project>. names, or every shk. name without a project config."""
     project = ctx.config.project if ctx.config else None
-    prefix = f"shk.{project}." if project else "shk."
+    return f"shk.{project}." if project else "shk."
+
+
+def _all_names(ctx: Context) -> Callable[[str], bool]:
+    prefix = _all_prefix(ctx)
     return lambda name: name.startswith(prefix)
 
 
