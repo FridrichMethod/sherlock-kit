@@ -143,8 +143,8 @@ shk manifest DIR
   `complete: false`. Availability is a snapshot, not a resource reservation.
 - `allocation` verifies an explicit local worker PID, own UID, physical job/array
   identity, current host and optional numeric step membership. It preserves actual
-  resources, topology, raw records and hashes; missing counts remain null and no
-  project resource policy is inferred. It refuses SSH, exited/reused PIDs and
+  resources, node records, raw records and hashes; missing counts remain null and
+  no project resource policy is inferred. It refuses SSH, exited/reused PIDs and
   ambiguous or contradictory evidence; a scheduler that does not answer is a
   retryable read failure, never non-membership. See
   [the allocation contract](docs/allocation.md).

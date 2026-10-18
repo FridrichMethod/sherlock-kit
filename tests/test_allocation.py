@@ -329,6 +329,7 @@ class AllocationCLI(unittest.TestCase):
         for tres, gpus in (
             ("cpu=4,mem=2G,node=1,gres/gpu:a=1,gres/gpu:b=1", 2),
             ("cpu=4,mem=2G,node=1,gres/gpu=2,gres/gpu:a=2", 2),
+            ("cpu=4,mem=2G,node=1,license/fs_scratch@server=1,gres/gpu=1", 1),
         ):
             with self.subTest(tres=tres):
                 self.data["job"]["44"] = self.job_record("44", AllocTRES=tres)
@@ -432,6 +433,28 @@ class AllocationCLI(unittest.TestCase):
         self.data["delay"] = {"pidinfo": 10}
         self.assertRefused(self.run_cli(), "allocation", "timeout", 4)
 
+    def test_caller_hostlists_are_expanded_without_admission_policy(self):
+        overlapping = "sh03-01n01,sh03-01n[01-02]"
+        self.data["hosts"][overlapping] = ["sh03-01n01", "sh03-01n01", "sh03-01n02"]
+        code, report = self.run_cli(*["--hostlist", overlapping] * 33)
+        self.assertEqual(code, 0, report)
+        self.assertEqual(
+            report["hostlists"][-1]["nodes"], ["sh03-01n01", "sh03-01n01", "sh03-01n02"]
+        )
+        self.assertEqual(self.calls().count(["show", "hostnames", overlapping]), 1)
+        self.data["hosts"][overlapping] = ["sh03-01n01", "bad host"]
+        self.assertRefused(self.run_cli("--hostlist", overlapping), "malformed expanded hostlist")
+
+    def test_step_proof_does_not_require_node_topology(self):
+        self.data["node"][self.host] = self.node_record(
+            CPUTot=None, ThreadsPerCore=None, CoresPerSocket=None, Sockets=None
+        )
+        code, report = self.run_cli("--step-id", "0")
+        self.assertEqual(code, 0, report)
+        self.assertNotIn("ThreadsPerCore", report["node_records"][0]["fields"])
+        self.data["node"][self.host] = self.node_record(NodeName="elsewhere")
+        self.assertRefused(self.run_cli(), "exactly one matching scheduler record")
+
     def test_documented_pidinfo_remaining_time_preserves_complete_raw_evidence(self):
         for identity, auxiliary in (
             (
@@ -485,7 +508,7 @@ class AllocationCLI(unittest.TestCase):
         self.assertEqual(code, 0, report)
         self.assertTrue(report["process"]["step_membership_verified"])
 
-    def test_owner_checked_before_process_contents_and_affinity_change(self):
+    def test_owner_checked_before_process_contents_and_affinity_is_reported(self):
         from types import SimpleNamespace
 
         from sherlock_kit import allocation
@@ -499,14 +522,16 @@ class AllocationCLI(unittest.TestCase):
                 allocation.process_identity(self.worker.pid)
             read.assert_not_called()
         (self.tmp / "facts.json").write_text(json.dumps(self.data))
+        # A worker may bind its threads while evidence is collected; affinity is not identity.
         with (
             patch.dict(os.environ, self.env),
-            patch.object(os, "sched_getaffinity", side_effect=[{0, 1}, {0}]),
-            self.assertRaises(allocation.ShkError),
+            patch.object(os, "sched_getaffinity", side_effect=[{0}, {1}]) as affinity,
         ):
-            allocation.allocation(
+            outcome = allocation.allocation(
                 allocation_namespace(self.worker.pid), Context(executor="local", cwd=self.tmp)
             )
+        self.assertEqual(outcome.payload["process"]["cpu_affinity"], [0])
+        self.assertEqual(affinity.call_count, 1)
 
     def test_process_exit_or_reuse_during_collection(self):
         from sherlock_kit import allocation

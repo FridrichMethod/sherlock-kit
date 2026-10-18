@@ -7,10 +7,12 @@ shk --executor local allocation --pid PID --job-id N_OR_N_TASK \
 
 The caller supplies the worker PID, not the toolkit subprocess or its query
 shell. The command never uses SSH and requires no project configuration. The
-worker must belong to the current Unix UID, exist on this host, and have stable
-Linux `/proc/PID/stat` start ticks and kernel affinity before and after evidence
-collection. Ownership is checked before reading process contents. A dead,
-zombie, replaced or changing process cannot produce complete success.
+worker must belong to the current Unix UID, exist on this host, and have the
+same Linux `/proc/PID/stat` start ticks before and after evidence collection.
+Ownership is checked before reading process contents. A dead, zombie or
+replaced process cannot produce complete success. The kernel CPU affinity is
+reported as read after collection; a worker may bind its threads meanwhile, so
+affinity is not part of its identity.
 
 The command reads actual Slurm job, optional numeric step and local node
 records with fixed POSIX shell programs, all within the configured
@@ -27,9 +29,11 @@ records fail. The step of an array element is queried and identified as
 `scontrol pidinfo PID` proves the supplied PID belongs to the selected physical
 job. An optional numeric step additionally requires exactly one matching row in
 `scontrol listpids JOBID.STEP`; listpids takes and prints only physical job IDs.
-Environment variables alone never prove allocation membership. At most 32
-caller hostlists are accepted. Scheduler and caller hostlists are expanded
-through Slurm; duplicate or malformed hosts fail.
+Environment variables alone never prove allocation membership. Scheduler and
+caller hostlists are expanded through `scontrol show hostnames` exactly as
+Slurm prints them, so overlapping caller expressions repeat hosts; each
+distinct expression is expanded once. Caller hostlists are only reported, never
+compared with the allocation.
 
 A `pidinfo` reply has exactly one job identity line,
 `Slurm JobId=N ends at TIME`; only N is compared, and a step suffix after it
@@ -84,8 +88,8 @@ records carry no allocated GRES field unless detail output is requested, which
 the command does not do. Requested resources, CUDA visibility and parent
 resources never substitute for actual step resources. Typed GPU TRES are summed
 when no generic GPU total exists; typed subsets cannot exceed a stated total.
-Other TRES entries (memory, nodes, billing) stay in `fields` and are not
-interpreted. A populated actual TRES without GPU entries establishes
+Other TRES entries (memory, nodes, billing, licenses) stay in `fields` and are
+not interpreted. A populated actual TRES without GPU entries establishes
 CPU-only use; unknown or missing actual TRES fails. `allocated_cpus` is the
 record's CPU count (`NumCPUs`, or step `CPUs`, else TRES `cpu`) and must agree
 with TRES `cpu` when both exist; `allocated_cpu_tres` is TRES `cpu` alone, and
@@ -93,9 +97,9 @@ with TRES `cpu` when both exist; `allocated_cpu_tres` is TRES `cpu` alone, and
 exceed the known parent allocation counts. Missing CPU/node/task counts are
 retained as null.
 
-The local node record always verifies `NodeName`. Numeric-step collection also
-requires numeric `CPUTot`, `ThreadsPerCore`, `CoresPerSocket` and `Sockets` facts.
-The generic proof permits multiple nodes, tasks, GPUs and SMT. It does not
-compare affinity cardinality to an allocation CPU count, enforce a project
-partition/resource profile, infer GPU device visibility, meter costs or certify
-scientific results. Those decisions belong to the caller.
+The local node record keeps the fields Slurm prints, identified by `NodeName`.
+The generic proof permits multiple nodes, tasks, GPUs and SMT and requires no
+node topology. It does not compare affinity cardinality to an allocation CPU
+count, enforce a project partition/resource profile, infer GPU device
+visibility, meter costs or certify scientific results. Those decisions belong
+to the caller.

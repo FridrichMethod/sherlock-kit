@@ -110,12 +110,7 @@ def tres_counts(value: str | None) -> tuple[int | None, int | None]:
     parsed: dict[str, str] = {}
     for entry in value.split(","):
         key, separator, count = entry.partition("=")
-        if (
-            not separator
-            or not re.fullmatch(r"[A-Za-z0-9_/:.-]+", key)
-            or not count
-            or key in parsed
-        ):
+        if not separator or not key or not count or key in parsed:
             raise invalid("malformed or duplicated allocated TRES")
         if (key == "cpu" or key == "gres/gpu" or key.startswith("gres/gpu:")) and not re.fullmatch(
             r"[0-9]+", count
@@ -192,18 +187,14 @@ class Collector:
         return raw
 
     def hosts(self, expression: str) -> list[str]:
-        """Expand generic caller hostlists, rejecting malformed or duplicate hosts."""
-        if not HOSTLIST.fullmatch(expression) or len(expression) > 4096:
+        """Expand a hostlist once, exactly as Slurm prints it (overlaps repeat hosts)."""
+        if not HOSTLIST.fullmatch(expression):
             raise invalid("invalid hostlist expression")
         for known in self.hostlists:
             if known["expression"] == expression:
                 return list(known["nodes"])
         nodes = self.query("hosts", expression).splitlines()
-        if (
-            len(nodes) > 10000
-            or len(set(nodes)) != len(nodes)
-            or any(not HOST.fullmatch(node) for node in nodes)
-        ):
+        if any(not HOST.fullmatch(node) for node in nodes):
             raise invalid("malformed expanded hostlist")
         self.hostlists.append({"expression": expression, "nodes": nodes})
         return nodes
@@ -319,7 +310,7 @@ def membership(collector: Collector, pid: int, job: str, step: str | None) -> di
 def step_record(
     collector: Collector, job: dict[str, Any], step: str, uid: int, hostname: str
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Collect the selected step and local node topology without SMT/resource policy."""
+    """Collect the selected step and its local node without SMT/resource policy."""
     # Slurm names an array element's step ArrayJobId_ArrayTaskId.STEP, and the meta physical
     # id's N.STEP would also return every sibling's step.
     array, task = job["array_job_id"], job["array_task_id"]
@@ -335,16 +326,12 @@ def step_record(
         step_id=step, tasks=number(found["fields"].get("Tasks"), "allocated tasks", positive=True)
     )
     node = local_node(found["nodes"], hostname)
-    return found, [node_record(collector, node, topology=True)]
+    return found, [node_record(collector, node)]
 
 
-def node_record(collector: Collector, node: str, *, topology: bool) -> dict[str, Any]:
-    """Retain the local node identity and require topology for a selected step."""
+def node_record(collector: Collector, node: str) -> dict[str, Any]:
+    """Retain the local node record as Slurm prints it."""
     raw, fields = matching_record(collector, "node", node)
-    if topology:
-        for key in ("CPUTot", "ThreadsPerCore", "CoresPerSocket", "Sockets"):
-            if number(fields.get(key), key, positive=True) is None:
-                raise invalid(f"missing node topology {key}")
     return {"node": node, "fields": fields, **hashed(raw)}
 
 
@@ -359,23 +346,15 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
     step = args.step_id
     if step is not None and number(step, "numeric step id") is None:
         raise invalid("missing numeric step id")
-    if len(args.hostlist) > 32:
-        raise invalid("at most 32 caller hostlists")
     if not all(HOSTLIST.fullmatch(expression) for expression in args.hostlist):
         raise invalid("invalid hostlist expression")
     before = process_identity(pid)
-    if before[0] != os.getuid():
-        raise invalid("worker process belongs to another UID")
-    try:
-        initial_affinity = sorted(os.sched_getaffinity(pid))
-    except (AttributeError, OSError) as exc:
-        raise invalid("cannot verify worker CPU affinity") from exc
     collector = Collector(ctx)
     job = scheduler_record(collector, "job", query_id, before[0])
     job_identity(job)
     node = local_node(job["nodes"], ctx.hostname)
     step_found, nodes = (
-        (None, [node_record(collector, node, topology=False)])
+        (None, [node_record(collector, node)])
         if step is None
         else step_record(collector, job, step, before[0], ctx.hostname)
     )
@@ -384,9 +363,10 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
     evidence = membership(collector, pid, job["job_id"], step)
     try:
         affinity = sorted(os.sched_getaffinity(pid))
-    except (AttributeError, OSError) as exc:
-        raise invalid("cannot verify worker CPU affinity") from exc
-    if process_identity(pid) != before or not affinity or affinity != initial_affinity:
+    except OSError as exc:
+        raise invalid(f"cannot read worker CPU affinity: {exc}") from exc
+    # Start ticks, not the affinity a worker may change, establish that it is the same process.
+    if process_identity(pid) != before:
         raise invalid("worker process identity changed during evidence collection")
     return Outcome({
         "action": "allocation",
