@@ -352,19 +352,19 @@ class JobIdSummaryTests(DetailsFlow):
         self.assertEqual([e["current"]["anomalies"] for e in report["names"]], [[], [], []])
 
     def test_entries_follow_job_id_order_not_name_order(self):
-        """b.sh is read first (queue before accounting) but has the higher job id."""
+        """a.sh sorts first by name and is read first (queue before accounting), yet is newer."""
         self.canned(
-            queue=[queue("7541", "7541", "RUNNING", nodes="sh01-01n01", name="b.sh")],
+            queue=[queue("7541", "7541", "RUNNING", nodes="sh01-01n01", name="a.sh")],
             accounting=[
-                account("7540", "7540", "COMPLETED", name="a.sh"),
-                account("7541", "7541", "RUNNING", name="b.sh"),
+                account("7540", "7540", "COMPLETED", name="b.sh"),
+                account("7541", "7541", "RUNNING", name="a.sh"),
             ],
-            jobs=[record("7541", name="b.sh", state="RUNNING")],
+            jobs=[record("7541", name="a.sh", state="RUNNING")],
         )
         code, report = self.details("--job-id", "7541", "--job-id", "7540")
         self.assertEqual(code, 0)
         found = [(e["name"], e["current"]["job_id"]) for e in report["names"]]
-        self.assertEqual(found, [("a.sh", "7540"), ("b.sh", "7541")])
+        self.assertEqual(found, [("b.sh", "7540"), ("a.sh", "7541")])
 
     def test_shk_names_keep_their_invariants_in_job_id_mode(self):
         self.canned(
