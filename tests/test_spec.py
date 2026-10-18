@@ -226,6 +226,8 @@ class ProfileAndArgvTests(Case):
         self.refused(3, "unknown_partition", partition="mystery")
         self.refused(3, "gpus_not_allowed", gpus=1)
         self.refused(3, "requeue_not_allowed", requeue=True)
+        interactive = self.refused(3, "batch_not_allowed", partition="dev", dry_run=True)
+        self.assertIn("sh_dev", interactive.hint)
         borrowed = self.refused(3, "courtesy_ack_required", partition="btrippe")
         self.assertIn("--courtesy-ack", borrowed.hint)
         built = self.build(partition="btrippe", courtesy_ack=True, gpus=1)

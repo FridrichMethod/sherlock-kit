@@ -1,13 +1,13 @@
 """Offline submit checks, the job name, the sbatch argv and the frozen job spec.
 
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
-partition, GPUs or requeue its profile forbids, a denylisted option (--comment only with a
-token) or a hetjob separator in the leading #SBATCH block, or a borrowed partition without
---courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad memory, time, array, --after-ok
-or --submission-token grammar, --hold without a token, an unreadable script or one over 1 MiB.
---constraint and --signal go to sbatch unchanged (Slurm checks them); each --after-ok value must
-be one job id, since shk joins them into its own --dependency string, where a ',' or '?' would
-add clauses.
+partition or one without batch jobs (dev), GPUs or requeue its profile forbids, a denylisted
+option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
+borrowed partition without --courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad
+memory, time, array, --after-ok or --submission-token grammar, --hold without a token, an
+unreadable script or one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm
+checks them); each --after-ok value must be one job id, since shk joins them into its own
+--dependency string, where a ',' or '?' would add clauses.
 """
 
 from __future__ import annotations
@@ -346,6 +346,13 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
     profile = partitions.profile(args.partition)
+    if not profile.batch:
+        raise ShkError(
+            EXIT_REFUSED,
+            "batch_not_allowed",
+            f"partition {profile.name} does not accept batch jobs: {profile.courtesy}",
+            hint="use sh_dev or salloc there, or submit to a batch partition such as normal",
+        )
     wanted = resources(args, profile)
     run = run_directory(args.run_dir, config, name)
     script = read_script(args.script, owns_comment=args.submission_token is not None)

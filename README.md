@@ -116,7 +116,9 @@ shk manifest DIR
   `--array N[%M]` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
   several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
   writes the `--dependency` string itself, so a `,` or `?` list is refused.
-  `--dry-run` is offline. `--preflight` is mutually exclusive and sends the
+  `dev` is refused offline (exit 3 `batch_not_allowed`): Sherlock rejects every
+  batch job there and keeps it for interactive `sh_dev` or `salloc` sessions;
+  `occupancy` and `resources` still read it. `--dry-run` is offline. `--preflight` is mutually exclusive and sends the
   same script/resources to `sbatch --test-only` as a read: no job, run directory
   or provenance is created. Its `preflight` object retains returncode, stdout
   and stderr; rejection is exit 3, read failure is never unknown.

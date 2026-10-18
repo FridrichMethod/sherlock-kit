@@ -1,4 +1,4 @@
-"""Packaged partition table (schema 1, 5-key profiles) and the generated rules block."""
+"""Packaged partition table (schema 1, 6-key profiles) and the generated rules block."""
 
 import json
 import sys
@@ -11,7 +11,7 @@ from sherlock_kit import partitions
 from sherlock_kit.errors import ShkError
 
 NAMES = ["normal", "bigmem", "dev", "service", "gpu", "owners", "bioe", "stat", "btrippe", "possu"]
-KEYS = {"preemptible", "requeue", "borrowed", "gpus_allowed", "courtesy"}
+KEYS = {"preemptible", "requeue", "borrowed", "gpus_allowed", "batch", "courtesy"}
 
 
 class PartitionTableTests(unittest.TestCase):
@@ -33,6 +33,9 @@ class PartitionTableTests(unittest.TestCase):
         )
         self.assertIn("between 00:00 and 07:00 Pacific", p["possu"].courtesy)
         self.assertEqual(p["normal"].courtesy, "")
+        # Sherlock refuses every sbatch job in dev (interactive sessions only, seen 2026-10-18)
+        self.assertEqual([n for n in NAMES if not p[n].batch], ["dev"])
+        self.assertIn("`sh_dev`", p["dev"].courtesy)
 
     def test_profile_lookup(self):
         self.assertEqual(partitions.profile("gpu").name, "gpu")

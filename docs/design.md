@@ -103,7 +103,9 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 
 ## Submit
 
-1. **Offline checks.** The partition is listed in `partitions.json`; GPUs only
+1. **Offline checks.** The partition is listed in `partitions.json` and takes
+   batch jobs (`batch: false` for `dev`, where Sherlock rejects every sbatch
+   job; `occupancy` and `resources` still read it); GPUs only
    where the profile allows them; requeue only where the profile allows it
    (today `owners`), else `--no-requeue`; the `--mem`, `--time` and `--array`
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
