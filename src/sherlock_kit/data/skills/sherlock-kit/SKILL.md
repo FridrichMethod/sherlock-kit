@@ -22,9 +22,9 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 | 0 | ok | continue |
 | 1 | config, spec, verification, validator, malformed reply | fix input errors before retrying; for `malformed_read`, follow its hint if present (one read retry after 60 s; `shk doctor --remote` checks remote tools) |
 | 2 | usage error | read `shk <cmd> --help` |
-| 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive shk owns, Slurm rejected, push or pull on Sherlock | read the message; change the request, not the guard |
+| 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, `dev` (no batch jobs), an `#SBATCH` directive shk owns, Slurm rejected, push or pull on Sherlock | read the message; change the request, not the guard |
 | 4 | SSH transport or master check unavailable | Local permission denial: follow Setup check 5. `auth_required`: ask the user to run the hint (`ssh sherlock-plain`, or `ssh -fN sherlock-dtn`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Other `unavailable` or `timeout` (hint `run shk doctor`): run `shk doctor`, retry once after about a minute, then stop and tell the user |
-| 5 | outcome unknown after a dispatched submit or cancel | run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s); never resubmit blind |
+| 5 | outcome unknown after a dispatched submit, cancel, release or requeue | run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s); never resubmit blind |
 | 6 | status ok, but the newest job of a name has an anomaly | stop and report it to the user |
 
 ## Configuration
@@ -65,9 +65,11 @@ shk status --all
 
 ## Controller evidence and exact mutations
 
-- `shk resources --partition owners` (repeatable partition) reads node state, features and configured minus allocated CPU/memory/GPU capacity. Missing facts are null and `complete: false`; OS FreeMem never substitutes.
+- `shk resources --partition owners` (repeatable partition) reads node state, features and configured minus allocated CPU/memory/GPU capacity per node. Count free capacity only on nodes with `schedulable: true`: DOWN, DRAIN, NOT_RESPONDING and similar states make it false, and null means unknown. Missing facts are null and `complete: false`; OS FreeMem never substitutes. It is a snapshot, not a reservation.
 - `shk status --job-id ID --details` (repeatable ID, mutually exclusive selector) reads current UID legacy or shk jobs. `details.queue` and `details.accounting` retain raw records with cluster, DBIndex, physical/array IDs, times, UID, Comment, TRES, nodes, restarts and exits. `details.jobs` retains queued physical `scontrol` identities with original `fields` and `raw` for request verification. Incomplete evidence or missing IDs is explicit; do not treat it as permission to resubmit.
-- `shk release --job-id ID --expect-name NAME --expect-token TOKEN` releases only a verified exact current-UID user-held job. `shk requeue --self --expect-name NAME --expect-token TOKEN` works locally only with real Slurm PID membership in the current physical allocation, identity checks and owners requeue policy. Arrays target the self element. Lost mutation replies remain unknown (exit 5); never retry blind. Checkpoint durability and maximum retries belong to the project controller.
+- `shk release --job-id ID --expect-name NAME --expect-token TOKEN` releases only a verified exact current-UID job held by `submit --hold --submission-token TOKEN`; both expectations are required. On a borrowed partition a release needs the same occupancy check, budget and window as a submission (see Occupancy below).
+- `shk requeue --self --expect-name NAME [--expect-token TOKEN]` runs only with the local executor inside the allocation: it needs real Slurm PID membership in the current physical allocation, the current UID and name, RUNNING, a `requeue=yes` partition (`owners`) and Requeue=1; the token is compared with Slurm Comment only when given. An array element is requeued as `ARRAYJOBID_TASKID`, never the whole array. Lost mutation replies remain unknown (exit 5); never retry blind. Checkpoint durability and maximum retries belong to the project controller.
+- `shk --executor local allocation --pid PID --job-id ID [--step-id N]` inside a job proves that a worker PID of the current UID belongs to that job (and numeric step) on this host through `scontrol pidinfo` and `listpids`, and reports the actual allocated CPUs, GPUs, nodes and raw records; for an array element pass `ARRAYJOBID_TASKID`. Missing counts stay null and ambiguous or contradictory evidence fails (exit 1). Use it instead of parsing `scontrol` or trusting environment variables.
 - A deterministic controller must keep all actions bounded and authorized, batch status reads at least 60 s apart and stay within its allocation. It must not invoke an LLM or schedule a later agent session.
 
 ## Data
