@@ -5,6 +5,8 @@ done
 mode=$1 since=$2
 shift 2
 u=$(id -un) uid=$(id -u)
+# Fields are separated by the ASCII unit separator, so "|" in comments and job names is data.
+sep=$(printf "\037")
 printf "SHK_USER %s\nSHK_UID %s\nSHK_HOST %s\n" "$u" "$uid" "$(uname -n)"
 specs() { # NAME RUN_DIR: count the spec files, print the newest NAME.<jobid>.json
     n=0 best=0
@@ -36,14 +38,15 @@ fi
 queue() {
     # Expired IDs can reject an otherwise valid squeue read. Accounting keeps its exact selector.
     if [ "$mode" = ids ]; then set -- --array; fi
-    env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 squeue -h --local -t all -u "$u" "$@" -o "%i|%A|%T|%P|%M|%C|%V|%S|%e|%N|%U|%k|%j"
+    format=$(printf "%s" "%i|%A|%T|%P|%M|%C|%V|%S|%e|%N|%U|%k|%j" | tr "|" "$sep")
+    env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 squeue -h --local -t all -u "$u" "$@" -o "$format"
 }
 scope() { # own rows of the requested IDs, or of names starting with the --all prefix
     if [ "$mode" = all ]; then
-        awk -F "|" -v uid="$uid" -v prefix="$prefix" \
+        awk -F "$sep" -v uid="$uid" -v prefix="$prefix" \
             "\$11 ~ /^[0-9]+$/ && \$11 == uid && index(\$13, prefix) == 1"
     else
-        awk -F "|" -v wanted="$selector" -v uid="$uid" \
+        awk -F "$sep" -v wanted="$selector" -v uid="$uid" \
             "BEGIN { n=split(wanted, ids, \",\") } \$11 ~ /^[0-9]+$/ && \$11 == uid { \
             for (i=1; i<=n; i++) if (\$1 == ids[i] || \$2 == ids[i] || \
             (index(ids[i], \"_\")==0 && index(\$1, ids[i] \"_\")==1)) { print; break } }"
@@ -62,7 +65,7 @@ fi
 printf "SHK_RC squeue %s\n" "$rc"
 # scontrol supplies held request details absent from the portable squeue format, in UTC like
 # squeue and sacct. One call per base job id: show job ARRAY_ID prints every element held.
-bases=$(printf "%s\n" "$out" | cut -d "|" -f1 | sed "s/_.*//" | sort -u)
+bases=$(printf "%s\n" "$out" | cut -d "$sep" -f1 | sed "s/_.*//" | sort -u)
 jrc=0
 for id in $bases; do
     case $id in *[!0-9]*)
@@ -74,7 +77,7 @@ for id in $bases; do
     [ -z "$job" ] || printf "%s\n" "$job" | sed "s/^/SHK_J|/"
 done
 printf "SHK_RC scontrol %s\n" "$jrc"
-out=$(env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 sacct -n -P --local --allocations --duplicates -u "$u" "$@" -S "now-${since}days" -E now --format=JobID%8192,JobIDRaw%128,Cluster%256,DBIndex,State%64,Partition%128,ElapsedRaw,AllocCPUS,AllocTRES%4096,Submit,Start,End,Restarts,ExitCode,NodeList%4096,UID,Comment%4096,JobName%4096)
+out=$(env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard SLURM_BITSTR_LEN=0 sacct -n -P --delimiter="$sep" --local --allocations --duplicates -u "$u" "$@" -S "now-${since}days" -E now --format=JobID%8192,JobIDRaw%128,Cluster%256,DBIndex,State%64,Partition%128,ElapsedRaw,AllocCPUS,AllocTRES%4096,Submit,Start,End,Restarts,ExitCode,NodeList%4096,UID,Comment%4096,JobName%4096)
 rc=$?
 [ -z "$out" ] || printf "%s\n" "$out" | sed "s/^/SHK_A|/"
 printf "SHK_RC sacct %s\nSHK_END\n" "$rc"

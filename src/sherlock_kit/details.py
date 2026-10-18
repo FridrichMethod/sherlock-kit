@@ -70,6 +70,7 @@ NORMALIZED = {
     "UID": "uid",
 }
 TOOLS = ("squeue", "sacct", "scontrol")
+SEPARATOR = "\x1f"  # details.sh: the ASCII unit separator, so "|" in names and comments is data
 NUMBERS = {"ElapsedRaw", "AllocCPUS", "Restarts", "UID"}
 TIMES = {"Submit", "Start", "End"}
 MISSING = {"", "Unknown", "N/A", "None", "(null)", "None assigned"}
@@ -173,7 +174,7 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
         ("accounting", ACCOUNTING, read.acct),
     ):
         for line in lines:
-            values = line.split("|")
+            values = line.split(SEPARATOR)
             try:
                 if len(values) != len(columns):
                     raise ValueError("field count")

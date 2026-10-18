@@ -259,3 +259,44 @@ class FailedReadTests(DetailsFlow):
         code, report = self.details("--job-id", "7400")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertEqual([row["job_id"] for row in report["details"]["accounting"]], ["7400"])
+
+
+class FreeTextTests(DetailsFlow):
+    """D13: "|" in a comment or job name is data, not a field separator."""
+
+    def test_pipe_in_another_jobs_comment_does_not_poison_names(self):
+        self.canned(
+            queue=[
+                queue("7800", "7800", "RUNNING", nodes="sh01-01n01"),
+                queue("7801", "7801", "RUNNING", nodes="sh01-01n02", name="sweep", comment="a|b"),
+            ],
+            accounting=[
+                account("7800", "7800", "RUNNING"),
+                account("7801", "7801", "RUNNING", name="sweep"),
+            ],
+            jobs=[record("7800", state="RUNNING")],
+        )
+        code, report = self.details("--all")
+        self.assertEqual((code, report["details"]["malformed"]), (0, []))
+        self.assertTrue(report["details"]["complete"])
+        self.assertEqual(report["names"][0]["current"]["anomalies"], [])
+
+    def test_pipe_in_a_legacy_job_name_is_kept(self):
+        self.canned(
+            queue=[
+                queue(
+                    "7810",
+                    "7810",
+                    "RUNNING",
+                    nodes="sh01-01n01",
+                    name="seed=1|lr=0.1",
+                    comment="x|y",
+                )
+            ],
+            accounting=[account("7810", "7810", "RUNNING", name="seed=1|lr=0.1")],
+            jobs=[record("7810", state="RUNNING", name="seed=1|lr=0.1", comment="x|y")],
+        )
+        code, report = self.details("--job-id", "7810")
+        self.assertEqual((code, report["names"][0]["name"]), (0, "seed=1|lr=0.1"))
+        self.assertEqual(report["details"]["queue"][0]["comment"], "x|y")
+        self.assertTrue(report["details"]["complete"])
