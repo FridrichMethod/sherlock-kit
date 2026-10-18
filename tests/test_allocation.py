@@ -10,10 +10,12 @@ and prints only physical ids; pidinfo prints the physical job id and its remaini
 import hashlib
 import json
 import os
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -346,6 +348,9 @@ class AllocationCLI(unittest.TestCase):
         for changes, message in [
             ({"JobId": "45"}, "exactly one matching scheduler record"),
             ({"UserId": f"other({self.uid + 1})"}, "allocation belongs to another UID"),
+            ({"UserId": "garbage"}, "missing or invalid scheduler owner"),
+            ({"UserId": "(null)"}, "missing or invalid scheduler owner"),
+            ({"UserId": "demo(x)"}, "missing or invalid scheduler owner"),
             ({"JobState": "PENDING"}, "allocation is not live"),
             ({"NumCPUs": "-1"}, "invalid allocated CPUs"),
             ({"AllocTRES": "cpu=5,mem=2G,node=1,gres/gpu=2"}, "allocated CPU fields disagree"),
@@ -406,6 +411,16 @@ class AllocationCLI(unittest.TestCase):
         self.assertEqual(self.calls(), [])
         self.stop_worker()
         self.assertRefused(self.run_cli(), "worker process")
+
+    def test_zombie_worker_is_refused(self):
+        # Killed but not yet reaped: /proc still has the PID, in state Z.
+        os.kill(self.worker.pid, signal.SIGKILL)
+        stat = Path(f"/proc/{self.worker.pid}/stat")
+        deadline = time.monotonic() + 10
+        while stat.read_text().rpartition(")")[2].split()[0] != "Z":
+            self.assertLess(time.monotonic(), deadline, "worker never became a zombie")
+            time.sleep(0.01)
+        self.assertRefused(self.run_cli(), "worker process exited")
 
     def test_pidinfo_step_suffixes_are_job_membership(self):
         for suffix in ("", ".batch", ".extern", ".0", ".interactive", ".0+1"):
