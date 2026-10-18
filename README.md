@@ -145,10 +145,24 @@ shk manifest DIR
   of the attempt it interrupted.
   `--details` returns the evidence contract described below. `cancel` cancels
   the live jobs of one name.
-- `resources` reads node state, partitions, active features and configured/
-  allocated CPU, memory and GPU capacity once. `free_memory_mb` uses CfgTRES
-  minus AllocTRES; OS FreeMem never substitutes. Missing facts are null and
-  `complete: false`. Availability is a snapshot, not a resource reservation.
+- `resources` reads `scontrol show nodes` once; Sherlock ships only the nodes
+  whose `Partitions=` list names a requested partition, each once. A node keeps
+  its state, partitions, active features, configured/allocated CPU (CPUEfctv,
+  else CPUTot), memory and GPU, CfgTRES/AllocTRES and its raw line (the
+  evidence, so `owners` is megabytes: filter the JSON rather than read it
+  whole). `complete`, `malformed`, `next_check_after` and the `provenance` of
+  the derived fields come before `nodes`. `free_*` is configured minus
+  allocated whatever the state (`free_memory_mb` from CfgTRES minus AllocTRES;
+  OS FreeMem never substitutes). `schedulable` is false when the `+`-joined
+  state has any of `DOWN`, `DRAIN`, `FAIL`, `MAINTENANCE`, `NOT_RESPONDING`,
+  `RESERVED`, `INVALID_REG`, `FUTURE`, `UNKNOWN`, `REBOOT_ISSUED`,
+  `REBOOT_REQUESTED`, `POWER_DOWN`, `POWERED_DOWN` or `POWERING_DOWN` (or their
+  short sinfo spellings, listed in `provenance`), true otherwise (`PLANNED` and
+  `COMPLETING` included) and null without a state: count only schedulable
+  nodes. Missing facts are null and `complete: false`; a failed `scontrol` read
+  is exit 1 `malformed_read` with its rc and stderr. Partition and QOS limits,
+  reservations and owners preemption are not reflected; availability is a
+  snapshot, not a resource reservation.
 - `allocation` verifies an explicit local worker PID, own UID, physical job/array
   identity, current host and optional numeric step membership. It preserves actual
   resources, node records, raw records and hashes; missing counts remain null and

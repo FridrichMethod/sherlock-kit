@@ -324,16 +324,6 @@ class GuardAndEvidenceFlows(Flow):
         self.assertIsNone(report["details"]["accounting"][0]["elapsed_seconds"])
         self.assertFalse(report["names"][0]["current"]["cost"]["final"])
 
-    def test_resources_partial_tool_failure_retains_nodes(self):
-        self.tool(
-            "scontrol",
-            'printf "NodeName=sh01 State=IDLE Partitions=normal CPUEfctv=32 CPUAlloc=0 CfgTRES=cpu=32,mem=100G AllocTRES=cpu=0,mem=0\\n"\nexit 1\n',
-        )
-        code, report = self.shk("resources", "--partition", "normal")
-        self.assertEqual(code, 0)
-        self.assertFalse(report["complete"])
-        self.assertEqual(report["nodes"][0]["free_memory_mb"], 102400)
-
 
 class NativeFormatFlows(Flow):
     tool = ExtensionFlows.tool
