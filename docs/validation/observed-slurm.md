@@ -247,8 +247,27 @@ and paths are omitted below; `<token>` and `<uid>` stand for the values seen.
   or cancelled. The suite must never fall through to the host's Slurm clients
   or inherit its job environment.
 
+### The fixed kit inside a job (2026-10-18, second run)
+
+Array 48367267 (2 tasks, `owners`, `--requeue`, 1 CPU, 2 GB, token) ran the
+integrated fixes from a pushed source tree; task 1 kept the meta record
+(JobId 48367267) and task 0 ran as 48367706.
+
+- `allocation --job-id` with the physical id and with `ArrayJobId_ArrayTaskId`
+  succeeded in both elements, the meta element included, and `--step-id 0`
+  proofs reported the step as `48367267_0.0` and `48367267_1.0`.
+- The job saw its token as `SHK_SUBMISSION_TOKEN`. On task 0, `requeue --self`
+  with a wrong token refused at the token check. On task 1, `requeue --self`
+  requeued `48367267_1`: accounting then held a `REQUEUED` attempt (Restarts 0)
+  and a `COMPLETED` attempt (Restarts 1) for task 1 and one `COMPLETED` attempt
+  for task 0, and status reported no anomaly on `owners`.
+- The hermetic suite ran three times on compute nodes, with `TMPDIR` on
+  node-local scratch and on `$SCRATCH`: no test reached a Slurm client, node-local
+  scratch allowed execution, and the only errors were the zombie-worker test,
+  whose killed worker had already been reaped, and once a 20 s test timeout for
+  a CLI started from `$SCRATCH` (both test-side; the tests now allow for them).
+
 ## Not observed live
 
-Lost ssh replies, duplicate submissions racing each other, an array task
-requeue, a successful `requeue --self`, natural preemption and `possu`. Those
-rest on offline tests with fake `ssh` and Slurm binaries.
+Lost ssh replies, duplicate submissions racing each other, natural preemption
+and `possu`. Those rest on offline tests with fake `ssh` and Slurm binaries.
