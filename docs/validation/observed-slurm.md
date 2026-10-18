@@ -238,14 +238,14 @@ and paths are omitted below; `<token>` and `<uid>` stand for the values seen.
 
 ### Transfers and the test suite
 
-- `shk pull` of each task's output (4 files, about 111 KB) through
+- `shk pull` of each task's output (4 files per task, 111 KB and 100 KB) through
   `sherlock-dtn` with the 0.5.0 argv, including `--chmod=Du+rwx`, verified and
   promoted.
 - The offline test suite run inside the job (compute node, `SLURM_*` set,
-  `TMPDIR` on node-local scratch) reached the real Slurm clients: 22 failures
-  and 4 errors out of 200 tests, with no job created or cancelled. The suite
-  must never fall through to the host's Slurm clients or inherit its job
-  environment.
+  `TMPDIR` on node-local scratch, once per task) reached the real Slurm
+  clients: 22 failures and 4 or 5 errors out of 200 tests, with no job created
+  or cancelled. The suite must never fall through to the host's Slurm clients
+  or inherit its job environment.
 
 ## Not observed live
 
