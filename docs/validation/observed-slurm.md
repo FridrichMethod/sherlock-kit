@@ -1,7 +1,8 @@
 # Observed Sherlock and Slurm behavior
 
 Facts seen live on Sherlock while piloting 0.1.0 to 0.3.0 (accepted 2026-10-08,
-2026-10-09 and 2026-10-10 UTC), which the 0.4.0 design relies on. They are observations from
+2026-10-09 and 2026-10-10 UTC), which the 0.4.0 design relies on, followed by the
+0.4.0 smoke and the 0.5.0 verification. They are observations from
 one user's account on specific days, not site guarantees; re-check a fact
 before building on it. Private configuration, paths, specs, receipts and
 bundles from those pilots are not public and are not reproduced here.
@@ -125,9 +126,127 @@ own `squeue`/`sacct` row parser and name resolution for 690 CPU seconds
 - After `done`, a plain `shk submit` was refused with exit 3 `done` and the hint
   to add `--resubmit REASON` once the cause is known.
 
+## 0.5.0 live verification (2026-10-18)
+
+Slurm 25.11.8, `shk` at the 0.5.0 candidate (commit 949f43b), CPU only: from
+lab-ubuntu through the existing masters, and inside a 2-task array on `owners`
+with `--no-requeue` whose tasks shared one node (local executor). Job 48350361
+was that array, submitted held and released; 48350370 (single) and 48350374
+(2-task array) were submitted held and cancelled while held. User names, UIDs
+and paths are omitted below; `<token>` and `<uid>` stand for the values seen.
+
+### Submission, holds and the dev partition
+
+- `submit --preflight` (`sbatch --test-only`) created no job and printed its
+  estimate on stderr in site-local time:
+  `sbatch: Job 48350340 to start at 2026-10-22T13:24:32 a using 1 processors on nodes sh02-01n56 in partition normal`.
+- `dev` rejects every batch job: `sbatch` exits 1 with
+  `Batch jobs are not allowed in the 'dev' partition, which is reserved for interactive sessions (salloc/srun/sdev and OnDemand)`
+  and `allocation failure: Invalid partition name specified`. 0.5.0 refuses
+  `dev` offline (exit 3 `batch_not_allowed`).
+- A held job reads `JobState=PENDING Reason=JobHeldUser Priority=0 Comment=<token>`
+  in `scontrol`. `release` with a wrong token gave exit 3
+  `control: SHK_REFUSED token`; with the right one exit 0.
+- After the release the pending array split at once: task 0 became job
+  48350477 and task 1 kept 48350361, the meta record (compare the 0.3.0 note
+  that the last task to leave the array keeps the array id). Both started
+  about two minutes after the release.
+- `SHK_NAME` reached the job; no token variable did (0.5.0 now exports
+  `SHK_SUBMISSION_TOKEN` when a token is given).
+
+### Never-allocated jobs and accounting
+
+- A held pending job in `sacct --jobs`, with the `status --details` fields:
+  `48350370|48350370|sherlock|<dbindex>|PENDING|normal|0|0||2026-10-18T17:34:05|Unknown|Unknown|0|0:0|None assigned|<uid>||<name>`.
+  A held pending array is one aggregate row `48350374_[0-1]`, while `squeue`
+  lists its tasks `48350374_0` and `48350374_1`.
+- Cancelled while held, `sacct` about three minutes later:
+  `48350370|48350370|sherlock|<dbindex>|CANCELLED by <uid>|normal|0|0||2026-10-18T17:34:05|None|2026-10-18T17:36:26|0|0:0|None assigned|<uid>||<name>`:
+  AllocCPUS 0, ElapsedRaw 0, empty AllocTRES, Start `None`, NodeList
+  `None assigned`, End set. `squeue` for the same jobs while the controller
+  still held them:
+  `48350374|48350374|CANCELLED|normal|0:00|1|2026-10-18T17:34:14|2026-10-18T17:36:33|2026-10-18T17:36:33||<uid>|<token>|<name>`:
+  `%C` echoes the requested CPUs, `%S` and `%e` are both the cancel time and
+  `%N` is empty, although nothing was allocated.
+- A cancelled array that never split is one `squeue` row without a task suffix
+  (`48350374`), and `scontrol` shows `ArrayJobId=48350374 ArrayTaskId=4294967294`.
+- The `sacct` Comment field was empty for pending, running and cancelled jobs
+  while `scontrol` and `squeue` `%k` showed the token: Sherlock's accounting
+  keeps no job comment. A submission token is visible only while the job is in
+  the controller, and in the frozen spec in the run directory.
+- A windowed name query (`sacct --name=NAME -S now-30days -E now`) returned no
+  rows for the held-then-cancelled jobs, while `--jobs=ID` with the same
+  window returned them. Inference: windowed `sacct` selects by eligible time,
+  and a job held until it was cancelled was never eligible. Once the controller
+  purges such a job, a lookup by name sees neither `squeue` nor `sacct` rows, so
+  the name reads as `new` (or `stale` with spec files).
+- `sacct -S now-31days` worked; `now-45days` and `now-60days` failed with
+  `sacct: error: Too wide of a date range in query` (exit 1), so a status window
+  much beyond 30 days fails on Sherlock.
+- `scontrol` prints site-local times (`SubmitTime=2026-10-18T10:33:37`), while
+  `squeue` and `sacct` under `TZ=UTC` print `2026-10-18T17:33:37`.
+- The account's history also holds legacy, non-`shk` arrays whose tasks ran on
+  several partitions (`stat`, `gpu`, `bioe`) with non-contiguous observed
+  indices; no legacy name contained `|`.
+
+### Array and step identity inside the job
+
+- Task 0 saw `SLURM_JOB_ID=48350477 SLURM_ARRAY_JOB_ID=48350361 SLURM_ARRAY_TASK_ID=0`,
+  task 1 `SLURM_JOB_ID=48350361 SLURM_ARRAY_JOB_ID=48350361 SLURM_ARRAY_TASK_ID=1`.
+- `scontrol show job 48350477 --oneliner` and `show job 48350361_0` both gave
+  the one record `JobId=48350477 ArrayJobId=48350361 ArrayTaskId=0`.
+  `show job 48350361` (the meta physical id) gave both records, task 1 first,
+  as long as the sibling was in the controller; `show job 48350361_1` gave one.
+  An element is therefore named `ARRAYJOBID_TASKID`; the meta physical id is
+  not a unique selector.
+- A 25.11.8 CPU job record carries, among others, `JobId ArrayJobId ArrayTaskId JobName UserId=name(uid) JobState Reason Dependency Requeue=0 Restarts BatchFlag SubmitTime EligibleTime AccrueTime StartTime EndTime Partition NodeList BatchHost StepMgrEnabled=Yes NumNodes NumCPUs NumTasks CPUs/Task ReqTRES=cpu=1,mem=2G,node=1,billing=1 AllocTRES=cpu=1,mem=2G,node=1,billing=1 Command SubmitLine Comment=<token>`,
+  and no `Gres=` field.
+- `scontrol show step 48350477.0` (physical id of the split element) prints
+  `StepId=48350361_0.0`; `show step 48350361.0` prints the steps of both
+  elements (`48350361_0.0` and `48350361_1.0`); `show step 48350361_1.0`
+  prints exactly one. Step records carry `StepId UserId=<uid> StartTime TimeLimit State Partition NodeList Nodes=1 CPUs=1 Tasks=1 Name Network TRES=cpu=1,mem=2G,node=1 ResvPorts CPUFreqReq Dist SrunHost:Pid TresPerTask`
+  (a numeric UserId), with no `Gres=`, `NumTasks=` or `NumNodes=`.
+- `scontrol listpids` takes a physical id only: `listpids 48350361_0` prints
+  `"48350361_0" does not look like a jobid` (exit 1), and so does an
+  `A_T.S` step. With a physical id it prints the header
+  `PID JOBID STEPID LOCALID GLOBALID` and rows such as `6741 48350477 batch 0 0`,
+  `6957 48350477 batch - -` and `-1 48350477 extern 0 0`, or `7349 48350477 0 0 0`
+  for step 0; JOBID is always the physical id. Without an argument it lists
+  every job on the node, other users' jobs included.
+- `scontrol pidinfo PID`, from the batch shell and from inside an `srun` step,
+  prints `Slurm JobId=48350477 ends at Sun Oct 18 11:03:22 2026` and then
+  `Job remaining time is 1496 seconds`: no step suffix, and the end time is
+  site-local `ctime` text.
+- `shk requeue --self` inside the job refused without mutating (task 0 at the
+  Requeue=0 policy check). These records shaped the 0.5.0 handling of array
+  elements, step proofs and duplicate `scontrol` records.
+
+### Node resources and timing
+
+- `resources --partition normal` read 268 nodes (454 KB of JSON),
+  `--partition owners` 1665 nodes (2.9 MB). State strings seen: `MIXED`,
+  `ALLOCATED`, `IDLE`, `DOWN+NOT_RESPONDING`, `DOWN+DRAIN+NOT_RESPONDING`,
+  `IDLE+DRAIN`, `MIXED+DRAIN`, `ALLOCATED+NOT_RESPONDING`, `MIXED+COMPLETING`,
+  `IDLE+COMPLETING+NOT_RESPONDING`, `MIXED+PLANNED`, `IDLE+PLANNED`,
+  `IDLE+COMPLETING+DRAIN+NOT_RESPONDING` and `IDLE+DRAIN+NOT_RESPONDING`.
+  Down, draining or unresponsive nodes (46 on `normal`, 252 on `owners`) still
+  report configured-minus-allocated capacity, so free capacity counts only
+  schedulable nodes.
+- One `scontrol show job ID --oneliner` took 0.03 to 0.04 s on a login node.
+
+### Transfers and the test suite
+
+- `shk pull` of each task's output (4 files, about 111 KB) through
+  `sherlock-dtn` with the 0.5.0 argv, including `--chmod=Du+rwx`, verified and
+  promoted.
+- The offline test suite run inside the job (compute node, `SLURM_*` set,
+  `TMPDIR` on node-local scratch) reached the real Slurm clients: 22 failures
+  and 4 errors out of 200 tests, with no job created or cancelled. The suite
+  must never fall through to the host's Slurm clients or inherit its job
+  environment.
+
 ## Not observed live
 
 Lost ssh replies, duplicate submissions racing each other, an array task
-requeue, natural preemption, `possu`, a live `shk cancel`, and `shk` itself
-running on Sherlock with the local executor. Those rest on offline tests with fake
-`ssh` and Slurm binaries.
+requeue, a successful `requeue --self`, natural preemption and `possu`. Those
+rest on offline tests with fake `ssh` and Slurm binaries.

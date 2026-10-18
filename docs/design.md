@@ -234,6 +234,13 @@ the same.
   a task with no Slurm rows in that window is submitted again as new, without
   `--resubmit`, even when its run directory still exists, and the new job runs
   in the same run directory.
+- Sherlock's windowed `sacct` omits jobs that were never eligible (seen
+  2026-10-18): a job held until it was cancelled leaves no row for a name
+  query, so once the controller purges it the name reads as `new` or `stale`.
+  `sacct --jobs` still finds it. Sherlock also refuses `sacct` windows much
+  wider than 30 days (`Too wide of a date range in query` at 45 days) and keeps
+  no job Comment in accounting, so a submission token is visible only while the
+  job is in the controller and in the frozen spec.
 - Check-then-submit is a race: two submitters can both pass the guard. For a
   single job `singleton` keeps the two from running at once; arrays have no
   backstop; `status` flags `duplicate_live`. There is no exactly-once claim.
