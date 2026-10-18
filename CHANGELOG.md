@@ -2,40 +2,103 @@
 
 ## 0.5.0
 
-- Pull keeps incoming directories owner-writable across large file-list batches.
-  Interrupted private stages repair owned directory access before resume/pruning,
-  refuse a symlink stage root and never chmod data files or child symlink targets.
-  The directory-only rsync option stays local to the receiver; the restricted DTN
-  sender command, file bytes and file permissions remain unchanged.
-
-- Detailed ID status queries read the current user's queue without expired-ID
-  filters, then scope queue/control evidence to the requested IDs. Accounting
-  retains exact ID filters, so aged-out single jobs and arrays remain readable
-  without masking genuine queue RPC failures.
-
 - Operational JSON adds `schema_version: 1`; existing result keys and exits,
   help, rules and version text remain compatible.
 
 - `status --details` retains queue, accounting and queued `scontrol` identities,
   including physical IDs, DBIndex, clusters, times, comments, UID and raw lines.
-  Repeatable `--job-id` queries only the current UID and supports legacy names.
+  Repeatable `--job-id` queries only the current UID, supports legacy names and
+  lists one entry per selected base job in job id order; detailed ID queries read
+  the queue without expired-ID filters while accounting keeps exact ID filters.
   Distinct accounting identities no longer collapse at `(JobID, Restarts)`.
 
-- `resources` reports Slurm configured minus allocated node capacity and marks
-  missing or partial evidence explicitly; OS FreeMem is never used.
+  - Control records come from one `scontrol show job` per queued base job (array
+    elements appear once); records outside the selection (siblings, other own
+    jobs, other projects under `--all`) are ignored instead of marking the query
+    incomplete, and `scontrol` times are UTC like `squeue` and `sacct`.
+  - Raw queue and accounting fields are separated by the ASCII unit separator
+    (0x1F), so a `|` in a comment or job name no longer poisons every name.
+  - Accounting rows of jobs that never had an allocation (held or pending jobs
+    cancelled before start, pending array remainders) are complete evidence, and
+    a terminal one has a final zero cost; queue rows without nodes report null
+    CPUs and start.
+  - A failed `squeue` or `sacct` read is exit 1 `malformed_read` like plain
+    status, keeping the evidence and `details.returncodes` but no name summaries;
+    a failed control read alone exits 0 with `complete: false`. Each entry's
+    `current.evidence_complete` covers its own job.
+  - `duplicate_live` and `unknown_partition` apply to `shk.` names only, and
+    `unexpected_preemption` is judged on the partition of each interrupted
+    attempt, so legacy jobs sharing a script name or running on another group's
+    partition no longer exit 6.
+
+- Without a spec file, an array's task count is inferred only when its tasks run
+  0 to max: 1-based, stepped or partly aged-out arrays have null count and missing
+  tasks, a state that follows the observed tasks (no longer `failed`) and a
+  nonfinal cost. Explicit task rows outrank pending accounting aggregates.
+  `status --since` accepts 1 to 31 days, the widest window Sherlock's slurmdbd
+  answers.
+
+- `resources` reports Slurm configured minus allocated node capacity; OS FreeMem
+  is never used. Nodes are filtered on Sherlock by their `Partitions=` list, each
+  once, and keep their raw line; `complete`, `malformed`, the cadence and one
+  top-level `provenance` precede `nodes`. Each node adds `schedulable` from its
+  State flags (false for DOWN, DRAIN, FAIL, MAINTENANCE, NOT_RESPONDING, RESERVED
+  and similar; PLANNED and COMPLETING stay true): count free capacity only there.
+  A failed `scontrol` read is exit 1 `malformed_read`.
 
 - `submit --preflight` runs `sbatch --test-only` without submitting or writing
-  provenance; Slurm refusal remains exit 3. `--hold` and public
-  `--submission-token` are CLI-owned options frozen with the spec.
+  provenance; a Slurm refusal is exit 3 and an unreachable or timed-out
+  controller is exit 1 `malformed_read` with a retry hint. `--hold` and the public
+  `--submission-token` are CLI-owned options frozen with the spec; `--hold` needs
+  a token, which the job sees as `SHK_SUBMISSION_TOKEN` (an inherited one is
+  unset otherwise). A leading `#SBATCH --comment` is refused only when a token
+  owns Comment. Submit, `--preflight` and `--dry-run` refuse `dev` offline (exit 3
+  `batch_not_allowed`): Sherlock keeps it for interactive sessions; partition
+  profiles gain a `batch` flag.
 
-- Exact `release` checks UID, name, token and user hold. `requeue --self` requires
-  a local current allocation, verified Slurm PID membership and owners policy.
-  Lost mutation replies remain unknown; checkpoint/retry decisions stay outside
-  the kit.
+- Exact `release` checks UID, name, token and user hold and keeps Slurm's error
+  text. `requeue --self` requires a local current allocation, Slurm PID membership
+  in the physical `SLURM_JOB_ID`, the job's own `scontrol` record (the array meta
+  element also returns its siblings), the current UID and name, RUNNING, a
+  partition whose profile allows requeue and Requeue=1; `--expect-token` is
+  optional and checked when given. An array element is requeued as
+  `ArrayJobId_ArrayTaskId`, never as the bare array id. Lost mutation replies
+  remain unknown (exit 5) with Slurm's message; checkpoint/retry decisions stay
+  outside the kit.
+
+- `shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id S]`
+  verifies a local worker's UID, PID membership (`pidinfo`, `listpids`), host and
+  allocation and reports actual resources, topology and hashed raw records. The
+  array meta element selects its own record among siblings, an array step is
+  queried as `ArrayJobId_ArrayTaskId.STEP` as Slurm prints it, and timeouts or
+  controller errors are retryable reads distinct from non-membership. No
+  admission policy (hostlist caps, mandatory topology, affinity equality) is
+  applied.
+
+- Pull keeps incoming directories owner-writable across large file-list batches
+  with the receiver-local `--chmod=Du+rwx`; the restricted DTN rsync server
+  command, file bytes and file permissions are unchanged. Before resuming, a stage
+  directory lacking owner access gets it back (an ordinary pull issues no chmod;
+  a refused repair is exit 1 `stage_unwritable`), a stage directory another user
+  owns or a symlinked stage root is refused, and child symlink targets are never
+  followed or chmodded.
 
 - Rules distinguish bounded deterministic compute controllers running in a
   Slurm allocation with `--executor local` from prohibited future agent
-  sessions. Array grammar is `N[%M]` throughout.
+  sessions. Releasing a job held on a borrowed partition counts as submitting it;
+  the reason for a cancellation goes to the user. Array grammar is `N[%M]`
+  throughout. The skill documents allocation, release, requeue and resources.
+
+- The offline suite stays hermetic inside Slurm jobs: importing `tests/fakes`
+  removes inherited `SLURM_*`, `SBATCH_*`, `SQUEUE_*`, `SACCT_*`, `SCANCEL_*`,
+  `SHK_*` and `SHERLOCK_KIT_*` variables and exported shell functions, puts
+  blocking stubs for every Slurm client on `PATH` behind each test's fakes, and
+  refuses a `TMPDIR` that cannot execute files; `tests/run_suite.py` fails a run
+  that reached a stub. A run inside a Sherlock job had reached the real `squeue`
+  and `scontrol`.
+
+- `docs/validation/observed-slurm.md` records the 2026-10-18 live verification on
+  Slurm 25.11.8 and corrects the old DTN note.
 
 ## 0.4.1
 

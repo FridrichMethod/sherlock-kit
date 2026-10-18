@@ -158,9 +158,11 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 state, the current job (partition, array size, task counts by state, exit codes,
 restarts, CPU and GPU seconds) and the history, plus `queried_at` and
 `next_check_after` (now + 60 s). Anomalies are evaluated on the current job only:
-`unexpected_preemption` (a restart or `PREEMPTED`/`REQUEUED` row on a profile
-that is not preemptible), `duplicate_live`, `unknown_partition`,
-`malformed_rows`; any of them gives exit 6. Nothing is acknowledged or stored,
+`unexpected_preemption` (an interrupted attempt, that is a `PREEMPTED`/`REQUEUED`
+row or an attempt replaced by a later restart, on a partition whose profile is not
+preemptible), `duplicate_live`, `unknown_partition`, `malformed_rows`; any of them
+gives exit 6. `duplicate_live` and `unknown_partition` apply to `shk.` names only,
+and `--job-id` entries are per base job. Nothing is acknowledged or stored,
 so nothing needs closing: a deliberate `--resubmit` makes a new current job.
 
 `cancel` resolves one name and cancels only its live jobs (`scancel` scoped by
@@ -174,13 +176,23 @@ Operational JSON has `schema_version=1`, including errors; text and existing
 keys/exits retain their meanings. `details.py` keeps full accounting identities
 (Cluster, DBIndex, physical JobIDRaw, Start/End and Restarts), preserving raw
 rows before deriving compatibility summaries. `status --job-id` selects current
-UID jobs including legacy names; full queued `scontrol` request facts support
-held job verification. Partial evidence is explicit and cannot claim final cost.
+UID jobs including legacy names and reports one entry per base job; full queued
+`scontrol` request facts (read once per base job, times in UTC) support held job
+verification. A failed queue or accounting read is exit 1; a failed control read
+only marks the evidence incomplete. Partial evidence is explicit and cannot claim
+final cost.
 
 `node_resources.py` subtracts Slurm allocations from configured capacity; OS
-FreeMem does not drive admission. `control.py` implements read-only
-`sbatch --test-only`, exact identity-verified user-hold release and local
-allocation-only self requeue with Slurm PID membership. After a mutation is
+FreeMem does not drive admission. `resources.sh` keeps only nodes whose
+`Partitions=` list names a wanted partition, `schedulable` comes from the State
+flags while `free_*` stays configured minus allocated, and a failed `scontrol`
+read is exit 1. `control.py` implements read-only `sbatch --test-only` (a
+controller transport failure is a retryable exit 1, not a refusal), exact
+identity-verified user-hold release and local allocation-only self requeue: PID
+membership through `listpids` and `show job` both use the physical
+`SLURM_JOB_ID`, the job's own record is kept out of any sibling records, and an
+array element is requeued as that record's `ArrayJobId_ArrayTaskId` on a
+partition whose profile allows requeue. After a mutation is
 issued an ambiguous reply stays unknown, with no retry. Slurm identity reads
 and mutations are not atomic; no exactly-once guarantee is claimed. The public
 submission token is correlation data stored in Slurm Comment, the job's
@@ -210,8 +222,11 @@ rerun resumes it, and uses receiver-local `--chmod=Du+rwx` to keep incoming
 directories writable when a readonly source spans multiple file-list batches.
 Before pruning it gives owner rwx back only to real stage directories that lack
 it (left by an interrupted pull of a readonly source); an ordinary pull issues
-no chmod and checks no owner, so filesystems that refuse chmod or map owners
-(CIFS, sshfs, NFSv4 idmap) work. File permissions are unchanged, a symlinked
+no chmod, so filesystems that refuse chmod (CIFS) work, and a needed repair that
+fails is exit 1 `stage_unwritable`. Because the stage is promoted onto LOCAL, a
+stage directory another user owns (planted in a shared parent) is refused with
+exit 3 `stage_untrusted`; an id-mapped filesystem that shows another owner needs
+the stage removed by hand. File permissions are unchanged, a symlinked
 stage root is refused and a child symlink target is never followed or
 chmodded. It verifies the inventory and every hash, re-reads the manifest, then
 runs the validator named by `--validate`, if any: its argv from
@@ -230,7 +245,7 @@ the same.
 ## Weaker guarantees, accepted
 
 - Deduplication uses only `squeue -t all` and `sacct` over the last 30 days
-  (`status` takes `--since`). Spec files are reported as `stale` but never block:
+  (`status` takes `--since`, 1 to 31 days: Sherlock's slurmdbd refuses wider windows). Spec files are reported as `stale` but never block:
   a task with no Slurm rows in that window is submitted again as new, without
   `--resubmit`, even when its run directory still exists, and the new job runs
   in the same run directory.

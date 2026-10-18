@@ -103,7 +103,7 @@ shk manifest DIR
 - Operational results print one JSON document with `schema_version: 1` on stdout; `rules`, `--version`
   and help print text, and usage errors print text on stderr (exit 2).
   `shk <command> --help` is the authoritative flag list. `submit`,
-  `status`, `cancel` and `occupancy` report `next_check_after`, 60 s after they
+  `status`, `cancel`, `occupancy` and `resources` report `next_check_after`, 60 s after they
   ran.
 - `submit`: the job name is `shk.<project>.<task slug>.<hash>` of project,
   campaign and task. One read call (`squeue` and the last 30 days of `sacct`)

@@ -623,7 +623,9 @@ def _register_submit(subparsers: Subparsers) -> None:
         "--submission-token", help="public correlation token stored in Slurm Comment"
     )
     parser.add_argument(
-        "--hold", action="store_true", help="submit with a user hold until exact release"
+        "--hold",
+        action="store_true",
+        help="submit with a user hold until exact release (needs --submission-token)",
     )
     requeue = parser.add_mutually_exclusive_group()
     requeue.add_argument("--requeue", action="store_true", help="default: the partition profile")
