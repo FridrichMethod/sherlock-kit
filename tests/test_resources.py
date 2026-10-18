@@ -69,6 +69,22 @@ class ResourcesFlows(Flow):
         code, report = self.shk("resources", "--partition", "gpu")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
 
+    def test_partition_filter_reads_partitions_lists_and_lists_a_node_once(self):
+        self.scontrol(
+            node("cn01", "MIXED", "stat,owners"),
+            node("cn02", "IDLE", "normal"),
+            node("cn03", "ALLOCATED", "owners"),
+            node("cn04", "IDLE", "bioe,possu"),
+        )
+        self.assertEqual(
+            self.names(self.shk("resources", "--partition", "owners")[1]), ["cn01", "cn03"]
+        )
+        self.assertEqual(self.names(self.shk("resources", "--partition", "stat")[1]), ["cn01"])
+        code, report = self.shk("resources", "--partition", "stat", "--partition", "owners")
+        self.assertEqual((code, self.names(report)), (0, ["cn01", "cn03"]))
+        self.assertEqual(report["nodes"][0]["partitions"], ["stat", "owners"])
+        self.assertTrue(report["complete"])
+
     def test_remote_program_ships_only_the_requested_partitions(self):
         self.scontrol(
             node("cn01", "MIXED", "stat,owners"),
@@ -82,6 +98,25 @@ class ResourcesFlows(Flow):
         ]
         self.assertEqual(shipped, ["SHK_N|NodeName=cn01", "SHK_N|NodeName=cn03"])
         self.assertEqual(reply.stdout.splitlines()[-2:], ["SHK_RC scontrol 0", "SHK_END"])
+
+    def test_effective_cpus_exclude_specialized_cores_before_cputot(self):
+        self.scontrol(
+            node(
+                "cn01",
+                "MIXED",
+                "normal",
+                cpus="CPUAlloc=4 CPUEfctv=30 CPUTot=32",
+                cfg="cpu=30,mem=125G,billing=51",
+                alloc="cpu=4,mem=8G",
+                extra=" CoreSpecCount=2 CPUSpecList=0-1",
+            ),
+            node("cn02", "MIXED", "normal", cpus="CPUAlloc=4 CPUTot=32", alloc="cpu=4,mem=8G"),
+        )
+        code, report = self.shk("resources", "--partition", "normal")
+        self.assertEqual(code, 0)
+        first, second = report["nodes"]
+        self.assertEqual((first["configured_cpus"], first["free_cpus"]), (30, 26))
+        self.assertEqual((second["configured_cpus"], second["free_cpus"]), (32, 28))
 
     def test_schedulable_follows_state_flags_and_free_capacity_stays_arithmetic(self):
         states = {
