@@ -144,7 +144,7 @@ class ExtensionFlows(Flow):
         uid = os.getuid()
         self.tool(
             "scontrol",
-            f'case "$1" in show) printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; release) printf "%s\\n" "$@" >"{record}" ;; esac\n',
+            f'case "$*" in "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; "release 44") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
         )
         code, report = self.shk(
             "release", "--job-id", "44", "--expect-name", "expected", "--expect-token", "token"
@@ -153,18 +153,19 @@ class ExtensionFlows(Flow):
         self.assertEqual(record.read_text(), "release\n44\n")
         for name, token in [("wrong", "token"), ("expected", "wrong")]:
             record.unlink(missing_ok=True)
-            self.assertEqual(
-                self.shk(
-                    "release", "--job-id", "44", "--expect-name", name, "--expect-token", token
-                )[0],
-                3,
+            code, report = self.shk(
+                "release", "--job-id", "44", "--expect-name", name, "--expect-token", token
+            )
+            self.assertEqual((code, report["error"]), (3, "remote_refused"))
+            self.assertIn(
+                report["message"], {"control: SHK_REFUSED name", "control: SHK_REFUSED token"}
             )
             self.assertFalse(record.exists())
 
     def test_release_lost_reply_is_unknown_and_no_retry(self):
         self.tool(
             "scontrol",
-            f'case "$1" in show) printf "JobId=44 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; release) exit 1 ;; esac\n',
+            f'case "$*" in "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; "release 44") exit 1 ;; *) exit 97 ;; esac\n',
         )
         code, report = self.shk(
             "release", "--job-id", "44", "--expect-name", "expected", "--expect-token", "token"
@@ -173,14 +174,22 @@ class ExtensionFlows(Flow):
         self.assertIn("--job-id 44", report["next"])
 
     def test_requeue_refuses_env_only_allocation_or_ssh(self):
-        self.knobs(SLURM_JOB_ID="44")
-        self.tool("scontrol", "exit 0\n")
-        self.assertEqual(
-            self.shk("requeue", "--self", "--expect-name", "expected", "--expect-token", "token")[
-                0
-            ],
-            3,
+        self.knobs(SLURM_JOB_ID="44")  # restored with the rest of the environment
+        os.environ.pop("SLURM_ARRAY_JOB_ID", None)
+        os.environ.pop("SLURM_ARRAY_TASK_ID", None)
+        record = self.tmp / "requeue-call"
+        # The record would allow requeue; only this process is outside the job's PID list.
+        self.tool(
+            "scontrol",
+            f'case "$*" in "listpids 44") printf "PID JOBID STEPID LOCALID GLOBALID\\n4242 44 batch 0 0\\n" ;; "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; requeue*) touch "{record}" ;; *) exit 97 ;; esac\n',
         )
+        argv = ("requeue", "--self", "--expect-name", "expected", "--expect-token", "token")
+        code, report = self.shk(*argv)
+        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED process"))
+        self.executor = "ssh"
+        code, report = self.shk(*argv)
+        self.assertEqual((code, report["error"]), (3, "self_only"))
+        self.assertFalse(record.exists())
 
     def test_cli_mutually_exclusive_selectors(self):
         parser = cli.build_parser()
@@ -217,12 +226,14 @@ class GuardAndEvidenceFlows(Flow):
     detail_tools = ExtensionFlows.detail_tools
 
     def test_self_requeue_requires_own_process_uid_identity_and_owners(self):
-        self.knobs(SLURM_JOB_ID="44")
+        self.knobs(SLURM_JOB_ID="44")  # restored with the rest of the environment
+        os.environ.pop("SLURM_ARRAY_JOB_ID", None)
+        os.environ.pop("SLURM_ARRAY_TASK_ID", None)
         record = self.tmp / "requeue-call"
         uid = os.getuid()
         script = self.tool(
             "scontrol",
-            f'case "$1" in listpids) printf "%s 44 batch 0 0\\n" "$PPID" ;; show) printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; requeue) printf "%s\\n" "$@" >"{record}" ;; esac\n',
+            f'case "$*" in "listpids 44") printf "%s 44 batch 0 0\\n" "$PPID" ;; "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
         )
         code, report = self.shk(
             "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"
@@ -230,68 +241,57 @@ class GuardAndEvidenceFlows(Flow):
         self.assertEqual((code, report.get("action")), (0, "requeued"))
         self.assertEqual(record.read_text(), "requeue\n44\n")
         original = script.read_text()
-        for old, new in [
-            ("Partition=owners", "Partition=normal"),
-            ("Requeue=1", "Requeue=0"),
-            ("JobState=RUNNING", "JobState=PENDING"),
-            (f"({uid})", f"({uid + 1})"),
-            ("Comment=token", "Comment=changed"),
-            ("JobId=44", "JobId=45"),
+        for old, new, reason in [
+            ("Partition=owners", "Partition=normal", "partition"),
+            ("Requeue=1", "Requeue=0", "policy"),
+            ("JobState=RUNNING", "JobState=PENDING", "state"),
+            (f"({uid})", f"({uid + 1})", "uid"),
+            ("Comment=token", "Comment=changed", "token"),
+            ("JobId=44", "JobId=45", "id"),
         ]:
             script.write_text(original.replace(old, new))
             record.unlink(missing_ok=True)
-            self.assertEqual(
-                self.shk(
-                    "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"
-                )[0],
-                3,
+            code, report = self.shk(
+                "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"
             )
+            self.assertEqual((code, report["message"]), (3, f"control: SHK_REFUSED {reason}"))
             self.assertFalse(record.exists())
 
     def test_array_self_requeues_physical_element_not_parent(self):
         self.knobs(SLURM_JOB_ID="45", SLURM_ARRAY_JOB_ID="44", SLURM_ARRAY_TASK_ID="2")
         record = self.tmp / "requeue-call"
+        # Membership is read by the physical id; the element is shown and requeued as 44_2.
         self.tool(
             "scontrol",
-            f'case "$1" in listpids) printf "%s 45 batch 0 0\\n" "$PPID" ;; show) printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; requeue) printf "%s\\n" "$@" >"{record}" ;; esac\n',
+            f'case "$*" in "listpids 45") printf "%s 45 batch 0 0\\n" "$PPID" ;; "show job 44_2 --oneliner") printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44_2") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
         )
-        self.assertEqual(
-            self.shk("requeue", "--self", "--expect-name", "expected", "--expect-token", "token")[
-                0
-            ],
-            0,
+        code, report = self.shk(
+            "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"
         )
-        self.assertEqual(record.read_text(), "requeue\n45\n")
+        self.assertEqual((code, report["job_id"]), (0, "44_2"))
+        self.assertEqual(record.read_text(), "requeue\n44_2\n")
 
     def test_release_refuses_other_uid_system_hold_running_and_multiple_records(self):
         record = self.tmp / "release-call"
         uid = os.getuid()
         script = self.tool(
             "scontrol",
-            f'case "$1" in show) printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; release) touch "{record}" ;; esac\n',
+            f'case "$*" in "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({uid}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; "release 44") touch "{record}" ;; *) exit 97 ;; esac\n',
         )
         original = script.read_text()
-        for old, new in [
-            (f"({uid})", f"({uid + 1})"),
-            ("JobHeldUser", "JobHeldAdmin"),
-            ("PENDING", "RUNNING"),
-            ("Priority=0", "Priority=1"),
-            ("JobId=44", "JobId=45"),
-            ("Priority=0\\n", "Priority=0\\nJobId=44\\n"),
+        for old, new, reason in [
+            (f"({uid})", f"({uid + 1})", "uid"),
+            ("JobHeldUser", "JobHeldAdmin", "hold"),
+            ("PENDING", "RUNNING", "state"),
+            ("Priority=0", "Priority=1", "priority"),
+            ("JobId=44", "JobId=45", "id"),
+            ("Priority=0\\n", "Priority=0\\nJobId=44\\n", "ambiguous"),
         ]:
             script.write_text(original.replace(old, new))
-            self.assertEqual(
-                self.shk(
-                    "release",
-                    "--job-id",
-                    "44",
-                    "--expect-name",
-                    "expected",
-                    "--expect-token",
-                    "token",
-                )[0],
-                3,
+            code, report = self.shk(
+                "release", "--job-id", "44", "--expect-name", "expected", "--expect-token", "token"
             )
+            self.assertEqual((code, report["message"]), (3, f"control: SHK_REFUSED {reason}"))
             self.assertFalse(record.exists())
 
     def test_details_retains_held_job_requests_and_missing_tool_status(self):

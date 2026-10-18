@@ -92,7 +92,7 @@ shk submit --task T [--campaign C] --script FILE --partition P --cpus N --mem SI
 shk resources --partition P [--partition P ...]
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION ...]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
-shk requeue --self --expect-name NAME --expect-token TOKEN
+shk requeue --self --expect-name NAME [--expect-token TOKEN]
 shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all | --job-id ID ...) [--since DAYS] [--details]
 shk cancel (--task T [--campaign C] | --name NAME)
 shk push LOCAL REMOTE [--anywhere]
@@ -148,11 +148,14 @@ shk manifest DIR
   ambiguous or contradictory evidence. See [the allocation contract](docs/allocation.md).
 - `release` checks one exact ID, current UID, expected name/token and user hold
   immediately before `scontrol release`. `requeue --self` has no arbitrary ID
-  option: it requires the local physical allocation ID, actual Slurm PID
-  membership, current UID/name/token, RUNNING state, owners and Requeue=1. For
-  arrays it requeues the physical self element. A lost mutation reply is exit 5;
-  Slurm ownership checks still apply, and concurrent user changes can race the
-  identity read. Checkpoint durability and retry limits belong to the caller.
+  option: it requires the local allocation (`SLURM_JOB_ID`), actual Slurm PID
+  membership in that physical job, current UID and name, the token only when
+  `--expect-token` is given, RUNNING state, a partition whose profile allows
+  requeue (today `owners`) and Requeue=1. An array element is verified and
+  requeued as `ArrayJobId_ArrayTaskId`, never the bare array ID, which would
+  requeue every element. A lost mutation reply is exit 5; Slurm ownership checks
+  still apply, and concurrent user changes can race the identity read.
+  Checkpoint durability and retry limits belong to the caller.
 - `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
   `remote_root` (`--anywhere` lifts that) and never deletes. Pushed files keep
   their local modification times (`rsync -t`, so a re-push skips unchanged
