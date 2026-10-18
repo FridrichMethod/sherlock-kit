@@ -8,7 +8,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import control, executor
-from sherlock_kit.errors import EXIT_ANOMALY, Outcome
+from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, Outcome, ShkError
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
@@ -69,6 +69,7 @@ NORMALIZED = {
     "Comment": "comment",
     "UID": "uid",
 }
+TOOLS = ("squeue", "sacct", "scontrol")
 NUMBERS = {"ElapsedRaw", "AllocCPUS", "Restarts", "UID"}
 TIMES = {"Submit", "Start", "End"}
 MISSING = {"", "Unknown", "N/A", "None", "(null)", "None assigned"}
@@ -293,6 +294,16 @@ def _summary_evidence(
             current["evidence_complete"] = False
 
 
+def _returncodes(lines: list[str]) -> dict[str, int | None]:
+    """The SHK_RC exit status of each tool, or None when the program never reported it."""
+    found = {}
+    for line in lines:
+        words = line.split()
+        if len(words) == 3 and words[0] == "SHK_RC" and words[2].isdecimal():
+            found[words[1]] = int(words[2])
+    return {tool: found.get(tool) for tool in TOOLS}
+
+
 def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     """Query own selected IDs or names and retain evidence before any summary reduction."""
     from sherlock_kit import slurm
@@ -307,17 +318,13 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     for item in selected:
         query.extend((item.name, item.run_dir or "-"))
     result = executor.check(executor.run_program(ctx.executor(), "details", query), "details")
-    # Partial tool evidence remains reviewable; never present an incomplete query as new.
     lines = result.stdout.splitlines()
-    complete = "SHK_END" in lines and all(
-        f"SHK_RC {tool} 0" in lines for tool in ("squeue", "sacct", "scontrol")
-    )
+    ended, codes = "SHK_END" in lines, _returncodes(lines)
+    # Partial tool evidence stays reviewable: parse it all, then refuse to summarize below.
     safe = result.stdout + "\nSHK_RC squeue 0\nSHK_RC sacct 0\nSHK_END\n"
     read = slurm.parse_read(safe, ("squeue", "sacct"))
     uid_line = [line.removeprefix("SHK_UID ") for line in lines if line.startswith("SHK_UID ")]
     if len(uid_line) != 1 or not uid_line[0].isdecimal():
-        from sherlock_kit.errors import EXIT_LOCAL, ShkError
-
         raise ShkError(EXIT_LOCAL, "malformed_read", "details query has no verified current UID")
     uid = int(uid_line[0])
     wanted = {item.name for item in selected}
@@ -328,7 +335,8 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     )
     report, rows = parse(read, uid, keep, ids)
     _jobs(result.stdout, uid, report)
-    report["complete"] = bool(report["complete"] and complete)
+    report["returncodes"] = codes
+    report["complete"] = bool(report["complete"] and ended and set(codes.values()) == {0})
     meta = {
         "executor": ctx.executor().kind,
         "user": read.user,
@@ -343,6 +351,20 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         for item in listed
     ]
     _summary_evidence(names, rows, ids, report)
+    if not ended or codes["squeue"] != 0 or codes["sacct"] != 0:
+        # Like plain status: states derived from a failed queue or accounting read could
+        # call a live or finished job new. The evidence is kept; the summaries are not.
+        return Outcome(
+            {
+                "ok": False,
+                "error": "malformed_read",
+                "message": f"details query incomplete: end={ended}, rc={codes}",
+                "hint": "retry once after 60 s; shk doctor --remote checks the remote tools",
+                **meta,
+                "details": report,
+            },
+            EXIT_LOCAL,
+        )
     anomaly = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
     payload: dict[str, Any] = {**meta, "names": names, "truncated": False}
     if args.details or ids:

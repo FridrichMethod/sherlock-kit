@@ -239,3 +239,23 @@ class NeverAllocatedTests(DetailsFlow):
         self.assertEqual([row["allocated_cpus"] for row in records], [None, None])
         self.assertEqual([row["started_at"] for row in records], [None, None])
         self.assertEqual([row["ended_at"] for row in records], ["2026-10-10T12:02:26Z"] * 2)
+
+
+class FailedReadTests(DetailsFlow):
+    """D5: a failed squeue or sacct never yields summary states."""
+
+    def test_failed_accounting_read_is_exit_1_with_evidence(self):
+        self.canned(accounting=[account("7400", "7400", "COMPLETED")])
+        self.fake.update(sacct_rc=1)
+        code, report = self.details("--task", "train-a")
+        self.assertEqual((code, report["ok"], report["error"]), (1, False, "malformed_read"))
+        self.assertNotIn("names", report)
+        self.assertFalse(report["details"]["complete"])
+        self.assertEqual(report["details"]["returncodes"], {"squeue": 0, "sacct": 1, "scontrol": 0})
+
+    def test_failed_queue_read_is_exit_1_with_accounting_evidence(self):
+        self.canned(accounting=[account("7400", "7400", "COMPLETED")])
+        self.fake.update(queue_rc=1)
+        code, report = self.details("--job-id", "7400")
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
+        self.assertEqual([row["job_id"] for row in report["details"]["accounting"]], ["7400"])

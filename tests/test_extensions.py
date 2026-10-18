@@ -306,10 +306,12 @@ class GuardAndEvidenceFlows(Flow):
         self.assertEqual(report["details"]["jobs"][0]["fields"]["CPUs/Task"], "4")
         self.assertIsNone(report["details"]["queue"][0]["allocated_cpus"])
         self.assertIsNone(report["details"]["queue"][0]["started_at"])
-        self.tool("sacct", "exit 1\n")
-        report = self.shk("status", "--job-id", "44", "--details")[1]
+        self.canned.update(sacct_rc=1)
+        code, report = self.shk("status", "--job-id", "44", "--details")
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertFalse(report["details"]["complete"])
-        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+        self.assertEqual(report["details"]["jobs"][0]["fields"]["ReqTRES"], "cpu=4,mem=2G")
+        self.assertNotIn("names", report)
 
     def test_details_full_accounting_missing_cost_evidence_is_not_final(self):
         self.detail_tools(

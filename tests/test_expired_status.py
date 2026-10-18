@@ -87,15 +87,15 @@ class ExpiredStatusFlows(Flow):
         calls = json.loads(self.state.read_text())["calls"]
         self.assertFalse(any(call["tool"] == "scontrol" for call in calls))
 
-    def test_genuine_queue_rpc_failure_remains_incomplete(self):
+    def test_genuine_queue_rpc_failure_fails_and_keeps_accounting(self):
         data = json.loads(self.state.read_text())
         data["queue_rc"] = 1
         self.state.write_text(json.dumps(data))
         code, report = self.shk("status", "--job-id", "44", "--job-id", "66", "--details")
-        self.assertEqual(code, 0)
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertFalse(report["details"]["complete"])
         self.assertTrue(report["details"]["accounting"])
-        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+        self.assertNotIn("names", report)
 
     def failing_filter(self):
         """Replace only the temporary awk dependency with an actual failing process."""
@@ -125,12 +125,13 @@ class ExpiredStatusFlows(Flow):
             check=False,
             timeout=30,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         report = json.loads(result.stdout)
+        self.assertEqual(report["error"], "malformed_read")
         self.assertFalse(report["details"]["complete"])
         self.assertEqual(report["details"]["queue"], [])
         self.assertTrue(report["details"]["accounting"])
-        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+        self.assertNotIn("names", report)
 
     def test_filter_failure_preserves_original_queue_rpc_error_code(self):
         self.failing_filter()
@@ -147,7 +148,7 @@ class ExpiredStatusFlows(Flow):
         self.assertEqual(result.returncode, 0)
         self.assertIn("SHK_RC squeue 9\n", result.stdout)
         code, report = self.shk("status", "--job-id", "88", "--details")
-        self.assertEqual(code, 0)
+        self.assertEqual((code, report["details"]["returncodes"]["squeue"]), (1, 9))
         self.assertFalse(report["details"]["complete"])
 
     def test_source_cli_process_has_the_same_expiry_contract(self):
