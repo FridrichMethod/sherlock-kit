@@ -44,6 +44,8 @@ DEFAULTS = {
     "courtesy_ack": False,
     "resubmit": None,
     "dry_run": False,
+    "submission_token": None,
+    "hold": False,
 }
 
 
@@ -268,6 +270,27 @@ class ProfileAndArgvTests(Case):
         self.assertIn("--no-requeue", self.build(partition="owners", requeue=False).argv)
         owners_array = self.build(array="2", partition="owners").argv
         self.assertFalse(any(option.startswith("--dependency") for option in owners_array))
+
+    def test_hold_needs_a_submission_token_that_the_job_sees(self):
+        # release compares Slurm Comment with --expect-token: a hold without a token is a dead end
+        error = self.refused(1, "spec_invalid", hold=True)
+        self.assertIn("--submission-token", error.message)
+        held = self.build(hold=True, submission_token="run-7.a:1")
+        self.assertEqual(
+            held.argv[-4:],
+            [
+                f"{EXPORT},SHK_SUBMISSION_TOKEN=run-7.a:1",
+                "--dependency=singleton",
+                "--comment=run-7.a:1",
+                "--hold",
+            ],
+        )
+        tagged = self.build(array="2", submission_token="t1").argv
+        self.assertEqual(tagged[-2:], [f"{EXPORT},SHK_SUBMISSION_TOKEN=t1", "--comment=t1"])
+        self.assertEqual(self.build().argv[-2:], [EXPORT, "--dependency=singleton"])
+        for token in ("", "-x", "a b", "a,b", "x" * 129):
+            with self.subTest(token=token):
+                self.refused(1, "spec_invalid", submission_token=token, hold=True)
 
     def test_frozen_spec_document(self):
         built = self.build(resubmit="fixed the input path", array="4%2")

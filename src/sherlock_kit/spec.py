@@ -3,10 +3,10 @@
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
 partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
 the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
-script_unreadable) for bad memory, time, array or --after-ok grammar, an unreadable script or
-one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm checks them); each
---after-ok value must be one job id, since shk joins them into its own --dependency string, where
-a ',' or '?' would add clauses.
+script_unreadable) for bad memory, time, array, --after-ok or --submission-token grammar, --hold
+without a token, an unreadable script or one over 1 MiB. --constraint and --signal go to sbatch
+unchanged (Slurm checks them); each --after-ok value must be one job id, since shk joins them into
+its own --dependency string, where a ',' or '?' would add clauses.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ DURATION = re.compile(r"([1-9][0-9]*)([hm])")
 CLOCK_TIME = re.compile(r"([0-9]+):([0-5][0-9]):([0-5][0-9])")
 ARRAY = re.compile(r"([0-9]+)(?:%([0-9]+))?")
 JOB_ID = re.compile(r"[1-9][0-9]*(?:_[0-9]+)?")  # one --after-ok value: N or N_TASK
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")  # no ",": it rides in --export
 # #SBATCH options that shk sets on the command line or that would bypass the profile.
 DENIED_LONG = (
     "account",
@@ -266,8 +267,14 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
     )
 
 
-def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
-    """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path."""
+def sbatch_argv(
+    name: str, run: str, wanted: Resources, token: str | None = None, hold: bool = False
+) -> list[str]:
+    """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path.
+
+    A submission token reaches the job as SHK_SUBMISSION_TOKEN and Slurm Comment; both it and
+    --hold come last, so the argv without them is the 0.4.0 one.
+    """
     log = f"{run}/slurm-{'%A_%a' if wanted.array else '%j'}"
     argv = ["sbatch", "--parsable", f"--job-name={name}", f"--partition={wanted.partition}"]
     if wanted.array:
@@ -289,12 +296,17 @@ def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
         argv.append(f"--constraint={wanted.constraint}")
     if wanted.signal:
         argv.append(f"--signal={wanted.signal}")
-    argv.append(f"--export=ALL,SHK_NAME={name}")
+    exported = f",SHK_SUBMISSION_TOKEN={token}" if token is not None else ""
+    argv.append(f"--export=ALL,SHK_NAME={name}{exported}")
     dependency = [f"afterok:{':'.join(wanted.after_ok)}"] if wanted.after_ok else []
     if wanted.array is None:  # singleton is for single jobs only; arrays have no backstop
         dependency.append("singleton")
     if dependency:
         argv.append(f"--dependency={','.join(dependency)}")
+    if token is not None:
+        argv.append(f"--comment={token}")
+    if hold:
+        argv.append("--hold")
     return argv
 
 
@@ -342,15 +354,12 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
             f"{profile.name} is borrowed: {profile.courtesy}",
             hint=f"run shk occupancy --partition {profile.name}, then add --courtesy-ack",
         )
-    argv, digest = sbatch_argv(name, run, wanted), hashlib.sha256(script).hexdigest()
-    token = getattr(args, "submission_token", None)
-    if token is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", token):
+    token, hold = args.submission_token, args.hold
+    if token is not None and not TOKEN.fullmatch(token):
         raise _invalid("--submission-token must be 1-128 public characters: A-Z a-z 0-9 _ . : -")
-    hold = getattr(args, "hold", False)
-    if token is not None:
-        argv.append(f"--comment={token}")
-    if hold:
-        argv.append("--hold")
+    if hold and token is None:
+        raise _invalid("--hold needs --submission-token, which shk release checks")
+    argv, digest = sbatch_argv(name, run, wanted, token, hold), hashlib.sha256(script).hexdigest()
     document = {
         "schema": 1,
         "submission_token": token,

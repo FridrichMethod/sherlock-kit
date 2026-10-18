@@ -118,8 +118,10 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    `N` or `N_TASK`, because `shk` joins them into its own `--dependency`
    string, where a `,` or `?` would add clauses. Build the sbatch argv
    (explicit name, partition, CPUs, memory, minutes, run directory, log paths,
-   `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs) and the frozen
-   spec. `--dry-run` stops here, with no network at all.
+   `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs; a submission
+   token adds `,SHK_SUBMISSION_TOKEN=<token>` to the export and
+   `--comment=<token>`, and `--hold` is accepted only with a token) and the
+   frozen spec. `--dry-run` stops here, with no network at all.
 2. **Read call** (`query.sh`, shared with `status`): one `squeue -t all` and one
    `sacct --duplicates` over the last 30 days for the user and name, plus the
    newest spec file; for a borrowed partition also its occupancy. Only
@@ -178,8 +180,10 @@ FreeMem does not drive admission. `control.py` implements read-only
 allocation-only self requeue with Slurm PID membership. After a mutation is
 issued an ambiguous reply stays unknown, with no retry. Slurm identity reads
 and mutations are not atomic; no exactly-once guarantee is claimed. The public
-submission token is correlation data stored in Slurm Comment and frozen spec,
-not a credential. No project ledger, checkpoint or retry policy enters the kit.
+submission token is correlation data stored in Slurm Comment, the job's
+`SHK_SUBMISSION_TOKEN` and the frozen spec, not a credential; a held job needs
+one, because release verifies it. No project ledger, checkpoint or retry
+policy enters the kit.
 
 ## Transfer
 

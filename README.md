@@ -121,8 +121,9 @@ shk manifest DIR
   or provenance is created. Its `preflight` object retains returncode, stdout
   and stderr; rejection is exit 3, read failure is never unknown.
   `--submission-token` accepts 1-128 public characters `[A-Za-z0-9_.:-]` (first
-  alphanumeric), freezes it in the spec and sets Slurm Comment. `--hold` freezes
-  a user hold. Tokens correlate attempts and contain no secrets.
+  alphanumeric), freezes it in the spec, sets Slurm Comment and exports it to
+  the job as `SHK_SUBMISSION_TOKEN`. `--hold` freezes a user hold and needs a
+  token, which `release` checks. Tokens correlate attempts and contain no secrets.
 - The script's leading `#SBATCH` lines may set anything except what `shk` owns
   (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
   `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,
