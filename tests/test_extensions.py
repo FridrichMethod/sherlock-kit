@@ -7,6 +7,7 @@ import sys
 from contextlib import redirect_stderr
 
 from fakes import SRC
+from fakes.expired_slurm import CannedSlurm
 from test_flows import Flow
 
 sys.path.insert(0, str(SRC))
@@ -58,7 +59,7 @@ class ExtensionFlows(Flow):
             self.assertEqual(self.submit("--dry-run", script="bad.sh")[0], 3)
         self.assertEqual(self.submit("--dry-run", "--submission-token", "bad|token")[0], 1)
 
-    def detail_tools(self, accounting=None, queue=None, job=None):
+    def detail_tools(self, accounting=None, queue="", jobs=()):
         uid = os.getuid()
         name = "legacy-job"
         accounting = (
@@ -71,12 +72,10 @@ class ExtensionFlows(Flow):
                 f"2026-10-10T12:00:32|2026-10-10T12:01:12|0|0:0|sh01|{uid}|tok|{name}\n"
             )
         )
-        queue = queue or ""
-        job = job or ""
-        for tool, text in [("sacct", accounting), ("squeue", queue), ("scontrol", job)]:
-            source = self.tmp / f"{tool}.txt"
-            source.write_text(text)
-            self.tool(tool, f'cat "{source}"\n')
+        self.canned = CannedSlurm(
+            self.tmp, queue=queue.splitlines(), accounting=accounting.splitlines(), jobs=jobs
+        )
+        self.knobs(**self.canned.env())
 
     def test_details_preserve_distinct_accounting_identities_and_legacy_names(self):
         self.detail_tools()
@@ -299,8 +298,8 @@ class GuardAndEvidenceFlows(Flow):
     def test_details_retains_held_job_requests_and_missing_tool_status(self):
         uid = os.getuid()
         queue = f"44|44|PENDING|normal|0:00|4|2026-10-10T12:00:00|Unknown|Unknown|(null)|{uid}|tok|legacy-job\n"
-        job = f"JobId=44 JobName=legacy-job UserId=user({uid}) Comment=tok JobState=PENDING Reason=JobHeldUser Priority=0 NumCPUs=4 NumTasks=1 CPUs/Task=4 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=4,mem=2G Features=CPU_GEN:ROM Requeue=0 TimeLimit=00:20:00\n"
-        self.detail_tools(accounting="", queue=queue, job=job)
+        job = f"JobId=44 JobName=legacy-job UserId=user({uid}) Comment=tok JobState=PENDING Reason=JobHeldUser Priority=0 NumCPUs=4 NumTasks=1 CPUs/Task=4 ReqB:S:C:T=0:0:*:* ReqTRES=cpu=4,mem=2G Features=CPU_GEN:ROM Requeue=0 TimeLimit=00:20:00"
+        self.detail_tools(accounting="", queue=queue, jobs=[job])
         code, report = self.shk("status", "--job-id", "44", "--details")
         self.assertEqual(code, 0)
         self.assertTrue(report["details"]["complete"])
@@ -309,10 +308,12 @@ class GuardAndEvidenceFlows(Flow):
         self.assertEqual(report["details"]["jobs"][0]["fields"]["CPUs/Task"], "4")
         self.assertIsNone(report["details"]["queue"][0]["allocated_cpus"])
         self.assertIsNone(report["details"]["queue"][0]["started_at"])
-        self.tool("sacct", "exit 1\n")
-        report = self.shk("status", "--job-id", "44", "--details")[1]
+        self.canned.update(sacct_rc=1)
+        code, report = self.shk("status", "--job-id", "44", "--details")
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertFalse(report["details"]["complete"])
-        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+        self.assertEqual(report["details"]["jobs"][0]["fields"]["ReqTRES"], "cpu=4,mem=2G")
+        self.assertNotIn("names", report)
 
     def test_details_full_accounting_missing_cost_evidence_is_not_final(self):
         self.detail_tools(
@@ -350,14 +351,19 @@ class NativeFormatFlows(Flow):
         self.assertEqual(report["nodes"][0]["free_gpus"], 0)
 
     def test_control_details_ignore_unrelated_own_job(self):
+        uid = os.getuid()
         self.detail_tools(
-            queue=f"44|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{os.getuid()}|tok|legacy-job\n",
+            queue=f"44_1|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{uid}|tok|legacy-job\n",
             accounting="",
-            job=f"JobId=45 JobName=unrelated UserId=user({os.getuid()}) Comment=tok\n",
+            # show job 44 also prints element 0, which started after the queue read.
+            jobs=[
+                f"JobId=44 ArrayJobId=44 ArrayTaskId=1 JobName=legacy-job UserId=user({uid}) Comment=tok",
+                f"JobId=45 ArrayJobId=44 ArrayTaskId=0 JobName=legacy-job UserId=user({uid}) Comment=tok",
+            ],
         )
         report = self.shk("status", "--job-id", "44", "--details")[1]
-        self.assertEqual(report["details"]["jobs"], [])
-        self.assertFalse(report["details"]["complete"])
+        self.assertEqual([job["job_id"] for job in report["details"]["jobs"]], ["44"])
+        self.assertTrue(report["details"]["complete"])
 
 
 class IdentityChronologyFlows(Flow):
@@ -385,7 +391,7 @@ class IdentityChronologyFlows(Flow):
         self.detail_tools(
             accounting="",
             queue=f"44|44|RUNNING|normal|1:00|4|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:20:01|sh01|{os.getuid()}|tok|legacy-job\n",
-            job=f"JobId=44 JobName=legacy-job UserId=user({os.getuid()}) Comment=tok\n",
+            jobs=[f"JobId=44 JobName=legacy-job UserId=user({os.getuid()}) Comment=tok"],
         )
         report = self.shk("status", "--job-id", "44", "--details")[1]
         self.assertIsNone(report["details"]["queue"][0]["ended_at"])
@@ -422,7 +428,10 @@ class EvidenceCompletenessRegressions(Flow):
         self.detail_tools(
             accounting="",
             queue=f"44|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{os.getuid()}|tok|legacy-job\n",
-            job="",
+            # The meta record left the controller after squeue; its sibling still answers.
+            jobs=[
+                f"JobId=45 ArrayJobId=44 ArrayTaskId=0 JobName=legacy-job UserId=user({os.getuid()})"
+            ],
         )
         report = self.shk("status", "--job-id", "44", "--details")[1]
         self.assertFalse(report["details"]["complete"])
@@ -452,14 +461,16 @@ class PendingEvidenceRegressions(Flow):
         self.detail_tools(
             accounting=f"44|44|sherlock|100|PENDING|owners|0|0||2026-10-10T12:00:00|Unknown|Unknown|0|0:0|None assigned|{uid}|tok|legacy-job\n",
             queue=f"44|44|PENDING|owners|0:00|4|2026-10-10T12:00:00|Unknown|Unknown|(null)|{uid}|tok|legacy-job\n",
-            job=f"JobId=44 JobName=legacy-job UserId=user({uid}) Comment=tok JobState=PENDING Reason=JobHeldUser Priority=0 ReqTRES=cpu=4,mem=2G Requeue=1\n",
+            jobs=[
+                f"JobId=44 JobName=legacy-job UserId=user({uid}) Comment=tok JobState=PENDING Reason=JobHeldUser Priority=0 ReqTRES=cpu=4,mem=2G Requeue=1"
+            ],
         )
         report = self.shk("status", "--job-id", "44", "--details")[1]
         self.assertTrue(report["details"]["complete"])
         self.assertTrue(report["details"]["allocation_evidence_complete"])
         self.assertFalse(report["names"][0]["current"]["cost"]["final"])
 
-    def test_history_gap_marks_all_summaries_nonfinal(self):
+    def test_history_gap_withdraws_only_its_own_final_cost(self):
         uid = os.getuid()
         records = "".join(
             f"{job}|{job}|sherlock|{job}|COMPLETED|owners|60|1|cpu=1,gres/gpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:01:01|{restarts}|0:0|sh01|{uid}|tok|{name}\n"
@@ -468,4 +479,6 @@ class PendingEvidenceRegressions(Flow):
         self.detail_tools(accounting=records)
         report = self.shk("status", "--job-id", "44", "--job-id", "45", "--details")[1]
         self.assertFalse(report["details"]["complete"])
-        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+        self.assertFalse(report["details"]["history_complete"])
+        final = {entry["name"]: entry["current"]["cost"]["final"] for entry in report["names"]}
+        self.assertEqual(final, {"a-complete": True, "z-gap": False})

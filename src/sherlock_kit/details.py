@@ -8,7 +8,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import control, executor
-from sherlock_kit.errors import EXIT_ANOMALY, Outcome
+from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, Outcome, ShkError
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
@@ -69,6 +69,8 @@ NORMALIZED = {
     "Comment": "comment",
     "UID": "uid",
 }
+TOOLS = ("squeue", "sacct", "scontrol")
+SEPARATOR = "\x1f"  # details.sh: the ASCII unit separator, so "|" in names and comments is data
 NUMBERS = {"ElapsedRaw", "AllocCPUS", "Restarts", "UID"}
 TIMES = {"Submit", "Start", "End"}
 MISSING = {"", "Unknown", "N/A", "None", "(null)", "None assigned"}
@@ -114,9 +116,10 @@ def normalized(values: dict[str, str], raw: str) -> dict[str, Any]:
             record[label] = value
     if "Elapsed" in values:
         record["elapsed_seconds"] = _elapsed(values["Elapsed"])
-    # Pending squeue CPUs and start/end times are requests/estimates, not allocation facts.
+    # squeue prints requested CPUs, and a placeholder start, for a job without nodes (pending,
+    # or cancelled before any allocation); pending end times are estimates.
     if "Elapsed" in values:
-        if values.get("State") == "PENDING":
+        if values.get("State") == "PENDING" or values.get("NodeList", "") in MISSING:
             record.update(allocated_cpus=None, started_at=None)
         if values.get("State") not in {
             "COMPLETED",
@@ -142,17 +145,21 @@ def _selected(value: str, ids: list[str]) -> bool:
 
 
 def _allocation_complete(data: dict[str, str]) -> bool:
-    """Missing TRES is valid only for an explicitly unstarted pending allocation."""
+    """Missing TRES is valid only for a job that never had an allocation, in any state.
+
+    Pending, held and cancelled-before-start rows print AllocCPUS 0, ElapsedRaw 0, no Start
+    and no AllocTRES; a started job without AllocTRES is incomplete evidence.
+    """
     return data["AllocTRES"] not in MISSING or (
-        data["State"] == "PENDING"
-        and data["Start"] in MISSING
-        and data["ElapsedRaw"] == "0"
-        and data["AllocCPUS"] == "0"
+        data["Start"] in MISSING and data["ElapsedRaw"] == "0" and data["AllocCPUS"] == "0"
     )
 
 
-def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, Any], Rows]:
-    """Keep every full record; derive summaries from the same accounting identities."""
+def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, Any], Rows, set[str]]:
+    """Keep every full record; derive summaries from the same accounting identities.
+
+    Also returns the base job ids whose own accounting evidence is incomplete.
+    """
     from sherlock_kit import slurm
 
     report: dict[str, Any] = {
@@ -165,12 +172,13 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
     }
     by_name: dict[str, list[slurm.Row]] = {}
     malformed: Counter[str | None] = Counter()
+    gaps: set[str] = set()
     for label, columns, lines in (
         ("queue", QUEUE, read.queue),
         ("accounting", ACCOUNTING, read.acct),
     ):
         for line in lines:
-            values = line.split("|")
+            values = line.split(SEPARATOR)
             try:
                 if len(values) != len(columns):
                     raise ValueError("field count")
@@ -183,6 +191,7 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                     continue
                 record = normalized(data, line)
                 report[label].append(record)
+                base = data["JobID"].partition("_")[0]
                 if label == "accounting" and any(
                     data[key] in MISSING
                     for key in (
@@ -194,10 +203,10 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                         "Restarts",
                     )
                 ):
-                    report["complete"] = False
-                allocation_complete = label != "accounting" or _allocation_complete(data)
-                report["allocation_evidence_complete"] &= allocation_complete
-                report["complete"] &= allocation_complete
+                    gaps.add(base)
+                if label == "accounting" and not _allocation_complete(data):
+                    report["allocation_evidence_complete"] = False
+                    gaps.add(base)
                 legacy = dict(data)
                 if label == "queue":
                     legacy = {key: data[key] for key in slurm.QUEUE_FIELDS}
@@ -208,7 +217,6 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                 by_name.setdefault(data["JobName"], []).append(slurm._row(legacy))
             except ValueError:
                 report["malformed"].append({"source": label, "raw": line})
-                report["complete"] = False
                 malformed[None] += 1
     seen = [
         value
@@ -220,42 +228,57 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
     report["missing_job_ids"] = [
         job for job in ids if not any(_selected(value, [job]) for value in seen)
     ]
-    report["complete"] = report["complete"] and not report["missing_job_ids"]
-    return report, slurm.Rows(by_name, malformed, truncated=False)
+    report["complete"] = not (gaps or report["malformed"] or report["missing_job_ids"])
+    return report, slurm.Rows(by_name, malformed, truncated=False), gaps
 
 
-def _jobs(stdout: str, uid: int, report: dict[str, Any]) -> None:
-    expected = {
-        record["job_id_raw"] for record in report["queue"] if record["job_id_raw"] is not None
+def _jobs(stdout: str, uid: int, report: dict[str, Any]) -> set[str]:
+    """Keep the own control records of the queued physical IDs; other records are not evidence.
+
+    show job ARRAY_ID also prints sibling elements that the selection or the queue read
+    did not include; they are ignored, while every queued physical ID needs its record.
+    Returns the base job ids with a queued physical ID that has none.
+    """
+    bases = {
+        record["job_id_raw"]: (record["job_id"] or "").partition("_")[0]
+        for record in report["queue"]
+        if record["job_id_raw"] is not None
     }
+    expected = set(bases)
+    observed: set[str | None] = set()
     for line in stdout.splitlines():
         if not line.startswith("SHK_J|"):
             continue
         raw = line.removeprefix("SHK_J|")
         data = fields(raw)
         own = re.fullmatch(r"[^()]*\(([0-9]+)\)", data.get("UserId", ""))
-        if not own or int(own[1]) != uid or data.get("JobId") not in expected:
-            report["complete"] = False
+        job = data.get("JobId")
+        if not own or int(own[1]) != uid or job not in expected or job in observed:
             continue
+        observed.add(job)
         report["jobs"].append({
-            "job_id": data.get("JobId"),
+            "job_id": job,
             "name": data.get("JobName"),
             "comment": data.get("Comment"),
             "uid": uid,
             "fields": data,
             "raw": raw,
         })
-    observed = {record["job_id"] for record in report["jobs"]}
     report["missing_control_job_ids"] = sorted(expected - observed)
     report["control_identities_complete"] = not report["missing_control_job_ids"]
     if not report["control_identities_complete"]:
         report["complete"] = False
+    return {bases[job] for job in report["missing_control_job_ids"]}
 
 
 def _summary_evidence(
-    names: list[dict[str, Any]], rows: Rows, ids: list[str], report: dict[str, Any]
+    names: list[dict[str, Any]], rows: Rows, ids: list[str], report: dict[str, Any], gaps: set[str]
 ) -> None:
-    """Mark history gaps and exact element selections without inventing sibling states."""
+    """Mark history gaps and exact element selections without inventing sibling states.
+
+    Each entry's evidence_complete (and so its final cost) rests on its own job's evidence and
+    on lines that no job can be told apart from; complete covers the whole query.
+    """
     partial = {
         str(row.base)
         for found in rows.by_name.values()
@@ -276,13 +299,53 @@ def _summary_evidence(
         current = entry["current"]
         if current is None:
             continue
-        if current["job_id"] in partial:
+        job = current["job_id"]
+        if job in partial:
             entry.update(state="unknown", scope="partial_array")
             current["array"].update(count=None, count_known=False)
             current["tasks"].update(count=None, missing=None)
-        if not report["complete"]:
-            current["cost"]["final"] = False
-            current["evidence_complete"] = False
+        current["evidence_complete"] = (
+            not (report["malformed"] or job in gaps or job in partial)
+            and not current["tasks"]["incomplete_history"]
+        )
+        current["cost"]["final"] = current["cost"]["final"] and current["evidence_complete"]
+
+
+def _by_job(rows: Rows) -> list[dict[str, Any]]:
+    """--job-id: one entry per base job, in job id order.
+
+    Legacy jobs often share a script name, so a name is no task identity there: only shk
+    names keep the duplicate_live (across the selected jobs) and unknown_partition checks.
+    """
+    from sherlock_kit import slurm, spec
+
+    entries = []
+    for name, found in rows.by_name.items():
+        jobs: dict[int, list[slurm.Row]] = {}
+        for row in found:
+            jobs.setdefault(row.base, []).append(row)
+        shk = spec.NAME.fullmatch(name) is not None
+        malformed = rows.malformed[name] + rows.malformed[None]
+        resolved = [
+            {"name": name, **slurm.resolve_name(group, malformed=malformed, invariants=shk)}
+            for group in jobs.values()
+        ]
+        live = [entry["current"] for entry in resolved if entry["state"] == "live"]
+        if shk and len(live) > 1:
+            for current in live:
+                current["anomalies"] = sorted([*current["anomalies"], "duplicate_live"])
+        entries.extend(resolved)
+    return sorted(entries, key=lambda entry: int(entry["current"]["job_id"]))
+
+
+def _returncodes(lines: list[str]) -> dict[str, int | None]:
+    """The SHK_RC exit status of each tool, or None when the program never reported it."""
+    found = {}
+    for line in lines:
+        words = line.split()
+        if len(words) == 3 and words[0] == "SHK_RC" and words[2].isdecimal():
+            found[words[1]] = int(words[2])
+    return {tool: found.get(tool) for tool in TOOLS}
 
 
 def status(args: argparse.Namespace, ctx: Context) -> Outcome:
@@ -294,20 +357,18 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     selected = slurm._selection(args, ctx)
     mode = "ids" if ids else ("all" if args.all else "names")
     query = [mode, str(since), *ids]
+    if args.all:
+        query.append(slurm._all_prefix(ctx))
     for item in selected:
         query.extend((item.name, item.run_dir or "-"))
     result = executor.check(executor.run_program(ctx.executor(), "details", query), "details")
-    # Partial tool evidence remains reviewable; never present an incomplete query as new.
     lines = result.stdout.splitlines()
-    complete = "SHK_END" in lines and all(
-        f"SHK_RC {tool} 0" in lines for tool in ("squeue", "sacct", "scontrol")
-    )
+    ended, codes = "SHK_END" in lines, _returncodes(lines)
+    # Partial tool evidence stays reviewable: parse it all, then refuse to summarize below.
     safe = result.stdout + "\nSHK_RC squeue 0\nSHK_RC sacct 0\nSHK_END\n"
     read = slurm.parse_read(safe, ("squeue", "sacct"))
     uid_line = [line.removeprefix("SHK_UID ") for line in lines if line.startswith("SHK_UID ")]
     if len(uid_line) != 1 or not uid_line[0].isdecimal():
-        from sherlock_kit.errors import EXIT_LOCAL, ShkError
-
         raise ShkError(EXIT_LOCAL, "malformed_read", "details query has no verified current UID")
     uid = int(uid_line[0])
     wanted = {item.name for item in selected}
@@ -316,9 +377,10 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         if ids
         else (slurm._all_names(ctx) if args.all else lambda name: name in wanted)
     )
-    report, rows = parse(read, uid, keep, ids)
-    _jobs(result.stdout, uid, report)
-    report["complete"] = bool(report["complete"] and complete)
+    report, rows, gaps = parse(read, uid, keep, ids)
+    gaps |= _jobs(result.stdout, uid, report)
+    report["returncodes"] = codes
+    report["complete"] = bool(report["complete"] and ended and set(codes.values()) == {0})
     meta = {
         "executor": ctx.executor().kind,
         "user": read.user,
@@ -327,12 +389,29 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         **slurm._cadence(ctx),
     }
     report.update(queried_at=meta["queried_at"], history_window_days=since)
-    listed = selected or [slurm.Selected(name) for name in sorted(rows.by_name)]
-    names = [
-        {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
-        for item in listed
-    ]
-    _summary_evidence(names, rows, ids, report)
+    if ids:
+        names = _by_job(rows)
+    else:
+        listed = selected or [slurm.Selected(name) for name in sorted(rows.by_name)]
+        names = [
+            {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
+            for item in listed
+        ]
+    _summary_evidence(names, rows, ids, report, gaps)
+    if not ended or codes["squeue"] != 0 or codes["sacct"] != 0:
+        # Like plain status: states derived from a failed queue or accounting read could
+        # call a live or finished job new. The evidence is kept; the summaries are not.
+        return Outcome(
+            {
+                "ok": False,
+                "error": "malformed_read",
+                "message": f"details query incomplete: end={ended}, rc={codes}",
+                "hint": "retry once after 60 s; shk doctor --remote checks the remote tools",
+                **meta,
+                "details": report,
+            },
+            EXIT_LOCAL,
+        )
     anomaly = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
     payload: dict[str, Any] = {**meta, "names": names, "truncated": False}
     if args.details or ids:

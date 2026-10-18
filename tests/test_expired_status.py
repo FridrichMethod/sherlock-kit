@@ -3,17 +3,14 @@
 import json
 import os
 import pwd
-import shlex
 import subprocess
 import sys
-from pathlib import Path
 
 from fakes import SRC
+from fakes.expired_slurm import CannedSlurm
 from test_flows import Flow
 
 from sherlock_kit import executor
-
-FIXTURE = Path(__file__).parent / "fakes/expired_slurm.py"
 
 
 def expiry_fixture(directory):
@@ -35,24 +32,11 @@ def expiry_fixture(directory):
         f"44|44|sherlock|900|COMPLETED|normal|614|1|cpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:10:15|0|0:0|sh01|{uid + 1}|tok|foreign-accounting",
         f"88|88|sherlock|901|COMPLETED|normal|614|1|cpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:10:15|0|0:0|sh01|{uid}|tok|unrelated-accounting",
     ])
-    jobs = {
-        "55": f"JobId=55 ArrayJobId=55 ArrayTaskId=0 JobName=live-array UserId=user({uid}) Comment=tok JobState=RUNNING"
-    }
-    state = directory / "expiry-state.json"
-    state.write_text(
-        json.dumps({"queue": queue, "accounting": accounting, "jobs": jobs, "calls": []})
-    )
-    tools = directory / "expiry-bin"
-    tools.mkdir()
-    for tool in ("squeue", "sacct", "scontrol"):
-        command = shlex.join([sys.executable, "-B", str(FIXTURE), tool])
-        path = tools / tool
-        path.write_text(f'#!/bin/sh\nexec {command} "$@"\n')
-        path.chmod(0o755)
-    return {
-        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
-        "FAKE_EXPIRY_STATE": str(state),
-    }, state
+    jobs = [
+        f"JobId=55 ArrayJobId=55 ArrayTaskId=0 JobName=live-array UserId=user({uid}) Comment=tok JobState=RUNNING"
+    ]
+    fake = CannedSlurm(directory, queue=queue, accounting=accounting, jobs=jobs)
+    return fake.env(), fake.path
 
 
 def assert_expiry_report(test, report, state):
@@ -103,19 +87,19 @@ class ExpiredStatusFlows(Flow):
         calls = json.loads(self.state.read_text())["calls"]
         self.assertFalse(any(call["tool"] == "scontrol" for call in calls))
 
-    def test_genuine_queue_rpc_failure_remains_incomplete(self):
+    def test_genuine_queue_rpc_failure_fails_and_keeps_accounting(self):
         data = json.loads(self.state.read_text())
         data["queue_rc"] = 1
         self.state.write_text(json.dumps(data))
         code, report = self.shk("status", "--job-id", "44", "--job-id", "66", "--details")
-        self.assertEqual(code, 0)
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertFalse(report["details"]["complete"])
         self.assertTrue(report["details"]["accounting"])
-        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+        self.assertNotIn("names", report)
 
     def failing_filter(self):
         """Replace only the temporary awk dependency with an actual failing process."""
-        command = self.tmp / "expiry-bin/awk"
+        command = self.tmp / "canned-bin/awk"
         command.write_text("#!/bin/sh\nexit 17\n")
         command.chmod(0o755)
 
@@ -141,12 +125,13 @@ class ExpiredStatusFlows(Flow):
             check=False,
             timeout=30,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 1, result.stderr)
         report = json.loads(result.stdout)
+        self.assertEqual(report["error"], "malformed_read")
         self.assertFalse(report["details"]["complete"])
         self.assertEqual(report["details"]["queue"], [])
         self.assertTrue(report["details"]["accounting"])
-        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+        self.assertNotIn("names", report)
 
     def test_filter_failure_preserves_original_queue_rpc_error_code(self):
         self.failing_filter()
@@ -163,7 +148,7 @@ class ExpiredStatusFlows(Flow):
         self.assertEqual(result.returncode, 0)
         self.assertIn("SHK_RC squeue 9\n", result.stdout)
         code, report = self.shk("status", "--job-id", "88", "--details")
-        self.assertEqual(code, 0)
+        self.assertEqual((code, report["details"]["returncodes"]["squeue"]), (1, 9))
         self.assertFalse(report["details"]["complete"])
 
     def test_source_cli_process_has_the_same_expiry_contract(self):

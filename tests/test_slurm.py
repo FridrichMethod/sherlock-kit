@@ -284,8 +284,25 @@ class ResolveTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
+class InterruptedPartitionTests(unittest.TestCase):
+    """A preemption or restart is judged on the partition of the attempt it interrupted."""
+
+    def test_preemption_on_owners_before_a_restart_on_normal_is_routine(self):
+        moved = current(
+            [q("500", "RUNNING")],
+            [a("500", "PREEMPTED", elapsed=30, partition="owners"), a("500", "RUNNING", restart=1)],
+        )
+        self.assertEqual((moved["max_restart"], moved["anomalies"]), (1, []))
+
+    def test_restarts_on_a_non_preemptible_partition_stay_unexpected(self):
+        node_fail = current(acct=[a("500", "NODE_FAIL", elapsed=30), a("500", restart=1)])
+        self.assertEqual(node_fail["anomalies"], ["unexpected_preemption"])
+        aged_out = current(acct=[a("500", restart=1)])
+        self.assertEqual(aged_out["anomalies"], ["unexpected_preemption"])
+        back = current(
+            acct=[a("500", "PREEMPTED", elapsed=30), a("500", restart=1, partition="owners")]
+        )
+        self.assertEqual(back["anomalies"], ["unexpected_preemption"])
 
 
 class FinalHistoryTests(unittest.TestCase):
@@ -293,3 +310,39 @@ class FinalHistoryTests(unittest.TestCase):
         result = current(acct=[a("500", restart=2, partition="owners")])
         self.assertEqual(result["tasks"]["incomplete_history"], [0])
         self.assertFalse(result["cost"]["final"])
+
+
+class UnknownCountTests(unittest.TestCase):
+    def test_unseen_indices_without_a_known_count_are_neither_failed_nor_missing(self):
+        for indices in ((1, 2, 3), (0, 4, 8)):
+            with self.subTest(indices=indices):
+                result = resolve(acct=[a(f"300_{i}") for i in indices])
+                tasks = result["current"]["tasks"]
+                self.assertEqual(
+                    (result["state"], tasks["count"], tasks["missing"]), ("done", None, None)
+                )
+                self.assertEqual(result["current"]["array"], {"count": None, "count_known": False})
+                self.assertFalse(result["current"]["cost"]["final"])
+        failed = resolve(acct=[a("300_1"), a("300_2", "FAILED", exit_code="1:0")])
+        self.assertEqual((failed["state"], failed["current"]["tasks"]["failed"]), ("failed", 1))
+        self.assertEqual(resolve([q("300_[5-6]")], [a("300_1")])["state"], "live")
+        known = resolve(acct=[a(f"300_{i}") for i in (1, 2, 3)], spec=(300, 4))
+        self.assertEqual((known["state"], known["current"]["tasks"]["missing"]), ("failed", 1))
+
+
+class ChronologyTests(unittest.TestCase):
+    def test_explicit_task_row_outranks_a_pending_aggregate_on_the_details_path(self):
+        identity = {"JobIDRaw": "44", "Cluster": "sherlock", "DBIndex": "1", "Restarts": "0"}
+        common = {**identity, "Partition": "normal", "Submit": "2026-10-10T12:00:00", "JobName": N}
+        pending = {"JobID": "44_[0-3]", "State": "PENDING", "ElapsedRaw": "0", "AllocCPUS": "0"}
+        pending |= {"AllocTRES": "", "Start": "Unknown", "End": "Unknown", "ExitCode": "0:0"}
+        done = {"JobID": "44_0", "State": "COMPLETED", "ElapsedRaw": "60", "AllocCPUS": "1"}
+        done |= {"AllocTRES": "cpu=1", "Start": "2026-10-10T12:00:01", "ExitCode": "0:0"}
+        done |= {"End": "2026-10-10T12:01:01"}
+        rows = [slurm._row({**common, **pending}), slurm._row({**common, **done})]
+        tasks = slurm.resolve_name(rows)["current"]["tasks"]
+        self.assertEqual(tasks["by_state"], {"COMPLETED": 1, "PENDING": 3})
+
+
+if __name__ == "__main__":
+    unittest.main()

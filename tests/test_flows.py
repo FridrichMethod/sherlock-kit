@@ -362,10 +362,12 @@ class StatusCancelOccupancyFlows(Flow):
         )
 
     def test_jobs_outside_the_sacct_window_are_forgotten(self):
-        self.slurm.add(spec.job_name("demo", "default", "old"), "COMPLETED", age_days=40)
+        self.slurm.add(spec.job_name("demo", "default", "old"), "COMPLETED", age_days=30.5)
         self.assertEqual(self.entry("old")["state"], "new")
-        self.assertEqual(self.entry("old", 0, "--since", "60")["state"], "done")
+        self.assertEqual(self.entry("old", 0, "--since", "31")["state"], "done")
         self.assertEqual(self.submit(task="old")[1]["state_before"], "new")
+        code, refused = self.shk("status", "--task", "old", "--since", "32")
+        self.assertEqual((code, refused["error"]), (1, "spec_invalid"))
 
     def test_stale_spec_files_submit_like_new_and_anomalies_exit_6(self):
         self.shk_dir("old").mkdir(parents=True)

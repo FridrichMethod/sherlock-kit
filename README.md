@@ -130,11 +130,19 @@ shk manifest DIR
   are refused. Matching follows sbatch's own parsing, so abbreviated long
   options (`--part=gpu`) and short flags bundled after value-less ones
   (`-Hp gpu`) count too.
-- `status`: one `squeue` and one `sacct` for all selected names; `--since`
-  defaults to 30 days (7 with `--all`). Give `--campaign` once for every
+- `status`: one `squeue` and one `sacct` for all selected names (`--details`
+  adds one `scontrol show job` per queued base job id); `--since` defaults to
+  30 days (7 with `--all`) and accepts 1 to 31, because Sherlock's slurmdbd
+  refuses wider `sacct` windows. Give `--campaign` once for every
   `--task` or once per `--task`, and `--run-dir` once per `--task` or not at
   all. Repeatable `--job-id N` or `N_TASK` is mutually exclusive with task,
-  name and all selectors; it includes legacy names and only current UID rows.
+  name and all selectors; it includes legacy names and only current UID rows,
+  and lists one entry per selected base job. Without a spec file (always with
+  `--all`, `--name` and `--job-id`) an array whose seen tasks are not exactly 0
+  to the largest index has null `array.count`, `tasks.count` and
+  `tasks.missing`, and `done` or `failed` describe the seen tasks only. A
+  preemption or restart is unexpected (exit 6) on the non-preemptible partition
+  of the attempt it interrupted.
   `--details` returns the evidence contract described below. `cancel` cancels
   the live jobs of one name.
 - `resources` reads node state, partitions, active features and configured/
@@ -190,28 +198,61 @@ shk manifest DIR
 
 ## Detailed status contract
 
-`status --details` adds `details = {queue, accounting, jobs, complete, queried_at, history_window_days, missing_job_ids, missing_control_job_ids, selection, allocation_evidence_complete, history_complete, control_identities_complete, malformed}`. Queue and
+`status --details` adds `details = {queue, accounting, jobs, complete, queried_at, history_window_days, missing_job_ids, missing_control_job_ids, selection, allocation_evidence_complete, history_complete, control_identities_complete, returncodes, malformed}`. Queue and
 accounting are lists of full records, before summary deduplication; every
-record includes the original `raw` line. Their normalized fields are
+record includes the original `raw` line, whose fields are separated by the
+ASCII unit separator (0x1F) so that `|` in comments and job names stays data.
+Their normalized fields are
 `job_id`, `job_id_raw`, `cluster`, `db_index`, `state`, `partition`,
 `elapsed_seconds`, `allocated_cpus`, `allocated_tres`, `submitted_at`,
 `started_at`, `ended_at`, `restarts`, `exit_code`, `nodes`, `name`, `comment`
 and `uid`. Missing fields are null, numeric facts are integers, timestamps
-are UTC strings, IDs (including DBIndex) remain strings. Pending queue CPUs,
-start and end are null because squeue supplies requests or predictions there.
+are UTC strings, IDs (including DBIndex) remain strings. Queue CPUs and start
+are null for a job without nodes (pending, or cancelled before any
+allocation), and a live job's end is null, because squeue prints requests,
+placeholders or predictions there. Sherlock's accounting `Comment` is empty,
+so `details` shows a submission token only in queue and control records while
+the controller holds the job; the frozen spec keeps it. Slurm also records the
+sbatch command line, which carries the token, as `SubmitLine` (in control
+records, and in `sacct` where slurmdbd stores it).
 
-`jobs` holds queued physical `scontrol` identities as `{job_id, name, comment, uid, fields, raw}`; `fields` retains original Slurm names and string values,
+`jobs` holds current-UID `scontrol` records of queued physical IDs as `{job_id, name, comment, uid, fields, raw}`, read with one `show job` per base job id: an
+array ID prints every element the controller still holds, records outside the
+selection are ignored, and each queued physical ID needs its own record.
+`fields` retains original Slurm names and string values (times in UTC),
 including request TRES, Features, TimeLimit, Requeue and array identity. All
-records are restricted to the current UID. Partial tools, missing requested
-IDs, malformed rows or missing accounting cost identity mark evidence
-incomplete, retain available facts and prevent a final cost claim. AllocTRES
-may be absent for an explicitly pending, unstarted allocation with zero CPUs
-and elapsed time; that is structurally complete and still has nonfinal cost.
-Missing allocation TRES after a job started and restart-history gaps are
-incomplete. Queued physical IDs must all have verified control identities.
+records are restricted to the current UID. `returncodes` holds each tool's
+exit status. A failed `squeue` or `sacct` read exits 1 `malformed_read` like
+plain status, with `details` and without `names`. A failed control read,
+missing requested IDs, malformed rows or missing accounting cost identity make
+`complete` false and retain available facts; a failed control read alone still
+exits 0.
+Accounting rows of jobs that never had an allocation (AllocCPUS 0, ElapsedRaw
+0, no Start and no AllocTRES, in any state such as PENDING or
+`CANCELLED by UID`) are structurally complete, and a terminal one has a final
+zero cost. Missing allocation TRES after a job started and restart-history
+gaps are incomplete.
+
+`--job-id` lists one entry per selected base job, in job id order; legacy jobs
+often share a script name, so `duplicate_live` (across the selected jobs) and
+`unknown_partition` apply to `shk.` names only. Each entry's
+`current.evidence_complete` covers its own job (accounting identity and
+allocation, control records, restart history, partial scope) and malformed
+lines that no job can be told apart from; `cost.final` requires it, while
+`complete` is the conjunction over the whole query. A requested ID without rows
+has no entry and is listed only in `missing_job_ids`, so a batch's cost is final
+only when that list is empty and every entry has `cost.final`.
 An exact array-element selection reports `selection.partial_array_ids`, entry
 `scope: partial_array`, unknown whole-array state/count/missing values, and
 nonfinal cost; sibling states cannot be inferred from a selected element.
+Without a spec file an array's task count is inferred only when the seen tasks
+are exactly 0 to the largest index; otherwise (1-based or stepped legacy
+arrays, early tasks gone from the window) `array.count`, `tasks.count` and
+`tasks.missing` are null, the state follows the seen tasks and the cost is not
+final. A cancelled array that never split is one squeue row without a task
+suffix, and names-mode `sacct` returned no rows on Sherlock for jobs held until
+cancelled, so such a names-mode summary can count one task; `--job-id` reads
+the accounting aggregate.
 A complete query does not establish unlimited historical coverage: it is bounded by
 `history_window_days`, and array cardinality without provenance is inferred.
 

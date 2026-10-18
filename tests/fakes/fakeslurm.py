@@ -11,7 +11,8 @@ row and show in squeue as one N_[a-b%t] PENDING aggregate (reason JobArrayTaskLi
 shk does not read); started tasks are N_k rows with distinct JobIDRaw, except the last task
 to leave the array, which keeps N (query.sh does not ask for JobIDRaw, so the quirk cannot
 confuse the parser); --duplicates prints one row per restart (Restarts 0, 1, ...); squeue
--t all forgets a finished job after MinJobAge; sbatch --parsable prints N or N;cluster.
+-t all forgets a finished job after MinJobAge; sbatch --parsable prints N or N;cluster;
+slurmdbd refuses sacct windows wider than 31 days.
 
 Knobs: FAKE_SBATCH_RC, FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued, exit
 1), FAKE_SBATCH_HANG (queued, then sleep that many seconds), FAKE_SBATCH_CLUSTER,
@@ -32,6 +33,7 @@ BIN = Path(__file__).resolve().with_name("bin")
 LIVE = {"PENDING", "RUNNING", "SUSPENDED", "COMPLETING", "CONFIGURING", "REQUEUED"}
 VALUE_FLAGS = ("-u", "-t", "-p", "-o", "-O", "-S", "-E")
 MIN_JOB_AGE = 300  # seconds slurmctld keeps a finished job (counted from submission here)
+MAX_WINDOW_DAYS = 31  # Sherlock's slurmdbd: "Too wide of a date range in query" beyond this
 RECORDED_ENV = ("SBATCH_", "SLURM_", "SQUEUE_", "SACCT_", "SCANCEL_")
 
 
@@ -264,6 +266,8 @@ def _acct_rows(job, duplicates):
 def sacct(state, options):
     fields = [field.partition("%")[0] for field in options["format"].split(",")]
     days = int(options["S"].removeprefix("now-").removesuffix("days"))
+    if days > MAX_WINDOW_DAYS:
+        return "", "sacct: error: Too wide of a date range in query\n", 1
     lines = []
     for job in _selected(state, options):
         if time.time() - job["submit"] <= days * 86400:

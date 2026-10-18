@@ -84,6 +84,7 @@ RUNNING = frozenset({
 MAX_ROWS = 50_000
 CADENCE = timedelta(seconds=60)
 SINCE_DAYS, SINCE_DAYS_ALL = 30, 7
+MAX_SINCE_DAYS = 31  # Sherlock's slurmdbd refuses wider sacct windows ("Too wide of a date range")
 BUDGET_JOBS, BUDGET_MINUTES = 2, 120  # "about 2 jobs x 2 h while others are active" (btrippe)
 
 
@@ -329,7 +330,7 @@ class Job:
     tasks: dict[str, Any]
     exit_codes: dict[str, int]
     max_restart: int
-    preempted: bool
+    interrupted: frozenset[str]  # partitions of preempted, requeued or restarted attempts
     cost: dict[str, Any]
 
     def current(self, anomalies: list[str]) -> dict[str, Any]:
@@ -353,14 +354,15 @@ class Job:
 def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dict[int, set[int]]]:
     """Per task: the row that decides its state, its newest sacct row and the restarts seen.
 
-    squeue wins over sacct, then the highest restart, then an explicit row over an aggregate.
+    squeue wins over sacct, then the later submission, then an explicit row over an aggregate
+    (a pending remainder whose Start is Unknown), then the later start, restart and end.
     """
     deciding: dict[int, Row] = {}
     accounted: dict[int, Row] = {}
     restarts: dict[int, set[int]] = {}
     for row in sorted(
         rows,
-        key=lambda r: (not r.from_acct, r.submitted, r.started, r.restart, r.ended, r.explicit),
+        key=lambda r: (not r.from_acct, r.submitted, r.explicit, r.started, r.restart, r.ended),
     ):
         for index in row.tasks:
             deciding[index] = row
@@ -371,7 +373,7 @@ def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dic
 
 
 def _task_summary(
-    deciding: dict[int, Row], restarts: dict[int, set[int]], count: int
+    deciding: dict[int, Row], restarts: dict[int, set[int]], count: int | None
 ) -> dict[str, Any]:
     kinds = Counter(_kind(row.state) for row in deciding.values())
     gaps = [index for index, seen in sorted(restarts.items()) if seen != set(range(max(seen) + 1))]
@@ -381,18 +383,19 @@ def _task_summary(
         "failed": kinds["failed"],
         "running": kinds["running"],
         "pending": kinds["pending"],
-        "missing": count - len(deciding),
+        "missing": None if count is None else count - len(deciding),
         "by_state": dict(sorted(Counter(row.state for row in deciding.values()).items())),
         "incomplete_history": gaps[:20],
     }
 
 
-def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> bool:
+def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int | None) -> bool:
     """Whether sacct holds every task in the terminal state that decides it.
 
-    Only then is the cost final: squeue can show the end before slurmdbd has the row.
+    Only then is the cost final: squeue can show the end before slurmdbd has the row. An
+    unknown task count never proves that every task was seen.
     """
-    return all(
+    return count is not None and all(
         index in accounted
         and accounted[index].state in TERMINAL
         and accounted[index].state == deciding[index].state
@@ -400,16 +403,49 @@ def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int) -> b
     )
 
 
+def _interrupted(rows: list[Row], restarts: dict[int, set[int]]) -> frozenset[str]:
+    """Partitions on which an attempt was preempted, requeued or restarted.
+
+    sacct --duplicates keeps each superseded attempt with the partition it ran on, which for a
+    job submitted to several partitions can differ from the next attempt's. A restart whose
+    earlier attempt is not visible counts against the partition it restarted on.
+    """
+    return frozenset(
+        row.partition
+        for row in rows
+        if row.state in ("PREEMPTED", "REQUEUED")
+        or (
+            row.from_acct
+            and any(
+                row.restart < max(restarts[index])
+                or (row.restart > 0 and row.restart - 1 not in restarts[index])
+                for index in row.tasks
+            )
+        )
+    )
+
+
 def _job(rows: list[Row], known_count: int | None) -> Job:
-    """Summary of one base job; known_count is the task count from its spec file, if any."""
+    """Summary of one base job; known_count is the task count from its spec file, if any.
+
+    Without it an array's count is inferred only when the seen tasks are exactly 0..max (shk's
+    own layout). A 1-based or stepped legacy array, or one whose early tasks left the sacct
+    window, has an unknown count: its state comes from the seen tasks, nothing is missing
+    and the cost is not final.
+    """
     deciding, accounted, restarts = _deciding_rows(rows)
     single = not any(row.array for row in rows)
     width = max(deciding) + 1
-    count = 1 if single else max(known_count or 0, width)
+    if single:
+        count: int | None = 1
+    elif known_count:
+        count = max(known_count, width)
+    else:
+        count = width if len(deciding) == width else None
     tasks = _task_summary(deciding, restarts, count)
     if tasks["running"] or tasks["pending"]:
         state = "live"
-    elif tasks["completed"] == count:
+    elif tasks["completed"] == (len(deciding) if count is None else count):
         state = "done"
     else:
         state = "failed"
@@ -424,7 +460,7 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
         tasks=tasks,
         exit_codes=dict(sorted(exits.items())),
         max_restart=max(row.restart for row in rows),
-        preempted=any(row.state in ("PREEMPTED", "REQUEUED") for row in rows),
+        interrupted=_interrupted(rows, restarts),
         cost={
             "cpu_seconds": sum(row.cpu_seconds for row in rows),
             "gpu_seconds": sum(row.gpu_seconds for row in rows),
@@ -433,26 +469,35 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
     )
 
 
-def _anomalies(job: Job, live_jobs: int, malformed: int) -> list[str]:
-    profile = partitions.profiles().get(job.partition)
+def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> list[str]:
+    """invariants: shk names, where one name is one task on a packaged partition.
+
+    A preemption or restart is unexpected on a packaged non-preemptible partition it happened on.
+    """
+    profiles = partitions.profiles()
     found = []
-    if live_jobs > 1:
+    if invariants and live_jobs > 1:
         found.append("duplicate_live")
     if malformed:
         found.append("malformed_rows")
-    if profile is None:
+    if invariants and job.partition not in profiles:
         found.append("unknown_partition")
-    elif not profile.preemptible and (job.preempted or job.max_restart > 0):
+    if any(name in profiles and not profiles[name].preemptible for name in job.interrupted):
         found.append("unexpected_preemption")
     return sorted(found)
 
 
 def resolve_name(
-    rows: list[Row], spec_files: int = 0, newest_spec: SpecFile | None = None, malformed: int = 0
+    rows: list[Row],
+    spec_files: int = 0,
+    newest_spec: SpecFile | None = None,
+    malformed: int = 0,
+    invariants: bool = True,
 ) -> dict[str, Any]:
     """Pure: one name's rows give {state, current, history, spec_files}.
 
     The largest base id is the current attempt, and any live job makes the name live.
+    Without invariants (a legacy name) duplicate_live and unknown_partition do not apply.
     """
     jobs: dict[int, list[Row]] = {}
     for row in {row.key: row for row in rows}.values():
@@ -468,7 +513,7 @@ def resolve_name(
     live = [job for job in summaries.values() if job.state == "live"]
     return {
         "state": "live" if live else newest.state,
-        "current": newest.current(_anomalies(newest, len(live), malformed)),
+        "current": newest.current(_anomalies(newest, len(live), malformed, invariants)),
         "history": [job.history() for job in summaries.values() if job is not newest],
         "spec_files": spec_files,
     }
@@ -610,7 +655,7 @@ def _register_status(subparsers: Subparsers) -> None:
         "--since",
         type=int,
         metavar="DAYS",
-        help=f"sacct window (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)",
+        help=f"sacct window, 1 to {MAX_SINCE_DAYS} (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)",
     )
     parser.set_defaults(handler=status)
 
@@ -863,15 +908,24 @@ def _since(args: argparse.Namespace) -> int:
     if args.since is None:
         return SINCE_DAYS_ALL if args.all else SINCE_DAYS
     since: int = args.since
-    if since < 1:
-        raise ShkError(EXIT_LOCAL, "spec_invalid", "--since must be at least 1 day")
+    if not 1 <= since <= MAX_SINCE_DAYS:
+        raise ShkError(
+            EXIT_LOCAL,
+            "spec_invalid",
+            f"--since must be 1 to {MAX_SINCE_DAYS} days",
+            hint=f"Sherlock's slurmdbd refuses sacct windows wider than {MAX_SINCE_DAYS} days",
+        )
     return since
 
 
-def _all_names(ctx: Context) -> Callable[[str], bool]:
+def _all_prefix(ctx: Context) -> str:
     """--all keeps shk.<project>. names, or every shk. name without a project config."""
     project = ctx.config.project if ctx.config else None
-    prefix = f"shk.{project}." if project else "shk."
+    return f"shk.{project}." if project else "shk."
+
+
+def _all_names(ctx: Context) -> Callable[[str], bool]:
+    prefix = _all_prefix(ctx)
     return lambda name: name.startswith(prefix)
 
 
