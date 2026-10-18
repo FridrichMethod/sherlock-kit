@@ -83,7 +83,7 @@ class DetailsFlow(Flow):
 
 
 class ControlLookupTests(DetailsFlow):
-    """D2, D3, D52: one scontrol call per base job id; records outside the selection ignored."""
+    """One scontrol call per base job id; records outside the selection are ignored."""
 
     def test_one_call_per_array_returns_each_element_once(self):
         self.canned(
@@ -186,7 +186,7 @@ class ControlLookupTests(DetailsFlow):
 
 
 class ControlTimeTests(DetailsFlow):
-    """D34: scontrol prints site-local times unless told otherwise."""
+    """scontrol prints site-local times unless told to print UTC."""
 
     def test_control_times_are_utc_like_queue_and_accounting(self):
         self.canned(
@@ -201,7 +201,7 @@ class ControlTimeTests(DetailsFlow):
 
 
 class NeverAllocatedTests(DetailsFlow):
-    """D4, G4: jobs cancelled while held or pending never had an allocation."""
+    """Jobs cancelled while held or pending never had an allocation."""
 
     def cancelled_while_held(self):
         self.canned(
@@ -242,7 +242,7 @@ class NeverAllocatedTests(DetailsFlow):
 
 
 class FailedReadTests(DetailsFlow):
-    """D5: a failed squeue or sacct never yields summary states."""
+    """A failed squeue or sacct read never yields summary states."""
 
     def test_failed_accounting_read_is_exit_1_with_evidence(self):
         self.canned(accounting=[account("7400", "7400", "COMPLETED")])
@@ -262,7 +262,7 @@ class FailedReadTests(DetailsFlow):
 
 
 class FreeTextTests(DetailsFlow):
-    """D13: "|" in a comment or job name is data, not a field separator."""
+    """A pipe in a comment or job name is data, not a field separator."""
 
     def test_pipe_in_another_jobs_comment_does_not_poison_names(self):
         self.canned(
@@ -303,7 +303,7 @@ class FreeTextTests(DetailsFlow):
 
 
 class JobIdSummaryTests(DetailsFlow):
-    """D6, D28: --job-id summarizes each base job; shk name invariants apply to shk names."""
+    """--job-id summarizes each base job; shk name invariants apply to shk names only."""
 
     def test_legacy_jobs_sharing_a_script_name_are_separate_entries(self):
         self.canned(
@@ -369,7 +369,7 @@ class JobIdSummaryTests(DetailsFlow):
 
 
 class ArrayCountTests(DetailsFlow):
-    """D7: legacy arrays need not be 0-based or contiguous."""
+    """Legacy arrays need not be 0-based or contiguous."""
 
     def test_array_without_task_zero_or_known_count_is_not_failed(self):
         rows = [
@@ -387,7 +387,7 @@ class ArrayCountTests(DetailsFlow):
 
 
 class EntryEvidenceTests(DetailsFlow):
-    """D12: one entry's partial evidence does not withdraw another entry's final cost."""
+    """One entry's partial evidence does not withdraw another entry's final cost."""
 
     def test_element_selection_does_not_withdraw_other_final_costs(self):
         self.canned(
@@ -419,7 +419,7 @@ class EntryEvidenceTests(DetailsFlow):
 
 
 class WindowTests(DetailsFlow):
-    """G5: Sherlock's slurmdbd refuses sacct windows wider than 31 days."""
+    """Sherlock's slurmdbd refuses sacct windows wider than 31 days."""
 
     def test_since_above_31_days_is_refused_offline(self):
         self.canned()
