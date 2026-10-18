@@ -14,6 +14,31 @@ if TYPE_CHECKING:
     from sherlock_kit.slurm import Subparsers
 
 
+# scontrol 25.11 joins the base state and its flags with "+" (IDLE+DRAIN); any of these, in
+# scontrol or short sinfo spelling, means the node takes no new work.
+UNSCHEDULABLE = frozenset([
+    "DOWN",
+    "DRAIN",
+    "DRAINED",
+    "DRAINING",
+    "FAIL",
+    "FAILING",
+    "MAINT",
+    "MAINTENANCE",
+    "NOT_RESPONDING",
+    "RESERVED",
+    "INVAL",
+    "INVALID_REG",
+    "FUTURE",
+    "UNKNOWN",
+    "REBOOT_ISSUED",
+    "REBOOT_REQUESTED",
+    "POWER_DOWN",
+    "POWERED_DOWN",
+    "POWERING_DOWN",
+])
+
+
 def register(subparsers: Subparsers) -> None:
     """Register a read-only repeated partition capacity query."""
     parser = subparsers.add_parser(
@@ -58,9 +83,11 @@ def _node(raw: str) -> dict[str, Any]:
         used_mem = 0
     gpu = slurm.gpus(data["CfgTRES"]) if data.get("CfgTRES") else None
     used_gpu = slurm.gpus(data["AllocTRES"]) if "AllocTRES" in data else None
+    state = data.get("State") or None
     return {
         "name": data.get("NodeName"),
-        "state": data.get("State"),
+        "state": state,
+        "schedulable": UNSCHEDULABLE.isdisjoint(state.split("+")) if state else None,
         "partitions": data.get("Partitions", "").split(","),
         "features": [
             v for v in data.get("ActiveFeatures", "").split(",") if v not in details.MISSING

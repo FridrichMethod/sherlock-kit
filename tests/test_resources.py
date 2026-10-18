@@ -63,3 +63,50 @@ class ResourcesFlows(Flow):
         self.scontrol(node("cn01", "IDLE", "gpu"), rc=1, stderr=error)
         code, report = self.shk("resources", "--partition", "gpu")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
+
+    def test_schedulable_follows_state_flags_and_free_capacity_stays_arithmetic(self):
+        states = {
+            "MIXED": True,
+            "ALLOCATED": True,
+            "IDLE": True,
+            "MIXED+PLANNED": True,
+            "IDLE+PLANNED": True,
+            "MIXED+COMPLETING": True,
+            "IDLE+DRAIN": False,
+            "MIXED+DRAIN": False,
+            "DOWN+NOT_RESPONDING": False,
+            "DOWN+DRAIN+NOT_RESPONDING": False,
+            "ALLOCATED+NOT_RESPONDING": False,
+            "IDLE+COMPLETING+NOT_RESPONDING": False,
+            "IDLE+COMPLETING+DRAIN+NOT_RESPONDING": False,
+            "DOWN+DRAIN+INVALID_REG": False,
+            "IDLE+MAINTENANCE+RESERVED": False,
+            "IDLE+RESERVED": False,
+            "IDLE+POWERED_DOWN": False,
+            "IDLE+POWERING_DOWN": False,
+            "IDLE+REBOOT_REQUESTED": False,
+            "MIXED+REBOOT_ISSUED": False,
+            "IDLE+FAIL": False,
+            "FUTURE": False,
+            "UNKNOWN": False,
+        }
+        self.scontrol(
+            *(node(f"cn{i:02d}", state, "owners") for i, state in enumerate(states)),
+            node("cn99", "IDLE+DRAIN", "owners", cfg="cpu=20,mem=125G,billing=111,gres/gpu=4"),
+        )
+        code, report = self.shk("resources", "--partition", "owners")
+        self.assertEqual(code, 0)
+        found = {entry["state"]: entry["schedulable"] for entry in report["nodes"][:-1]}
+        self.assertEqual(found, states)
+        drained = report["nodes"][-1]
+        self.assertEqual(
+            (drained["schedulable"], drained["free_cpus"], drained["free_gpus"]), (False, 20, 4)
+        )
+        self.assertTrue(report["complete"])
+
+    def test_missing_state_is_unknown_schedulability_and_incomplete(self):
+        self.scontrol(node("cn01", "IDLE", "normal").replace("State=IDLE ", ""))
+        code, report = self.shk("resources", "--partition", "normal")
+        self.assertEqual(code, 0)
+        self.assertIsNone(report["nodes"][0]["schedulable"])
+        self.assertFalse(report["complete"])
