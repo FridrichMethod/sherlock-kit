@@ -137,7 +137,12 @@ shk manifest DIR
   `--task` or once per `--task`, and `--run-dir` once per `--task` or not at
   all. Repeatable `--job-id N` or `N_TASK` is mutually exclusive with task,
   name and all selectors; it includes legacy names and only current UID rows,
-  and lists one entry per selected base job.
+  and lists one entry per selected base job. Without a spec file (always with
+  `--all`, `--name` and `--job-id`) an array whose seen tasks are not exactly 0
+  to the largest index has null `array.count`, `tasks.count` and
+  `tasks.missing`, and `done` or `failed` describe the seen tasks only. A
+  preemption or restart is unexpected (exit 6) on the non-preemptible partition
+  of the attempt it interrupted.
   `--details` returns the evidence contract described below. `cancel` cancels
   the live jobs of one name.
 - `resources` reads node state, partitions, active features and configured/
@@ -197,9 +202,11 @@ and `uid`. Missing fields are null, numeric facts are integers, timestamps
 are UTC strings, IDs (including DBIndex) remain strings. Queue CPUs and start
 are null for a job without nodes (pending, or cancelled before any
 allocation), and a live job's end is null, because squeue prints requests,
-placeholders or predictions there. Sherlock stores no job comments in
-accounting: a submission token is visible only in the frozen spec and, while
-the controller holds the job, in queue and control records.
+placeholders or predictions there. Sherlock's accounting `Comment` is empty,
+so `details` shows a submission token only in queue and control records while
+the controller holds the job; the frozen spec keeps it. Slurm also records the
+sbatch command line, which carries the token, as `SubmitLine` (in control
+records, and in `sacct` where slurmdbd stores it).
 
 `jobs` holds current-UID `scontrol` records of queued physical IDs as `{job_id, name, comment, uid, fields, raw}`, read with one `show job` per base job id: an
 array ID prints every element the controller still holds, records outside the
@@ -209,8 +216,9 @@ including request TRES, Features, TimeLimit, Requeue and array identity. All
 records are restricted to the current UID. `returncodes` holds each tool's
 exit status. A failed `squeue` or `sacct` read exits 1 `malformed_read` like
 plain status, with `details` and without `names`. A failed control read,
-missing requested IDs, malformed rows or missing accounting cost identity mark
-evidence incomplete, retain available facts and prevent a final cost claim.
+missing requested IDs, malformed rows or missing accounting cost identity make
+`complete` false and retain available facts; a failed control read alone still
+exits 0.
 Accounting rows of jobs that never had an allocation (AllocCPUS 0, ElapsedRaw
 0, no Start and no AllocTRES, in any state such as PENDING or
 `CANCELLED by UID`) are structurally complete, and a terminal one has a final
@@ -223,7 +231,9 @@ often share a script name, so `duplicate_live` (across the selected jobs) and
 `current.evidence_complete` covers its own job (accounting identity and
 allocation, control records, restart history, partial scope) and malformed
 lines that no job can be told apart from; `cost.final` requires it, while
-`complete` is the conjunction over the whole query.
+`complete` is the conjunction over the whole query. A requested ID without rows
+has no entry and is listed only in `missing_job_ids`, so a batch's cost is final
+only when that list is empty and every entry has `cost.final`.
 An exact array-element selection reports `selection.partial_array_ids`, entry
 `scope: partial_array`, unknown whole-array state/count/missing values, and
 nonfinal cost; sibling states cannot be inferred from a selected element.
