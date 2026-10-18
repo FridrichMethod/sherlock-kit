@@ -204,14 +204,17 @@ and `.shk*` entries, so the job writes it over its own output subdirectory, not
 the run directory with its `.shk/` and logs. It refuses unsafe entries
 (absolute paths, empty, `.` or `..` components, `.shk` components, duplicates).
 With NAME the last component of LOCAL, it takes a lock on `.NAME.shk-lock`,
-rsyncs exactly the listed files into the private stage `.NAME.shk-stage` beside
-LOCAL (restoring owner access on its owned real directories before pruning
-anything the manifest does not list, so a rerun resumes it),
-and uses receiver-local `--chmod=Du+rwx` to keep incoming directories writable
-when a readonly source spans multiple file-list batches. File permissions are
-unchanged; the stage root stays private and child symlink targets are never
-followed or chmodded. It verifies the inventory and every hash, re-reads the manifest, then runs the
-validator named by `--validate`, if any: its argv from
+rsyncs exactly the listed files into the private stage `.NAME.shk-stage`
+(created 0700) beside LOCAL, pruning anything the manifest does not list so a
+rerun resumes it, and uses receiver-local `--chmod=Du+rwx` to keep incoming
+directories writable when a readonly source spans multiple file-list batches.
+Before pruning it gives owner rwx back only to real stage directories that lack
+it (left by an interrupted pull of a readonly source); an ordinary pull issues
+no chmod and checks no owner, so filesystems that refuse chmod or map owners
+(CIFS, sshfs, NFSv4 idmap) work. File permissions are unchanged, a symlinked
+stage root is refused and a child symlink target is never followed or
+chmodded. It verifies the inventory and every hash, re-reads the manifest, then
+runs the validator named by `--validate`, if any: its argv from
 `[tool.sherlock-kit.validators]` plus the stage directory as the last argument,
 from the project root (the directory of the configuration file); exit 0 passes,
 and the validator treats the stage as read-only because whatever it writes is

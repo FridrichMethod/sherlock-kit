@@ -533,20 +533,29 @@ class ReadonlyPullTests(TransferCase):
         self.assertEqual((outside / "keep").read_text(), "untouched")
         self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
 
-    def test_only_owned_stage_directories_are_repaired(self):
-        self.stage.mkdir()
+    def test_id_mapped_stage_ownership_is_not_refused(self):
+        # NFSv4 idmap falling back to nobody, sshfs idmap=none, vfat uid=0: stat names another owner
         real = os.fstat
 
         def foreign(fd):
-            info = real(fd)
-            values = list(info)
-            values[4] = info.st_uid + 1
+            values = list(real(fd))
+            values[4] = 65534
             return os.stat_result(values)
 
-        before = self.stage.stat().st_mode & 0o777
-        with patch.object(os, "fstat", side_effect=foreign), self.assertRaises(ShkError):
-            transfer._prepare_stage(self.stage, {"result.json": H})
-        self.assertEqual(self.stage.stat().st_mode & 0o777, before)
+        with patch.object(os, "fstat", side_effect=foreign):
+            code, body = self.pull()
+        self.assertEqual((code, body.get("action")), (0, "pulled"), body)
+        self.assertEqual(tree(self.dest), self.expected())
+
+    def test_a_refused_chmod_never_breaks_a_pull_that_needs_no_repair(self):
+        # CIFS without noperm refuses chmod; fresh and resumed stages already allow the owner rwx
+        self.write(self.stage, {"nested/.log.txt.Zx81Qa": "partial", "stale/x": "older"})
+        refused = PermissionError(1, "Operation not permitted")
+        with patch.object(os, "fchmod", side_effect=refused) as fchmod:
+            code, body = self.pull()
+        self.assertEqual((code, body.get("action")), (0, "pulled"), body)
+        self.assertEqual(tree(self.dest), self.expected())
+        fchmod.assert_not_called()
 
 
 class RefusalAndPushTests(TransferCase):

@@ -386,10 +386,12 @@ def _prune(directory: Path, files: set[str], directories: set[str], prefix: str 
 
 
 def _writable_directories(directory: Path, parent_fd: int | None = None) -> None:
-    """Restore owner access only on this private stage's real, owned directories.
+    """Give owner rwx back to the stage directories that lack it, and touch nothing else.
 
-    Opening each child relative to its parent's descriptor with O_NOFOLLOW avoids
-    chmodding a symlink target. Files are never opened or chmodded by this pass.
+    An interrupted pull of a readonly source by an older shk (without --chmod=Du+rwx) leaves
+    them; an ordinary pull issues no chmod, so filesystems that refuse chmod or map owners work.
+    Opening each child relative to its parent's descriptor with O_NOFOLLOW avoids chmodding a
+    symlink target; files are never opened or chmodded by this pass.
     """
     try:
         fd = os.open(
@@ -404,17 +406,9 @@ def _writable_directories(directory: Path, parent_fd: int | None = None) -> None
             f"Cannot open private stage directory {directory}: {error}",
         ) from None
     try:
-        info = os.fstat(fd)
-        if info.st_uid != os.geteuid():
-            raise ShkError(
-                EXIT_REFUSED,
-                "stage_untrusted",
-                f"Private stage directory {directory} belongs to another user",
-            )
-        mode = stat.S_IMODE(info.st_mode) | 0o700
-        if parent_fd is None:
-            mode &= ~0o077  # The stage root stays private, even after an interrupted readonly pull.
-        os.fchmod(fd, mode)
+        mode = stat.S_IMODE(os.fstat(fd).st_mode)
+        if mode & 0o700 != 0o700:
+            os.fchmod(fd, mode | 0o700)
         with os.scandir(fd) as scan:
             found = list(scan)
         for entry in found:
