@@ -263,6 +263,19 @@ class FailedReadTests(DetailsFlow):
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertEqual([row["job_id"] for row in report["details"]["accounting"]], ["7400"])
 
+    def test_failed_control_read_alone_keeps_the_summaries(self):
+        """A finished job can leave the controller between the squeue and scontrol reads."""
+        self.canned(
+            queue=[queue("7410", "7410", "COMPLETED", nodes="sh01-01n01")],
+            accounting=[account("7410", "7410", "COMPLETED")],
+        )
+        code, report = self.details("--job-id", "7410")
+        self.assertEqual(code, 0)
+        self.assertEqual(report["details"]["returncodes"], {"squeue": 0, "sacct": 0, "scontrol": 1})
+        self.assertEqual(report["names"][0]["state"], "done")
+        self.assertFalse(report["names"][0]["current"]["cost"]["final"])
+        self.assertFalse(report["details"]["complete"])
+
 
 class FreeTextTests(DetailsFlow):
     """A pipe in a comment or job name is data, not a field separator."""
@@ -323,7 +336,7 @@ class JobIdSummaryTests(DetailsFlow):
                 record("7502", name="lab.sh", state="RUNNING"),
             ],
         )
-        code, report = self.details("--job-id", "7500", "--job-id", "7501", "--job-id", "7502")
+        code, report = self.details("--job-id", "7502", "--job-id", "7501", "--job-id", "7500")
         self.assertEqual(code, 0)
         found = [
             (e["name"], e["current"]["job_id"], e["state"], e["history"]) for e in report["names"]
@@ -337,6 +350,21 @@ class JobIdSummaryTests(DetailsFlow):
             ],
         )
         self.assertEqual([e["current"]["anomalies"] for e in report["names"]], [[], [], []])
+
+    def test_entries_follow_job_id_order_not_name_order(self):
+        """b.sh is read first (queue before accounting) but has the higher job id."""
+        self.canned(
+            queue=[queue("7541", "7541", "RUNNING", nodes="sh01-01n01", name="b.sh")],
+            accounting=[
+                account("7540", "7540", "COMPLETED", name="a.sh"),
+                account("7541", "7541", "RUNNING", name="b.sh"),
+            ],
+            jobs=[record("7541", name="b.sh", state="RUNNING")],
+        )
+        code, report = self.details("--job-id", "7541", "--job-id", "7540")
+        self.assertEqual(code, 0)
+        found = [(e["name"], e["current"]["job_id"]) for e in report["names"]]
+        self.assertEqual(found, [("a.sh", "7540"), ("b.sh", "7541")])
 
     def test_shk_names_keep_their_invariants_in_job_id_mode(self):
         self.canned(
@@ -445,6 +473,62 @@ class EntryEvidenceTests(DetailsFlow):
         self.assertEqual([job["job_id"] for job in report["details"]["jobs"]], ["7700"])
         self.assertTrue(report["details"]["control_identities_complete"])
         self.assertFalse(report["details"]["complete"])
+
+    def finished_pair(self, accounting=(), jobs=None, ids=()):
+        """Two finished jobs, still in the controller: a.sh (7720) and b.sh (7721)."""
+        self.canned(
+            queue=[
+                queue("7720", "7720", "COMPLETED", nodes="sh01-01n01", name="a.sh"),
+                queue("7721", "7721", "COMPLETED", nodes="sh01-01n02", name="b.sh"),
+            ],
+            accounting=[
+                account("7720", "7720", "COMPLETED", name="a.sh"),
+                account("7721", "7721", "COMPLETED", name="b.sh"),
+                *accounting,
+            ],
+            jobs=[
+                record("7720", name="a.sh", state="COMPLETED"),
+                record("7721", name="b.sh", state="COMPLETED"),
+            ]
+            if jobs is None
+            else jobs,
+        )
+        selected = [arg for job in ("7720", "7721", *ids) for arg in ("--job-id", job)]
+        code, report = self.details(*selected)
+        found = [
+            (
+                e["current"]["job_id"],
+                e["current"]["evidence_complete"],
+                e["current"]["cost"]["final"],
+            )
+            for e in report["names"]
+        ]
+        return code, report, found
+
+    def test_missing_control_record_withdraws_only_its_own_final_cost(self):
+        code, report, found = self.finished_pair(
+            jobs=[record("7721", name="b.sh", state="COMPLETED")]
+        )
+        self.assertEqual(code, 0)
+        self.assertEqual(found, [("7720", False, False), ("7721", True, True)])
+        self.assertEqual(report["details"]["missing_control_job_ids"], ["7720"])
+        self.assertFalse(report["details"]["complete"])
+
+    def test_unattributable_malformed_line_withdraws_every_final_cost(self):
+        """A requested heterogeneous job: its leader row 7724+0 cannot be read as a job id."""
+        hetjob = [
+            account("7724+0", "7724", "COMPLETED", name="het.sh"),
+            account("7724+1", "7725", "COMPLETED", name="het.sh"),
+        ]
+        code, report, found = self.finished_pair(accounting=hetjob, ids=["7724"])
+        self.assertEqual(code, 6)
+        self.assertEqual(found, [("7720", False, False), ("7721", False, False)])
+        self.assertEqual([m["source"] for m in report["details"]["malformed"]], ["accounting"])
+        self.assertIn("7724+0", [row["job_id"] for row in report["details"]["accounting"]])
+        self.assertEqual(
+            [e["current"]["anomalies"] for e in report["names"]], [["malformed_rows"]] * 2
+        )
+        self.assertEqual(self.finished_pair()[2], [("7720", True, True), ("7721", True, True)])
 
 
 class WindowTests(DetailsFlow):
