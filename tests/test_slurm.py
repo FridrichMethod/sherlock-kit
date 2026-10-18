@@ -309,5 +309,19 @@ class UnknownCountTests(unittest.TestCase):
         self.assertEqual((known["state"], known["current"]["tasks"]["missing"]), ("failed", 1))
 
 
+class ChronologyTests(unittest.TestCase):
+    def test_explicit_task_row_outranks_a_pending_aggregate_on_the_details_path(self):
+        identity = {"JobIDRaw": "44", "Cluster": "sherlock", "DBIndex": "1", "Restarts": "0"}
+        common = {**identity, "Partition": "normal", "Submit": "2026-10-10T12:00:00", "JobName": N}
+        pending = {"JobID": "44_[0-3]", "State": "PENDING", "ElapsedRaw": "0", "AllocCPUS": "0"}
+        pending |= {"AllocTRES": "", "Start": "Unknown", "End": "Unknown", "ExitCode": "0:0"}
+        done = {"JobID": "44_0", "State": "COMPLETED", "ElapsedRaw": "60", "AllocCPUS": "1"}
+        done |= {"AllocTRES": "cpu=1", "Start": "2026-10-10T12:00:01", "ExitCode": "0:0"}
+        done |= {"End": "2026-10-10T12:01:01"}
+        rows = [slurm._row({**common, **pending}), slurm._row({**common, **done})]
+        tasks = slurm.resolve_name(rows)["current"]["tasks"]
+        self.assertEqual(tasks["by_state"], {"COMPLETED": 1, "PENDING": 3})
+
+
 if __name__ == "__main__":
     unittest.main()

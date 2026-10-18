@@ -353,14 +353,15 @@ class Job:
 def _deciding_rows(rows: list[Row]) -> tuple[dict[int, Row], dict[int, Row], dict[int, set[int]]]:
     """Per task: the row that decides its state, its newest sacct row and the restarts seen.
 
-    squeue wins over sacct, then the highest restart, then an explicit row over an aggregate.
+    squeue wins over sacct, then the later submission, then an explicit row over an aggregate
+    (a pending remainder whose Start is Unknown), then the later start, restart and end.
     """
     deciding: dict[int, Row] = {}
     accounted: dict[int, Row] = {}
     restarts: dict[int, set[int]] = {}
     for row in sorted(
         rows,
-        key=lambda r: (not r.from_acct, r.submitted, r.started, r.restart, r.ended, r.explicit),
+        key=lambda r: (not r.from_acct, r.submitted, r.explicit, r.started, r.restart, r.ended),
     ):
         for index in row.tasks:
             deciding[index] = row
