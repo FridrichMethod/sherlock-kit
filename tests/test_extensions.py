@@ -71,6 +71,19 @@ class ExtensionFlows(Flow):
             self.assertEqual(self.submit("--dry-run", *token, script="tagged.sh")[0], 3)
         self.assertEqual(self.submit("--dry-run", "--submission-token", "bad|token")[0], 1)
 
+    def test_a_job_without_a_token_never_inherits_one(self):
+        seen = self.tmp / "seen"
+        body = (
+            f'[ "$1" = --parsable ] || exit 9\necho "${{SHK_SUBMISSION_TOKEN-unset}}" >"{seen}"\n'
+        )
+        body += "echo 900001\n"
+        self.tool("sbatch", body)  # --export=ALL hands the job what sbatch inherits
+        self.knobs(SHK_SUBMISSION_TOKEN="parent-7")  # inside a controller submitted with one
+        code, report = self.submit()
+        self.assertEqual((code, report["action"]), (0, "submitted"))
+        self.assertNotIn("SHK_SUBMISSION_TOKEN", " ".join(report["argv"]))
+        self.assertEqual(seen.read_text(), "unset\n")
+
     def detail_tools(self, accounting=None, queue="", jobs=()):
         uid = os.getuid()
         name = "legacy-job"

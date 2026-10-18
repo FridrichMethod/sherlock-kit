@@ -4,7 +4,7 @@
 # SHK_LIVE <ids>, SHK_REJECTED <rc> (+ SHK_ERR| lines, files removed), SHK_UNPARSED (files
 # kept) or SHK_REFUSED <why> (nothing ran); always exits 0.
 for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
-    case $v in SLURM_CONF) ;; SBATCH_* | SQUEUE_* | SACCT_* | SLURM_*) unset "$v" ;; esac
+    case $v in SLURM_CONF) ;; SBATCH_* | SQUEUE_* | SACCT_* | SLURM_* | SHK_SUBMISSION_TOKEN) unset "$v" ;; esac
 done
 name=$1 run=$2 stamp=$3 sum=$4 spec=$5
 base=$run/.shk/$name.$stamp
