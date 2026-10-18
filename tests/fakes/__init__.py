@@ -3,10 +3,11 @@
 Every test module imports this package, so both entry points (``tests/run_suite.py`` and
 ``python3 -m unittest discover -s tests``) run the setup once, before any test:
 
-- inherited scheduler and kit state is removed from ``os.environ``: ``SLURM_*``, ``SBATCH_*``,
-  ``SQUEUE_*``, ``SACCT_*``, ``SCANCEL_*``, ``SHK_*`` (except the suite knobs
-  ``SHK_BUILD_PYTHON`` and ``SHK_REQUIRE_ALL``), ``SHERLOCK_KIT_*`` and exported shell functions
-  (``BASH_FUNC_*``, which bash, Sherlock's ``sh``, runs instead of a command on PATH);
+- an inherited SIGCHLD disposition is reset, and inherited scheduler and kit state is removed
+  from ``os.environ``: ``SLURM_*``, ``SBATCH_*``, ``SQUEUE_*``, ``SACCT_*``, ``SCANCEL_*``,
+  ``SHK_*`` (except the suite knobs ``SHK_BUILD_PYTHON`` and ``SHK_REQUIRE_ALL``),
+  ``SHERLOCK_KIT_*`` and exported shell functions (``BASH_FUNC_*``, which bash, Sherlock's
+  ``sh``, runs instead of a command on PATH);
 - a tripwire of blocking stubs for every Slurm client is put first on PATH, so per-test fakes
   (prepended later) shadow it and it shadows the system clients. A stub records its call
   (``tripwire_hits()``) and exits ``TRIPWIRE_RC``; ``run_suite.py`` fails a run with hits
@@ -29,6 +30,7 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -76,6 +78,8 @@ def _scrub():
     for name in list(os.environ):
         if name.startswith(SCRUBBED) and name not in SUITE_KNOBS:
             del os.environ[name]
+    # An inherited SIGCHLD of SIG_IGN reaps children at once, so every exit status reads as 0.
+    signal.signal(signal.SIGCHLD, signal.SIG_DFL)
 
 
 def _tripwire():
