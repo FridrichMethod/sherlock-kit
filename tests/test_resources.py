@@ -41,7 +41,8 @@ class ResourcesFlows(Flow):
         directory = self.tmp / "tools"
         directory.mkdir(exist_ok=True)
         text = self.tmp / "nodes.txt"
-        text.write_text("".join(f"{line}\n" for line in lines))
+        # Latin-1 writes each code point below 256 as that byte, so a line can carry a non-UTF-8 byte.
+        text.write_text("".join(f"{line}\n" for line in lines), encoding="latin-1")
         script = directory / "scontrol"
         script.write_text(
             "#!/bin/sh\n"
@@ -98,6 +99,16 @@ class ResourcesFlows(Flow):
         ]
         self.assertEqual(shipped, ["SHK_N|NodeName=cn01", "SHK_N|NodeName=cn03"])
         self.assertEqual(reply.stdout.splitlines()[-2:], ["SHK_RC scontrol 0", "SHK_END"])
+
+    def test_a_non_utf8_byte_in_a_node_line_keeps_the_node_in_a_utf8_locale(self):
+        self.knobs(LC_ALL="C.UTF-8")
+        reason = " Reason=NHC: temp\xe9rature high [root@2026-10-17T08:00:00]"
+        self.scontrol(node("cn01", "DRAIN", "normal", extra=reason), node("cn02", "IDLE", "normal"))
+        code, report = self.shk("resources", "--partition", "normal")
+        self.assertEqual(
+            (code, self.names(report), report["complete"]), (0, ["cn01", "cn02"], True)
+        )
+        self.assertIn("temp\ufffdrature", report["nodes"][0]["raw"])
 
     def test_effective_cpus_exclude_specialized_cores_before_cputot(self):
         self.scontrol(

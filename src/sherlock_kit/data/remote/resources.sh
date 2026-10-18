@@ -3,7 +3,10 @@
 for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
     case $v in SLURM_CONF) ;; SBATCH_* | SQUEUE_* | SACCT_* | SLURM_*) unset "$v" ;; esac
 done
-out=$(env LC_ALL=C scontrol show nodes --oneliner)
+# The C locale also keeps grep from dropping a node line that holds a non-UTF-8 byte.
+LC_ALL=C
+export LC_ALL
+out=$(scontrol show nodes --oneliner)
 rc=$?
 wanted=
 for p in "$@"; do wanted=${wanted:+$wanted|}$p; done
