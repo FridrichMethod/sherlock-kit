@@ -29,10 +29,13 @@ and real `rsync`. The suite stays hermetic even inside a Slurm job: importing
 do) removes inherited `SLURM_*`, `SBATCH_*`, `SQUEUE_*`, `SACCT_*`, `SCANCEL_*`,
 `SHK_*` (except `SHK_BUILD_PYTHON` and `SHK_REQUIRE_ALL`) and `SHERLOCK_KIT_*`
 variables and exported shell functions, and puts blocking stubs for every Slurm
-client on `PATH` behind each test's fakes and ahead of the system ones. A run in
-which a test reaches a stub fails, and a `TMPDIR` that cannot execute files (the
-tests write their fakes there) is refused. Install `rsync` and `dash`, then set
-up a development environment once (`.venv*/` is ignored by Git):
+client on `PATH` behind each test's fakes and ahead of the system ones. A stub
+blocks the call (exit 97, a message on stderr) and logs it. `tests/run_suite.py`,
+which CI and the checks below use, fails a run in which any test reached a stub;
+under `unittest discover` only the test's own assertions decide the result. A
+`TMPDIR` that cannot execute files (the tests write their fakes there) is
+refused. Install `rsync` and `dash`, then set up a development environment once
+(`.venv*/` is ignored by Git):
 
 ```sh
 python3 -m venv .venv

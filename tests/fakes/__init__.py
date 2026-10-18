@@ -9,7 +9,8 @@ Every test module imports this package, so both entry points (``tests/run_suite.
   (``BASH_FUNC_*``, which bash, Sherlock's ``sh``, runs instead of a command on PATH);
 - a tripwire of blocking stubs for every Slurm client is put first on PATH, so per-test fakes
   (prepended later) shadow it and it shadows the system clients. A stub records its call
-  (``tripwire_hits()``) and exits ``TRIPWIRE_RC``; ``run_suite.py`` fails a run with hits;
+  (``tripwire_hits()``) and exits ``TRIPWIRE_RC``; ``run_suite.py`` fails a run with hits
+  (``unittest discover`` cannot, so a test that expects a failure still passes there);
 - the tripwire is written under TMPDIR, where the tests write their fakes too, and must run
   there: a fake that cannot execute (a noexec mount) falls through to the next PATH entry, so
   a TMPDIR that cannot execute files is refused with RuntimeError.
