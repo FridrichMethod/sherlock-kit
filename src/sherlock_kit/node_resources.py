@@ -7,7 +7,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import details, executor, partitions, slurm
-from sherlock_kit.errors import Outcome
+from sherlock_kit.errors import EXIT_LOCAL, Outcome, ShkError
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
@@ -86,11 +86,20 @@ def _node(raw: str) -> dict[str, Any]:
 
 
 def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """Read Slurm node facts once and explicitly mark missing capacity evidence."""
+    """Read the partitions' Slurm node facts once; a failed read is exit 1, missing facts null."""
     wanted = {partitions.profile(name).name for name in args.partition}
     result = executor.check(executor.run_program(ctx.executor(), "resources"), "resources")
     lines = result.stdout.splitlines()
-    complete = "SHK_END" in lines and "SHK_RC scontrol 0" in lines
+    rc = next((line.split()[-1] for line in lines if line.startswith("SHK_RC scontrol ")), None)
+    if "SHK_END" not in lines or rc != "0":
+        raise ShkError(
+            EXIT_LOCAL,
+            "malformed_read",
+            f"resources incomplete: end={'SHK_END' in lines}, scontrol rc={rc}. "
+            f"{result.stderr.strip()[-2000:]}".strip(),
+            hint="retry once after 60 s; shk doctor --remote checks the remote tools",
+        )
+    complete = True
     nodes, malformed = [], []
     for line in lines:
         if not line.startswith("SHK_N|"):
