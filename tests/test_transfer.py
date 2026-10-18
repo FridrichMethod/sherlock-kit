@@ -556,8 +556,10 @@ class ReadonlyPullTests(TransferCase):
         self.assertEqual((outside / "keep").read_text(), "untouched")
         self.assertEqual(outside.stat().st_mode & 0o777, 0o555)
 
-    def test_id_mapped_stage_ownership_is_not_refused(self):
-        # NFSv4 idmap falling back to nobody, sshfs idmap=none, vfat uid=0: stat names another owner
+    def test_a_stage_another_user_owns_is_refused_untouched(self):
+        # The stage is promoted onto LOCAL: a foreign stage in a shared parent keeps its owner's access.
+        self.stage.mkdir()
+        self.stage.chmod(0o500)
         real = os.fstat
 
         def foreign(fd):
@@ -567,8 +569,19 @@ class ReadonlyPullTests(TransferCase):
 
         with patch.object(os, "fstat", side_effect=foreign):
             code, body = self.pull()
-        self.assertEqual((code, body.get("action")), (0, "pulled"), body)
-        self.assertEqual(tree(self.dest), self.expected())
+        self.assertEqual((code, body.get("error")), (3, "stage_untrusted"), body)
+        self.assertEqual(self.stage.stat().st_mode & 0o777, 0o500)
+        self.stage.chmod(0o700)
+        self.assertFalse(self.dest.exists())
+
+    def test_a_refused_needed_repair_is_a_clear_local_error(self):
+        self.stage.mkdir()
+        self.stage.chmod(0o500)
+        refused = PermissionError(1, "Operation not permitted")
+        with patch.object(os, "fchmod", side_effect=refused):
+            code, body = self.pull()
+        self.stage.chmod(0o700)
+        self.assertEqual((code, body.get("error")), (1, "stage_unwritable"), body)
 
     def test_a_refused_chmod_never_breaks_a_pull_that_needs_no_repair(self):
         # CIFS without noperm refuses chmod; fresh and resumed stages already allow the owner rwx
