@@ -671,11 +671,8 @@ class Reply:
     lines: list[str]
 
 
-def _refusal(program: str, marker: str, value: str, lines: list[str]) -> ShkError:
+def _refusal(program: str, marker: str, value: str, errors: str) -> ShkError:
     refusal = REFUSALS[marker]
-    errors = " ".join(
-        line.removeprefix("SHK_ERR|") for line in lines if line.startswith("SHK_ERR|")
-    )
     message = f"{program}: {marker} {value} {errors[-2000:]}".strip()
     return ShkError(EXIT_REFUSED, refusal.token, message, refusal.hint)
 
@@ -693,10 +690,16 @@ def _mutate(
     if len(markers) != 1:
         return Reply("unknown", f"{len(markers)} terminal markers", lines)
     marker, _, value = markers[0]
+    # SHK_ERR| lines carry the Slurm client's own message as evidence.
+    errors = " ".join(
+        line.removeprefix("SHK_ERR|") for line in lines if line.startswith("SHK_ERR|")
+    ).strip()
     if marker in REFUSALS:
-        raise _refusal(program, marker, value, lines)
+        raise _refusal(program, marker, value, errors)
     if marker == "SHK_UNPARSED":
-        return Reply("unknown", "unparsed sbatch reply", lines)
+        evidence = " ".join(part for part in (value, errors[-2000:]) if part)
+        detail = f"unparsed {program} reply" + (f": {evidence}" if evidence else "")
+        return Reply("unknown", detail, lines)
     return Reply(marker, value, lines)
 
 

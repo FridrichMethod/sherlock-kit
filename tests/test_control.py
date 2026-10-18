@@ -213,7 +213,11 @@ class SelfRequeue(ControlFlow):
         }
         self.scontrol(replies)
         code, report = self.requeue("--expect-token", "tok-1")
-        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED listpids"))
+        self.assertEqual(code, 3)
+        self.assertEqual(
+            report["message"],
+            "control: SHK_REFUSED listpids slurm_load_job error: Invalid job id specified",
+        )
         self.assertNotIn(["requeue", "44"], self.calls())
 
     def test_program_refuses_any_target_but_its_own_allocation(self):
@@ -266,6 +270,23 @@ class SelfRequeue(ControlFlow):
             code, report = self.requeue()
         self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED partition"))
 
+    def test_post_dispatch_failure_is_unknown_with_slurm_evidence(self):
+        self.allocation("44")
+        self.scontrol({
+            "listpids 44": {"out": listpids("44")},
+            "show job 44 --oneliner": {"out": job_record("44") + "\n"},
+            "requeue 44": {
+                "err": "Requested operation is presently disabled for job 44\n",
+                "rc": 1,
+            },
+        })
+        code, report = self.requeue()
+        self.assertEqual((code, report["action"]), (5, "unknown"))
+        self.assertNotIn("sbatch", report["detail"])
+        self.assertIn("scontrol requeue exit 1", report["detail"])
+        self.assertIn("Requested operation is presently disabled for job 44", report["detail"])
+        self.assertIn("status --job-id 44 --details", report["next"])
+
 
 class ExactRelease(ControlFlow):
     def held(self, **changes):
@@ -278,3 +299,26 @@ class ExactRelease(ControlFlow):
             self.release()
         self.assertEqual(raised.exception.code, 2)
         self.assertEqual(self.calls(), [])
+
+    def test_release_query_failure_keeps_slurm_evidence(self):
+        self.scontrol({
+            "show job 44 --oneliner": {
+                "err": "slurm_load_jobs error: Invalid job id specified\n",
+                "rc": 1,
+            }
+        })
+        code, report = self.release("--expect-token", "tok-1")
+        self.assertEqual(
+            (code, report["message"]),
+            (3, "control: SHK_REFUSED query slurm_load_jobs error: Invalid job id specified"),
+        )
+
+    def test_release_definitive_error_after_dispatch_is_unknown_with_evidence(self):
+        self.scontrol({
+            "show job 44 --oneliner": {"out": self.held()},
+            "release 44": {"err": "Access/permission denied for job 44\n", "rc": 1},
+        })
+        code, report = self.release("--expect-token", "tok-1")
+        self.assertEqual((code, report["action"]), (5, "unknown"))
+        self.assertIn("scontrol release exit 1", report["detail"])
+        self.assertIn("Access/permission denied for job 44", report["detail"])

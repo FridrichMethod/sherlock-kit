@@ -11,16 +11,17 @@ for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
 done
 refuse() {
     printf "SHK_REFUSED %s\n" "$1"
+    [ -z "${2:-}" ] || printf "%s\n" "$2" | head -c 2000 | sed "s/^/SHK_ERR|/"
     exit 0
 }
 uid=$(id -u)
 if [ "$action" = requeue ]; then
     [ "$target" = "$self_target" ] || refuse allocation
     # listpids takes only the physical id and prints it as JOBID.
-    pids=$(scontrol listpids "$self_id" 2>/dev/null) || refuse listpids
+    pids=$(scontrol listpids "$self_id" 2>&1) || refuse listpids "$pids"
     printf "%s\n" "$pids" | awk -v pid="$$" -v job="$self_id" "\$1 == pid && \$2 == job { found=1 } END { exit !found }" || refuse process
 fi
-job=$(scontrol show job "$target" --oneliner 2>/dev/null) || refuse query
+job=$(scontrol show job "$target" --oneliner 2>&1) || refuse query "$job"
 [ "$(printf "%s\n" "$job" | wc -l)" -eq 1 ] || refuse ambiguous
 field() { printf "%s\n" "$job" | sed -n "s/.*\(^\| \)$1=\([^ ]*\).*/\2/p"; }
 actual_uid=$(field UserId)
@@ -47,8 +48,11 @@ else
     [ "$actual_id" = "$self_id" ] || refuse physical
 fi
 # After dispatch every nonzero or missing reply is ambiguous, never retry automatically.
-scontrol "$action" "$target" >/dev/null 2>&1 || {
-    printf "SHK_UNPARSED\n"
+err=$(scontrol "$action" "$target" 2>&1 >/dev/null)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+    printf "SHK_UNPARSED scontrol %s exit %s\n" "$action" "$rc"
+    printf "%s\n" "$err" | head -c 2000 | sed "s/^/SHK_ERR|/"
     exit 0
-}
+fi
 printf "SHK_CHANGED %s\n" "$target"

@@ -171,6 +171,7 @@ class ExtensionFlows(Flow):
             "release", "--job-id", "44", "--expect-name", "expected", "--expect-token", "token"
         )
         self.assertEqual((code, report["action"]), (5, "unknown"))
+        self.assertEqual(report["detail"], "unparsed control reply: scontrol release exit 1")
         self.assertIn("--job-id 44", report["next"])
 
     def test_requeue_refuses_env_only_allocation_or_ssh(self):

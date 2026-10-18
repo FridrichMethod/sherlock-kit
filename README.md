@@ -153,9 +153,11 @@ shk manifest DIR
   `--expect-token` is given, RUNNING state, a partition whose profile allows
   requeue (today `owners`) and Requeue=1. An array element is verified and
   requeued as `ArrayJobId_ArrayTaskId`, never the bare array ID, which would
-  requeue every element. A lost mutation reply is exit 5; Slurm ownership checks
-  still apply, and concurrent user changes can race the identity read.
-  Checkpoint durability and retry limits belong to the caller.
+  requeue every element. A refusal is exit 3 and keeps Slurm's message when a
+  query failed; a lost or failed mutation reply is exit 5 with Slurm's message in
+  `detail`. Slurm ownership checks still apply, and concurrent user changes can
+  race the identity read. Checkpoint durability and retry limits belong to the
+  caller.
 - `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
   `remote_root` (`--anywhere` lifts that) and never deletes. Pushed files keep
   their local modification times (`rsync -t`, so a re-push skips unchanged
