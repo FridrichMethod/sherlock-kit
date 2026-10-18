@@ -265,7 +265,10 @@ def job_identity(job: dict[str, Any]) -> None:
     physical = fields.get("JobId")
     if number(physical, "physical JobId", positive=True) is None:
         raise invalid("missing physical JobId")
-    array, task = fields.get("ArrayJobId"), fields.get("ArrayTaskId")
+    # Slurm prints the array identity right after JobId; the same keys later on the line are
+    # free text (a Comment such as "rerun of ArrayJobId=40 ArrayTaskId=7"), not this job's.
+    leading = list(fields)[1:3] == ["ArrayJobId", "ArrayTaskId"]
+    array, task = (fields.get("ArrayJobId"), fields.get("ArrayTaskId")) if leading else (None, None)
     if (array is None) != (task is None):
         raise invalid("incomplete array identity")
     if array is not None and (

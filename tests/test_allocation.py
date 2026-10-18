@@ -321,6 +321,18 @@ class AllocationCLI(unittest.TestCase):
                 self.assertIn(["show", "step", step, "--oneliner"], self.calls())
                 self.assertIn(["listpids", f"{physical}.0"], self.calls())
 
+    def test_array_keys_in_a_free_text_comment_never_redirect_the_step_proof(self):
+        self.data["job"] = {
+            "44": self.job_record("44", Comment="rerun of ArrayJobId=40 ArrayTaskId=7")
+        }
+        self.data["step"] = {"44.0": self.step_record("44.0"), "40_7.0": self.step_record("40_7.0")}
+        code, report = self.run_cli("--step-id", "0")
+        self.assertEqual(code, 0, report)
+        self.assertEqual(
+            (report["job"]["array_job_id"], report["step"]["query_id"]), (None, "44.0")
+        )
+        self.assertNotIn(["show", "step", "40_7.0", "--oneliner"], self.calls())
+
     def test_cpu_only_actual_resources_and_typed_or_unrelated_tres(self):
         self.data["job"]["44"] = self.job_record("44", AllocTRES="cpu=4,mem=2G,node=1,billing=4")
         code, report = self.run_cli()
