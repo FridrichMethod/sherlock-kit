@@ -17,7 +17,7 @@ treat the stage as read-only, whatever they write is promoted with it), rename t
 
 manifest: write DIR/SHA256SUMS locally (inside jobs, no network), sha256sum-compatible and sorted.
 
-The DTN refuses options that alter its restricted sender command. Pull's --chmod=Du+rwx is
+The DTN refuses options that alter its restricted rsync server command. Pull's --chmod=Du+rwx is
 receiver-local: it keeps incoming directories writable without changing file permissions or the
 remote sender command. --files-from=- sends the DTN-proven list-file command.
 """
