@@ -438,23 +438,41 @@ class PullTests(TransferCase):
         self.assertEqual(lists, [{b"nested/log.txt", b"result.json", b"with space", b""}] * 2)
 
 
+LEGACY_PULL = (
+    "rsync",
+    "-r",
+    "--protect-args",
+    "--checksum",
+    "--partial",
+    "--from0",
+    "--files-from=-",
+)
+SENDER_SIDE = re.compile(r"(opening connection using|\w+ args):")  # rsync --debug=CMD2 lines
+
+
 class ReadonlyPullTests(TransferCase):
     def freeze_remote(self):
         for path in self.remote.rglob("*"):
             path.chmod(0o555 if path.is_dir() or path.name == "execute.sh" else 0o444)
         self.remote.chmod(0o555)
 
-    def test_large_files_from_pull_keeps_readonly_file_bytes_and_modes(self):
-        legacy_pull = (
-            "rsync",
-            "-r",
-            "--protect-args",
-            "--checksum",
-            "--partial",
-            "--from0",
-            "--files-from=-",
+    def sender(self, pull) -> list:
+        """The DTN sender's command line and the server options --protect-args sends in-stream."""
+        argv = [*pull, "--dry-run", "--debug=CMD2", "-e", str(self.fake.path), "--"]
+        done = subprocess.run(
+            [*argv, f"sherlock-dtn:{self.remote}/", f"{self.tmp / 'probe'}/"],
+            input=b"result.json\0",
+            capture_output=True,
+            check=True,
+            timeout=60,
         )
-        with patch.object(transfer, "PULL", legacy_pull):
+        text = (done.stdout + done.stderr).decode()
+        found = [line for line in text.splitlines() if SENDER_SIDE.match(line)]
+        self.assertEqual(len(found), 2, text)
+        return found
+
+    def test_large_files_from_pull_keeps_readonly_file_bytes_and_modes(self):
+        with patch.object(transfer, "PULL", LEGACY_PULL):
             self.assertEqual(self.pull()[0], 0)
         # Multiple file-list batches revisit readonly parents created by earlier batches.
         names = {
@@ -467,8 +485,13 @@ class ReadonlyPullTests(TransferCase):
         self.freeze_remote()
         listed = transfer.parse_manifest((self.remote / "SHA256SUMS").read_text())
         self.assertGreater(sum(len(name.encode()) + 1 for name in listed), 137619)
+        umask = os.umask(0)
+        os.umask(umask)  # rsync without -p gives new files the source mode minus the umask
         before = {
-            name: ((self.remote / name).read_bytes(), (self.remote / name).stat().st_mode & 0o777)
+            name: (
+                (self.remote / name).read_bytes(),
+                (self.remote / name).stat().st_mode & 0o777 & ~umask,
+            )
             for name in listed
         }
         code, body = self.pull("--replace")
@@ -484,9 +507,9 @@ class ReadonlyPullTests(TransferCase):
         ]
         self.assertEqual(len(commands), 2)
         self.assertEqual(commands[0], commands[1])
-        self.assertNotIn(
-            "--chmod", commands[1]
-        )  # Receiving-side option must not reach the restricted DTN sender.
+        # The receiver-side --chmod must not reach the restricted DTN sender, neither on its
+        # command line nor among the protected args rsync sends after it.
+        self.assertEqual(self.sender(transfer.PULL), self.sender(LEGACY_PULL))
         self.assertEqual((self.remote / "stages").stat().st_mode & 0o777, 0o555)
 
     def test_resume_prunes_readonly_old_directories_and_keeps_readonly_data(self):
