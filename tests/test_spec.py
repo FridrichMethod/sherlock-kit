@@ -44,6 +44,8 @@ DEFAULTS = {
     "courtesy_ack": False,
     "resubmit": None,
     "dry_run": False,
+    "submission_token": None,
+    "hold": False,
 }
 
 
@@ -209,12 +211,23 @@ class DirectiveTests(Case):
         unbalanced = spec.directives(b"#SBATCH --comment='unbalanced\n")
         self.assertEqual(unbalanced, ["--comment='unbalanced"])
 
+    def test_a_script_comment_is_refused_only_when_shk_owns_comment(self):
+        comments = ("--comment='exp 42'", "--comment=sweep-lr-0.1", "--comm=bookkeeping-42")
+        for directive in comments:
+            body = f"#!/bin/sh\n#SBATCH {directive}\necho\n".encode()
+            with self.subTest(directive=directive):
+                self.assertNotIn("--comment", " ".join(self.build(body=body).argv))
+                error = self.refused(3, "sbatch_directive", body=body, submission_token="t1")
+                self.assertIn("--submission-token", error.hint)
+
 
 class ProfileAndArgvTests(Case):
     def test_profile_gates(self):
         self.refused(3, "unknown_partition", partition="mystery")
         self.refused(3, "gpus_not_allowed", gpus=1)
         self.refused(3, "requeue_not_allowed", requeue=True)
+        interactive = self.refused(3, "batch_not_allowed", partition="dev", dry_run=True)
+        self.assertIn("sh_dev", interactive.hint)
         borrowed = self.refused(3, "courtesy_ack_required", partition="btrippe")
         self.assertIn("--courtesy-ack", borrowed.hint)
         built = self.build(partition="btrippe", courtesy_ack=True, gpus=1)
@@ -268,6 +281,27 @@ class ProfileAndArgvTests(Case):
         self.assertIn("--no-requeue", self.build(partition="owners", requeue=False).argv)
         owners_array = self.build(array="2", partition="owners").argv
         self.assertFalse(any(option.startswith("--dependency") for option in owners_array))
+
+    def test_hold_needs_a_submission_token_that_the_job_sees(self):
+        # release compares Slurm Comment with --expect-token: a hold without a token is a dead end
+        error = self.refused(1, "spec_invalid", hold=True)
+        self.assertIn("--submission-token", error.message)
+        held = self.build(hold=True, submission_token="run-7.a:1")
+        self.assertEqual(
+            held.argv[-4:],
+            [
+                f"{EXPORT},SHK_SUBMISSION_TOKEN=run-7.a:1",
+                "--dependency=singleton",
+                "--comment=run-7.a:1",
+                "--hold",
+            ],
+        )
+        tagged = self.build(array="2", submission_token="t1").argv
+        self.assertEqual(tagged[-2:], [f"{EXPORT},SHK_SUBMISSION_TOKEN=t1", "--comment=t1"])
+        self.assertEqual(self.build().argv[-2:], [EXPORT, "--dependency=singleton"])
+        for token in ("", "-x", "a b", "a,b", "x" * 129):
+            with self.subTest(token=token):
+                self.refused(1, "spec_invalid", submission_token=token, hold=True)
 
     def test_frozen_spec_document(self):
         built = self.build(resubmit="fixed the input path", array="4%2")

@@ -1,11 +1,12 @@
 """Packaged partition profiles: data/partitions.json, schema_version 1 (frozen 0.4.0).
 
-A profile is preemptible, requeue, borrowed and gpus_allowed (booleans) plus a one-line
-courtesy text, which may be empty. Listing is the authorization fact; there are no caps and
-no clock gate (the possu window and the btrippe budget are courtesy text only). profile(name)
-raises ShkError(3, "unknown_partition") for an unlisted name, where profiles().get() returns
-None. markdown() is the "### Partition profiles" block that both rules files end with, byte
-for byte.
+A profile is preemptible, requeue, borrowed, gpus_allowed and batch (booleans) plus a one-line
+courtesy text, which may be empty. batch is false where Sherlock rejects every sbatch job (dev,
+interactive sessions only); the rules bullet leaves it to the courtesy text. Listing is the
+authorization fact; there are no caps and no clock gate (the possu window and the btrippe budget
+are courtesy text only). profile(name) raises ShkError(3, "unknown_partition") for an unlisted
+name, where profiles().get() returns None. markdown() is the "### Partition profiles" block that
+both rules files end with, byte for byte.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ from sherlock_kit.errors import EXIT_REFUSED, ShkError
 
 INTRO = (
     "`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. "
-    "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`."
+    "Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held "
+    "there counts as submitting it (same occupancy check, budget and time window)."
 )
 
 
@@ -34,6 +36,7 @@ class Profile:
     requeue: bool
     borrowed: bool
     gpus_allowed: bool
+    batch: bool
     courtesy: str
 
 

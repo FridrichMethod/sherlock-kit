@@ -52,11 +52,23 @@ class ExtensionFlows(Flow):
         self.assertEqual(code, 0)
         self.assertIn("--hold", report["argv"])
         self.assertIn("--comment=public-123", report["argv"])
+        export = [option for option in report["argv"] if option.startswith("--export=")]
+        self.assertEqual(
+            export, [f"--export=ALL,SHK_NAME={report['name']},SHK_SUBMISSION_TOKEN=public-123"]
+        )
         frozen = json.loads(next(self.shk_dir().glob("*.json")).read_text())
         self.assertEqual((frozen["hold"], frozen["submission_token"]), (True, "public-123"))
-        for option in ("--hold", "-H", "--ho", "--comment=x", "--comm=x", "-vH"):
+        code, report = self.submit("--dry-run", "--hold")
+        self.assertEqual((code, report["error"]), (1, "spec_invalid"))
+        self.assertIn("--submission-token", report["message"])
+        for option in ("--hold", "-H", "--ho", "-vH"):
             (self.tmp / "bad.sh").write_text(f"#!/bin/sh\n#SBATCH {option}\necho work\n")
             self.assertEqual(self.submit("--dry-run", script="bad.sh")[0], 3)
+        for option in ("--comment=x", "--comm=x"):  # Comment is shk's only with a token
+            (self.tmp / "tagged.sh").write_text(f"#!/bin/sh\n#SBATCH {option}\necho work\n")
+            self.assertEqual(self.submit("--dry-run", script="tagged.sh")[0], 0)
+            token = ("--submission-token", "public-123")
+            self.assertEqual(self.submit("--dry-run", *token, script="tagged.sh")[0], 3)
         self.assertEqual(self.submit("--dry-run", "--submission-token", "bad|token")[0], 1)
 
     def detail_tools(self, accounting=None, queue="", jobs=()):

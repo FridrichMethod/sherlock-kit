@@ -116,18 +116,22 @@ shk manifest DIR
   `--array N[%M]` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
   several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
   writes the `--dependency` string itself, so a `,` or `?` list is refused.
-  `--dry-run` is offline. `--preflight` is mutually exclusive and sends the
+  `dev` is refused offline (exit 3 `batch_not_allowed`): Sherlock rejects every
+  batch job there and keeps it for interactive `sh_dev` or `salloc` sessions;
+  `occupancy` and `resources` still read it. `--dry-run` is offline. `--preflight` is mutually exclusive and sends the
   same script/resources to `sbatch --test-only` as a read: no job, run directory
   or provenance is created. Its `preflight` object retains returncode, stdout
   and stderr; rejection is exit 3, read failure is never unknown.
   `--submission-token` accepts 1-128 public characters `[A-Za-z0-9_.:-]` (first
-  alphanumeric), freezes it in the spec and sets Slurm Comment. `--hold` freezes
-  a user hold. Tokens correlate attempts and contain no secrets.
+  alphanumeric), freezes it in the spec, sets Slurm Comment and exports it to
+  the job as `SHK_SUBMISSION_TOKEN`. `--hold` freezes a user hold and needs a
+  token, which `release` checks. Tokens correlate attempts and contain no secrets.
 - The script's leading `#SBATCH` lines may set anything except what `shk` owns
   (`-A`/`--account`, `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`,
   `-p`/`--partition`, `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`,
-  `-J`/`--job-name`, `-H`/`--hold`, `--comment`) and a `hetjob` or `packjob` separator: heterogeneous jobs
-  are refused. Matching follows sbatch's own parsing, so abbreviated long
+  `-J`/`--job-name`, `-H`/`--hold`, and `--comment` when `--submission-token`
+  sets Comment) and a `hetjob` or `packjob` separator: heterogeneous jobs are
+  refused. Matching follows sbatch's own parsing, so abbreviated long
   options (`--part=gpu`) and short flags bundled after value-less ones
   (`-Hp gpu`) count too.
 - `status`: one `squeue` and one `sacct` for all selected names (`--details`
@@ -205,7 +209,8 @@ shk manifest DIR
   `possu`) need it and `--courtesy-ack` before a submission, and such a
   submission reports their occupancy and courtesy text, with a warning when
   others are running there and you already have 2 jobs there or ask for more
-  than 2 h.
+  than 2 h. Releasing a job held there counts as submitting it: `release`
+  checks neither occupancy nor the clock, so check both first.
 - `install-skill` copies the agent skill into a project (`.claude/skills/` and
   `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/` (Codex
   gets a hint instead); `--check` exits 1 when a copy is missing or stale.

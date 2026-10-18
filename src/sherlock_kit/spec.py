@@ -1,12 +1,13 @@
 """Offline submit checks, the job name, the sbatch argv and the frozen job spec.
 
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
-partition, GPUs or requeue its profile forbids, a denylisted option or a hetjob separator in
-the leading #SBATCH block, or a borrowed partition without --courtesy-ack; exit 1 (spec_invalid,
-script_unreadable) for bad memory, time, array or --after-ok grammar, an unreadable script or
-one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm checks them); each
---after-ok value must be one job id, since shk joins them into its own --dependency string, where
-a ',' or '?' would add clauses.
+partition or one without batch jobs (dev), GPUs or requeue its profile forbids, a denylisted
+option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
+borrowed partition without --courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad
+memory, time, array, --after-ok or --submission-token grammar, --hold without a token, an
+unreadable script or one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm
+checks them); each --after-ok value must be one job id, since shk joins them into its own
+--dependency string, where a ',' or '?' would add clauses.
 """
 
 from __future__ import annotations
@@ -35,6 +36,7 @@ DURATION = re.compile(r"([1-9][0-9]*)([hm])")
 CLOCK_TIME = re.compile(r"([0-9]+):([0-5][0-9]):([0-5][0-9])")
 ARRAY = re.compile(r"([0-9]+)(?:%([0-9]+))?")
 JOB_ID = re.compile(r"[1-9][0-9]*(?:_[0-9]+)?")  # one --after-ok value: N or N_TASK
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")  # no ",": it rides in --export
 # #SBATCH options that shk sets on the command line or that would bypass the profile.
 DENIED_LONG = (
     "account",
@@ -47,8 +49,8 @@ DENIED_LONG = (
     "begin",
     "job-name",
     "hold",
-    "comment",
 )
+COMMENT = "comment"  # shk owns Slurm Comment only when --submission-token sets it
 DENIED_SHORT = "AxGpadbJH"  # -b is --begin
 FLAGS_WITHOUT_VALUE = "hOQsuvVW"  # sbatch short flags that may be bundled before another one
 HETJOB_SEPARATORS = ("hetjob", "packjob")  # Slurm reports components as N+k: one name, many jobs
@@ -186,8 +188,8 @@ def directives(script: bytes) -> list[str]:
     return words
 
 
-def denied(word: str) -> bool:
-    """Whether one #SBATCH word sets an option shk owns or starts a hetjob component.
+def denied(word: str, owned: tuple[str, ...] = DENIED_LONG) -> bool:
+    """Whether one #SBATCH word sets an option shk owns (long names in owned) or starts a hetjob.
 
     sbatch parses #SBATCH words with getopt_long, so this follows it: -p, -pgpu, -Hp (value-less
     flags bundle before another), --partition=gpu, --part=gpu (an unambiguous prefix) and
@@ -199,14 +201,14 @@ def denied(word: str) -> bool:
         option = word[2:].partition("=")[0]
         if not option:
             return False
-        return option.startswith("gpus") or any(name.startswith(option) for name in DENIED_LONG)
+        return option.startswith("gpus") or any(name.startswith(option) for name in owned)
     if word.startswith("-"):
         flags = word[1:].lstrip(FLAGS_WITHOUT_VALUE)
         return bool(flags) and flags[0] in DENIED_SHORT
     return False
 
 
-def read_script(path: str) -> bytes:
+def read_script(path: str, owns_comment: bool = False) -> bytes:
     """The job script bytes: at most 1 MiB, without a denylisted #SBATCH option."""
     try:
         with open(path, "rb") as stream:
@@ -215,14 +217,15 @@ def read_script(path: str) -> bytes:
         raise ShkError(EXIT_LOCAL, "script_unreadable", f"{path}: {exc.strerror or exc}") from None
     if len(data) > SCRIPT_LIMIT:
         raise _invalid(f"{path} is larger than 1 MiB")
-    refused = [word for word in directives(data) if denied(word)]
+    owned = (*DENIED_LONG, COMMENT) if owns_comment else DENIED_LONG
+    refused = [word for word in directives(data) if denied(word, owned)]
     if refused:
         raise ShkError(
             EXIT_REFUSED,
             "sbatch_directive",
             f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
             hint="remove it from the script and use the shk submit command line instead "
-            "(heterogeneous jobs are not supported)",
+            "(--submission-token sets Comment; heterogeneous jobs are not supported)",
         )
     return data
 
@@ -266,8 +269,14 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
     )
 
 
-def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
-    """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path."""
+def sbatch_argv(
+    name: str, run: str, wanted: Resources, token: str | None = None, hold: bool = False
+) -> list[str]:
+    """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path.
+
+    A submission token reaches the job as SHK_SUBMISSION_TOKEN and Slurm Comment; both it and
+    --hold come last, so the argv without them is the 0.4.0 one.
+    """
     log = f"{run}/slurm-{'%A_%a' if wanted.array else '%j'}"
     argv = ["sbatch", "--parsable", f"--job-name={name}", f"--partition={wanted.partition}"]
     if wanted.array:
@@ -289,12 +298,17 @@ def sbatch_argv(name: str, run: str, wanted: Resources) -> list[str]:
         argv.append(f"--constraint={wanted.constraint}")
     if wanted.signal:
         argv.append(f"--signal={wanted.signal}")
-    argv.append(f"--export=ALL,SHK_NAME={name}")
+    exported = f",SHK_SUBMISSION_TOKEN={token}" if token is not None else ""
+    argv.append(f"--export=ALL,SHK_NAME={name}{exported}")
     dependency = [f"afterok:{':'.join(wanted.after_ok)}"] if wanted.after_ok else []
     if wanted.array is None:  # singleton is for single jobs only; arrays have no backstop
         dependency.append("singleton")
     if dependency:
         argv.append(f"--dependency={','.join(dependency)}")
+    if token is not None:
+        argv.append(f"--comment={token}")
+    if hold:
+        argv.append("--hold")
     return argv
 
 
@@ -332,9 +346,16 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
     profile = partitions.profile(args.partition)
+    if not profile.batch:
+        raise ShkError(
+            EXIT_REFUSED,
+            "batch_not_allowed",
+            f"partition {profile.name} does not accept batch jobs: {profile.courtesy}",
+            hint="use sh_dev or salloc there, or submit to a batch partition such as normal",
+        )
     wanted = resources(args, profile)
     run = run_directory(args.run_dir, config, name)
-    script = read_script(args.script)
+    script = read_script(args.script, owns_comment=args.submission_token is not None)
     if profile.borrowed and not args.courtesy_ack:
         raise ShkError(
             EXIT_REFUSED,
@@ -342,15 +363,12 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
             f"{profile.name} is borrowed: {profile.courtesy}",
             hint=f"run shk occupancy --partition {profile.name}, then add --courtesy-ack",
         )
-    argv, digest = sbatch_argv(name, run, wanted), hashlib.sha256(script).hexdigest()
-    token = getattr(args, "submission_token", None)
-    if token is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", token):
+    token, hold = args.submission_token, args.hold
+    if token is not None and not TOKEN.fullmatch(token):
         raise _invalid("--submission-token must be 1-128 public characters: A-Z a-z 0-9 _ . : -")
-    hold = getattr(args, "hold", False)
-    if token is not None:
-        argv.append(f"--comment={token}")
-    if hold:
-        argv.append("--hold")
+    if hold and token is None:
+        raise _invalid("--hold needs --submission-token, which shk release checks")
+    argv, digest = sbatch_argv(name, run, wanted, token, hold), hashlib.sha256(script).hexdigest()
     document = {
         "schema": 1,
         "submission_token": token,

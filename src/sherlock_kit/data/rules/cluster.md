@@ -27,18 +27,18 @@ Read `/etc/agents/AGENTS.md` first as the banner requires. It and its topic file
 - Use `shk submit`, `shk status` and `shk cancel`: the CLI contract, using the local executor. Plain `sbatch` follows the same rules and the profiles below: explicit `--time`; GPU jobs `-G n` on a GPU partition; `-C` instead of `--exclude`; no `--account`. `sh_part` and `sh_node_feat` (login shell) list partitions and node features.
 - At least 60 s between checks (`squeue --me`, `sacct -j ID -o JobID,State,Elapsed,MaxRSS,ExitCode`, `seff ID`); prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; diagnose before resubmitting; jobs do at least 10 minutes of work. `shk` exit 5: run the `shk status` command in the reply's `next`, not before the time it names, never a blind resubmit; exit 6: stop and report.
 - Never schedule future agent/LLM sessions (`scrontab`, `--begin`, self-resubmitting agents). Bounded deterministic compute controllers may submit and poll authorized stages inside an allocation via `shk --executor local`, no workstation needed.
-- Cancel only exact verified own jobs with `scancel ID` or UID/name-scoped `shk cancel`. Exact verified own cancellations in an authorized task may proceed; record a reason. Ask for unclear scope/ownership, unrelated work, broad cancellation or material irreversible loss of important progress/results. Never `scancel -u $USER`; never kill processes on compute nodes.
+- Cancel only exact verified own jobs with `scancel ID` or UID/name-scoped `shk cancel`. Exact verified own cancellations in an authorized task may proceed; tell the user why. Ask for unclear scope/ownership, unrelated work, broad cancellation or material irreversible loss of important progress/results. Never `scancel -u $USER`; never kill processes on compute nodes.
 - `shk doctor` is read-only. Config: `[tool.sherlock-kit]` in the nearest `pyproject.toml` or `sherlock-kit.toml` at/above cwd; elsewhere use `--project-dir DIR`.
 
 ### Partition profiles
-`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`.
+`shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
 - `normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.
-- `bigmem`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public high-memory partition: only for jobs that need more memory than normal provides. Follow Sherlock's own limits for it.
-- `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public development partition: debugging and short tests only, never production runs. Follow Sherlock's own limits for it.
-- `service`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Follow Sherlock's own limits for it.
+- `bigmem`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public high-memory partition: only for jobs needing more memory than normal provides. Sherlock's own limits apply.
+- `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Interactive only (`sh_dev`, `salloc`): Sherlock rejects batch jobs here, so `shk submit` refuses it. Debugging and short tests, never production runs.
+- `service`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Sherlock's own limits apply.
 - `gpu`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public GPU partition: few GPUs, long queue, never preempted. Follow Sherlock's own per-user GPU limits.
-- `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Preemptible: Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.
-- `bioe`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition, not borrowed: respect fairshare and leave room for other department users.
-- `stat`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition, not borrowed: respect fairshare and leave room for other department users.
-- `btrippe`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed from another group. Run `shk occupancy` first. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00.
-- `possu`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Borrowed from another group and stricter than btrippe. Run `shk occupancy` first. Submit only between 00:00 and 07:00 Pacific, a few short jobs; never submit outside that window, not even short jobs.
+- `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.
+- `bioe`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition: respect fairshare and leave room for other department users.
+- `stat`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition: respect fairshare and leave room for other department users.
+- `btrippe`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00.
+- `possu`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Stricter than btrippe. Submit only between 00:00 and 07:00 Pacific, a few short jobs; never submit outside that window, not even short jobs.

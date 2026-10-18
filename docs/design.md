@@ -103,13 +103,16 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 
 ## Submit
 
-1. **Offline checks.** The partition is listed in `partitions.json`; GPUs only
+1. **Offline checks.** The partition is listed in `partitions.json` and takes
+   batch jobs (`batch: false` for `dev`, where Sherlock rejects every sbatch
+   job; `occupancy` and `resources` still read it); GPUs only
    where the profile allows them; requeue only where the profile allows it
    (today `owners`), else `--no-requeue`; the `--mem`, `--time` and `--array`
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
    `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
    `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
-   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`, `-H`/`--hold`, `--comment`) or
+   `-a`/`--array`, `-d`/`--dependency`, `-b`/`--begin`, `-J`/`--job-name`,
+   `-H`/`--hold`, and `--comment` when a submission token sets Comment) or
    start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
    `--courtesy-ack`. The denylist follows sbatch's getopt parsing: abbreviated
    long options (`--part`) and short flags bundled after value-less ones
@@ -118,8 +121,10 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    `N` or `N_TASK`, because `shk` joins them into its own `--dependency`
    string, where a `,` or `?` would add clauses. Build the sbatch argv
    (explicit name, partition, CPUs, memory, minutes, run directory, log paths,
-   `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs) and the frozen
-   spec. `--dry-run` stops here, with no network at all.
+   `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs; a submission
+   token adds `,SHK_SUBMISSION_TOKEN=<token>` to the export and
+   `--comment=<token>`, and `--hold` is accepted only with a token) and the
+   frozen spec. `--dry-run` stops here, with no network at all.
 2. **Read call** (`query.sh`, shared with `status`): one `squeue -t all` and one
    `sacct --duplicates` over the last 30 days for the user and name, plus the
    newest spec file; for a borrowed partition also its occupancy. Only
@@ -178,8 +183,10 @@ FreeMem does not drive admission. `control.py` implements read-only
 allocation-only self requeue with Slurm PID membership. After a mutation is
 issued an ambiguous reply stays unknown, with no retry. Slurm identity reads
 and mutations are not atomic; no exactly-once guarantee is claimed. The public
-submission token is correlation data stored in Slurm Comment and frozen spec,
-not a credential. No project ledger, checkpoint or retry policy enters the kit.
+submission token is correlation data stored in Slurm Comment, the job's
+`SHK_SUBMISSION_TOKEN` and the frozen spec, not a credential; a held job needs
+one, because release verifies it. No project ledger, checkpoint or retry
+policy enters the kit.
 
 ## Transfer
 
@@ -197,14 +204,17 @@ and `.shk*` entries, so the job writes it over its own output subdirectory, not
 the run directory with its `.shk/` and logs. It refuses unsafe entries
 (absolute paths, empty, `.` or `..` components, `.shk` components, duplicates).
 With NAME the last component of LOCAL, it takes a lock on `.NAME.shk-lock`,
-rsyncs exactly the listed files into the private stage `.NAME.shk-stage` beside
-LOCAL (restoring owner access on its owned real directories before pruning
-anything the manifest does not list, so a rerun resumes it),
-and uses receiver-local `--chmod=Du+rwx` to keep incoming directories writable
-when a readonly source spans multiple file-list batches. File permissions are
-unchanged; the stage root stays private and child symlink targets are never
-followed or chmodded. It verifies the inventory and every hash, re-reads the manifest, then runs the
-validator named by `--validate`, if any: its argv from
+rsyncs exactly the listed files into the private stage `.NAME.shk-stage`
+(created 0700) beside LOCAL, pruning anything the manifest does not list so a
+rerun resumes it, and uses receiver-local `--chmod=Du+rwx` to keep incoming
+directories writable when a readonly source spans multiple file-list batches.
+Before pruning it gives owner rwx back only to real stage directories that lack
+it (left by an interrupted pull of a readonly source); an ordinary pull issues
+no chmod and checks no owner, so filesystems that refuse chmod or map owners
+(CIFS, sshfs, NFSv4 idmap) work. File permissions are unchanged, a symlinked
+stage root is refused and a child symlink target is never followed or
+chmodded. It verifies the inventory and every hash, re-reads the manifest, then
+runs the validator named by `--validate`, if any: its argv from
 `[tool.sherlock-kit.validators]` plus the stage directory as the last argument,
 from the project root (the directory of the configuration file); exit 0 passes,
 and the validator treats the stage as read-only because whatever it writes is
@@ -224,6 +234,13 @@ the same.
   a task with no Slurm rows in that window is submitted again as new, without
   `--resubmit`, even when its run directory still exists, and the new job runs
   in the same run directory.
+- Sherlock's windowed `sacct` omits jobs that were never eligible (seen
+  2026-10-18): a job held until it was cancelled leaves no row for a name
+  query, so once the controller purges it the name reads as `new` or `stale`.
+  `sacct --jobs` still finds it. Sherlock also refuses `sacct` windows much
+  wider than 30 days (`Too wide of a date range in query` at 45 days) and keeps
+  no job Comment in accounting, so a submission token is visible only while the
+  job is in the controller and in the frozen spec.
 - Check-then-submit is a race: two submitters can both pass the guard. For a
   single job `singleton` keeps the two from running at once; arrays have no
   backstop; `status` flags `duplicate_live`. There is no exactly-once claim.
