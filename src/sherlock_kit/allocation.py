@@ -7,6 +7,7 @@ import hashlib
 import os
 import re
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,13 @@ HOST = re.compile(r"[A-Za-z0-9_.-]+")
 HOSTLIST = re.compile(r"[A-Za-z0-9_.\[\],-]+")
 NULL = {"", "(null)", "N/A", "None", "Unknown"}
 ACTUAL_NULL = NULL - {"Unknown"}
+# The ids Slurm prints for a record: a job is selected by its physical JobId or by
+# ArrayJobId_ArrayTaskId, a step by StepId (A_T.S for an array element), a node by NodeName.
+IDENTITIES: dict[str, Callable[[dict[str, str]], tuple[str | None, ...]]] = {
+    "job": lambda f: (f.get("JobId"), f"{f.get('ArrayJobId')}_{f.get('ArrayTaskId')}"),
+    "step": lambda f: (f.get("StepId"),),
+    "node": lambda f: (f.get("NodeName"),),
+}
 
 
 def invalid(message: str) -> ShkError:
@@ -56,9 +64,9 @@ def process_identity(pid: int) -> tuple[int, int]:
 
 
 def strict_fields(raw: str) -> dict[str, str]:
-    """Parse one scontrol record, rejecting duplicate field names and extra rows."""
+    """Parse one scontrol record line, rejecting control characters and duplicate fields."""
     if not raw or any(ord(char) < 32 or ord(char) == 127 for char in raw):
-        raise invalid("expected exactly one scheduler record")
+        raise invalid("malformed scheduler record")
     matches = list(details.FIELD.finditer(raw))
     if not matches or matches[0].start() != 0:
         raise invalid("malformed scheduler fields")
@@ -128,46 +136,19 @@ def tres_counts(value: str | None) -> tuple[int | None, int | None]:
     return cpu, total if total is not None else typed_total
 
 
-def gres_count(value: str) -> int:
-    """Count legacy actual GRES; annotations containing commas are device metadata."""
-    if value.lower() == "unknown":
-        raise invalid("unknown actual allocation GRES")
-    if value in ACTUAL_NULL:
-        return 0
-    if value.count("(") != value.count(")"):
-        raise invalid("malformed allocated GRES annotation")
-    cleaned = re.sub(r"\([^()]*\)", "", value)
-    total = 0
-    for entry in cleaned.split(","):
-        parts = entry.split(":")
-        if not parts[0] or any(not part for part in parts):
-            raise invalid("malformed allocated GRES")
-        if parts[0] == "gpu":
-            count = number(parts[-1] if len(parts) > 1 else "1", "allocated GPU GRES")
-            if count is None:
-                raise invalid("missing allocated GPU GRES count")
-            total += count
-    return total
-
-
 def resource_counts(fields: dict[str, str], *, step: bool) -> dict[str, int | None]:
-    """Keep actual TRES and legacy resource counts separate; requests are ignored."""
-    cpu_tres, gpu_tres = tres_counts(fields.get("TRES" if step else "AllocTRES"))
+    """Actual job AllocTRES or step TRES and CPU counts; requests are ignored."""
+    cpu_tres, gpus = tres_counts(fields.get("TRES" if step else "AllocTRES"))
     cpus = number(fields.get("CPUs" if step else "NumCPUs"), "allocated CPUs")
     if cpus is not None and cpu_tres is not None and cpus != cpu_tres:
         raise invalid("allocated CPU fields disagree")
-    legacy = [fields[key] for key in ("Gres", "GRES", "JOB_GRES") if key in fields]
-    counts = [gres_count(value) for value in legacy if value not in ACTUAL_NULL]
-    if len(set(counts)) > 1 or (counts and gpu_tres is not None and counts[0] != gpu_tres):
-        raise invalid("allocated GPU fields disagree")
-    gpus = gpu_tres if gpu_tres is not None else (counts[0] if counts else (0 if legacy else None))
     if gpus is None:
-        raise invalid("no actual GPU or CPU-only allocation evidence")
+        raise invalid("no actual allocated TRES")
     return {
         "allocated_cpus": cpus if cpus is not None else cpu_tres,
         "allocated_cpu_tres": cpu_tres,
         "allocated_gpus": gpus,
-        **({} if step else {"allocated_gpu_tres": gpu_tres}),
+        **({} if step else {"allocated_gpu_tres": gpus}),
     }
 
 
@@ -206,9 +187,9 @@ class Collector:
         """Expand generic caller hostlists, rejecting malformed or duplicate hosts."""
         if not HOSTLIST.fullmatch(expression) or len(expression) > 4096:
             raise invalid("invalid hostlist expression")
-        for record in self.hostlists:
-            if record["expression"] == expression:
-                return list(record["nodes"])
+        for known in self.hostlists:
+            if known["expression"] == expression:
+                return list(known["nodes"])
         nodes = self.query("hosts", expression).splitlines()
         if (
             len(nodes) > 10000
@@ -228,10 +209,25 @@ def local_node(nodes: list[str], hostname: str) -> str:
     return matches[0]
 
 
+def matching_record(collector: Collector, action: str, query_id: str) -> tuple[str, dict[str, str]]:
+    """The one record of a reply that Slurm identifies as query_id.
+
+    An array's meta physical id also returns every sibling element (and their steps), so a
+    reply may hold several lines; each is parsed strictly and exactly one must match.
+    """
+    matches = []
+    for line in collector.query(action, query_id).splitlines():
+        fields = strict_fields(line)
+        if query_id in IDENTITIES[action](fields):
+            matches.append((line, fields))
+    if len(matches) != 1:
+        raise invalid(f"expected exactly one matching scheduler record for {action} {query_id}")
+    return matches[0]
+
+
 def scheduler_record(collector: Collector, action: str, query_id: str, uid: int) -> dict[str, Any]:
     """Collect a live own allocation/step with expanded actual nodes and resources."""
-    raw = collector.query(action, query_id)
-    fields = strict_fields(raw)
+    raw, fields = matching_record(collector, action, query_id)
     if owner(fields.get("UserId")) != uid:
         raise invalid("allocation belongs to another UID")
     state = fields.get("State" if action == "step" else "JobState")
@@ -240,12 +236,12 @@ def scheduler_record(collector: Collector, action: str, query_id: str, uid: int)
     partition = fields.get("Partition")
     if not partition or partition in NULL:
         raise invalid("missing allocated partition")
-    expression = fields.get("NodeList") or (fields.get("Nodes") if action == "step" else None)
-    if not expression:
+    expression = fields.get("NodeList")
+    if expression is None or expression in NULL:
         raise invalid("missing allocated nodes")
     nodes = collector.hosts(expression)
     node_count = number(
-        fields.get("NumNodes", fields.get("Nodes") if fields.get("NodeList") else None),
+        fields.get("Nodes" if action == "step" else "NumNodes"),
         "allocated node count",
         positive=True,
     )
@@ -264,9 +260,9 @@ def scheduler_record(collector: Collector, action: str, query_id: str, uid: int)
     }
 
 
-def job_identity(record: dict[str, Any], query_id: str) -> None:
-    """Bind logical array selection to a distinct physical allocation ID."""
-    fields = record["fields"]
+def job_identity(job: dict[str, Any]) -> None:
+    """Keep the physical allocation ID and, for an array element, its logical identity."""
+    fields = job["fields"]
     physical = fields.get("JobId")
     if number(physical, "physical JobId", positive=True) is None:
         raise invalid("missing physical JobId")
@@ -277,18 +273,15 @@ def job_identity(record: dict[str, Any], query_id: str) -> None:
         number(array, "ArrayJobId", positive=True) is None or number(task, "ArrayTaskId") is None
     ):
         raise invalid("missing array identity")
-    if query_id != physical and (array is None or query_id != f"{array}_{task}"):
-        raise invalid("scheduler job identity differs from selection")
-    record.update(job_id=physical, array_job_id=array, array_task_id=task)
+    job.update(job_id=physical, array_job_id=array, array_task_id=task)
 
 
 def membership(collector: Collector, pid: int, job: str, step: str | None) -> dict[str, Any]:
     """Verify actual PID-to-job and optional numeric PID-to-step associations."""
     raw = collector.query("pidinfo", str(pid))
     lines = raw.splitlines()
-    match = re.fullmatch(
-        r"Slurm (?:JobId=|job id )([0-9]+)(?:\.(?:batch|extern|[0-9]+))? ends at .+", lines[0]
-    )
+    # Only the job id counts; a step suffix (.batch, .interactive, .0+1, ...) is not checked.
+    match = re.fullmatch(r"Slurm (?:JobId=|job id )([0-9]+)(?:\.\S+)? ends at .+", lines[0])
     valid_lines = len(lines) == 1 or (
         len(lines) == 2
         and re.fullmatch(
@@ -318,35 +311,28 @@ def membership(collector: Collector, pid: int, job: str, step: str | None) -> di
 def step_record(
     collector: Collector, job: dict[str, Any], step: str, uid: int, hostname: str
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Collect selected step and local node topology without SMT/resource policy."""
-    identity = f"{job['job_id']}.{step}"
-    record = scheduler_record(collector, "step", identity, uid)
-    if record["fields"].get("StepId") != identity or record["partition"] != job["partition"]:
-        raise invalid("step identity or partition differs from allocation")
-    if not set(record["nodes"]).issubset(job["nodes"]):
+    """Collect the selected step and local node topology without SMT/resource policy."""
+    # Slurm names an array element's step ArrayJobId_ArrayTaskId.STEP, and the meta physical
+    # id's N.STEP would also return every sibling's step.
+    array, task = job["array_job_id"], job["array_task_id"]
+    identity = f"{array}_{task}.{step}" if array is not None else f"{job['job_id']}.{step}"
+    found = scheduler_record(collector, "step", identity, uid)
+    if not set(found["nodes"]).issubset(job["nodes"]):
         raise invalid("step nodes are outside parent allocation")
     for key in ("allocated_cpus", "allocated_gpus"):
-        actual, parent = record[key], job[key]
+        actual, parent = found[key], job[key]
         if actual is not None and parent is not None and actual > parent:
             raise invalid(f"step {key} exceeds parent allocation")
-    record.update(
-        step_id=step,
-        tasks=number(
-            record["fields"].get("Tasks", record["fields"].get("NumTasks")),
-            "allocated tasks",
-            positive=True,
-        ),
+    found.update(
+        step_id=step, tasks=number(found["fields"].get("Tasks"), "allocated tasks", positive=True)
     )
-    node = local_node(record["nodes"], hostname)
-    return record, [node_record(collector, node, topology=True)]
+    node = local_node(found["nodes"], hostname)
+    return found, [node_record(collector, node, topology=True)]
 
 
 def node_record(collector: Collector, node: str, *, topology: bool) -> dict[str, Any]:
     """Retain the local node identity and require topology for a selected step."""
-    raw = collector.query("node", node)
-    fields = strict_fields(raw)
-    if fields.get("NodeName") != node:
-        raise invalid("node topology identity differs")
+    raw, fields = matching_record(collector, "node", node)
     if topology:
         for key in ("CPUTot", "ThreadsPerCore", "CoresPerSocket", "Sockets"):
             if number(fields.get(key), key, positive=True) is None:
@@ -367,6 +353,8 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
         raise invalid("missing numeric step id")
     if len(args.hostlist) > 32:
         raise invalid("at most 32 caller hostlists")
+    if not all(HOSTLIST.fullmatch(expression) for expression in args.hostlist):
+        raise invalid("invalid hostlist expression")
     before = process_identity(pid)
     if before[0] != os.getuid():
         raise invalid("worker process belongs to another UID")
@@ -376,9 +364,9 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
         raise invalid("cannot verify worker CPU affinity") from exc
     collector = Collector(ctx)
     job = scheduler_record(collector, "job", query_id, before[0])
-    job_identity(job, query_id)
+    job_identity(job)
     node = local_node(job["nodes"], ctx.hostname)
-    record, nodes = (
+    step_found, nodes = (
         (None, [node_record(collector, node, topology=False)])
         if step is None
         else step_record(collector, job, step, before[0], ctx.hostname)
@@ -407,7 +395,7 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
             "step_membership_verified": True if step is not None else None,
         },
         "job": job,
-        "step": record,
+        "step": step_found,
         "node_records": nodes,
         "hostlists": collector.hostlists,
         "membership_evidence": evidence,
