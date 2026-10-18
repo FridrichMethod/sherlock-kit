@@ -60,8 +60,8 @@ if [ "$mode" != names ]; then
 fi
 [ -z "$out" ] || printf "%s\n" "$out" | sed "s/^/SHK_Q|/"
 printf "SHK_RC squeue %s\n" "$rc"
-# scontrol supplies held request details absent from the portable squeue format. One call per
-# base job id: show job ARRAY_ID prints every element the controller still holds.
+# scontrol supplies held request details absent from the portable squeue format, in UTC like
+# squeue and sacct. One call per base job id: show job ARRAY_ID prints every element held.
 bases=$(printf "%s\n" "$out" | cut -d "|" -f1 | sed "s/_.*//" | sort -u)
 jrc=0
 for id in $bases; do
@@ -70,7 +70,7 @@ for id in $bases; do
         continue
         ;;
     esac
-    job=$(scontrol show job "$id" --oneliner) || jrc=$?
+    job=$(env TZ=UTC LC_ALL=C SLURM_TIME_FORMAT=standard scontrol show job "$id" --oneliner) || jrc=$?
     [ -z "$job" ] || printf "%s\n" "$job" | sed "s/^/SHK_J|/"
 done
 printf "SHK_RC scontrol %s\n" "$jrc"

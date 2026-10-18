@@ -183,3 +183,18 @@ class ControlLookupTests(DetailsFlow):
             self.assertIn(f"--name={NAME}", self.fake.calls(tool)[0]["argv"])
         self.assertIn("-S", self.fake.calls("sacct")[0]["argv"])
         self.assertIn("now-30days", self.fake.calls("sacct")[0]["argv"])
+
+
+class ControlTimeTests(DetailsFlow):
+    """D34: scontrol prints site-local times unless told otherwise."""
+
+    def test_control_times_are_utc_like_queue_and_accounting(self):
+        self.canned(
+            queue=[queue("7200", "7200", "PENDING")],
+            accounting=[account("7200", "7200", "PENDING")],
+            jobs=[record("7200")],
+        )
+        self.details("--job-id", "7200")
+        for tool in ("squeue", "sacct", "scontrol"):
+            env = self.fake.calls(tool)[0]["env"]
+            self.assertEqual((env.get("TZ"), env.get("SLURM_TIME_FORMAT")), ("UTC", "standard"))
