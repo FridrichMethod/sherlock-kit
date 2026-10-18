@@ -3,17 +3,14 @@
 import json
 import os
 import pwd
-import shlex
 import subprocess
 import sys
-from pathlib import Path
 
 from fakes import SRC
+from fakes.expired_slurm import CannedSlurm
 from test_flows import Flow
 
 from sherlock_kit import executor
-
-FIXTURE = Path(__file__).parent / "fakes/expired_slurm.py"
 
 
 def expiry_fixture(directory):
@@ -35,24 +32,11 @@ def expiry_fixture(directory):
         f"44|44|sherlock|900|COMPLETED|normal|614|1|cpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:10:15|0|0:0|sh01|{uid + 1}|tok|foreign-accounting",
         f"88|88|sherlock|901|COMPLETED|normal|614|1|cpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:10:15|0|0:0|sh01|{uid}|tok|unrelated-accounting",
     ])
-    jobs = {
-        "55": f"JobId=55 ArrayJobId=55 ArrayTaskId=0 JobName=live-array UserId=user({uid}) Comment=tok JobState=RUNNING"
-    }
-    state = directory / "expiry-state.json"
-    state.write_text(
-        json.dumps({"queue": queue, "accounting": accounting, "jobs": jobs, "calls": []})
-    )
-    tools = directory / "expiry-bin"
-    tools.mkdir()
-    for tool in ("squeue", "sacct", "scontrol"):
-        command = shlex.join([sys.executable, "-B", str(FIXTURE), tool])
-        path = tools / tool
-        path.write_text(f'#!/bin/sh\nexec {command} "$@"\n')
-        path.chmod(0o755)
-    return {
-        "PATH": f"{tools}{os.pathsep}{os.environ['PATH']}",
-        "FAKE_EXPIRY_STATE": str(state),
-    }, state
+    jobs = [
+        f"JobId=55 ArrayJobId=55 ArrayTaskId=0 JobName=live-array UserId=user({uid}) Comment=tok JobState=RUNNING"
+    ]
+    fake = CannedSlurm(directory, queue=queue, accounting=accounting, jobs=jobs)
+    return fake.env(), fake.path
 
 
 def assert_expiry_report(test, report, state):
@@ -115,7 +99,7 @@ class ExpiredStatusFlows(Flow):
 
     def failing_filter(self):
         """Replace only the temporary awk dependency with an actual failing process."""
-        command = self.tmp / "expiry-bin/awk"
+        command = self.tmp / "canned-bin/awk"
         command.write_text("#!/bin/sh\nexit 17\n")
         command.chmod(0o755)
 
