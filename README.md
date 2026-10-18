@@ -92,7 +92,7 @@ shk submit --task T [--campaign C] --script FILE --partition P --cpus N --mem SI
 shk resources --partition P [--partition P ...]
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION ...]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
-shk requeue --self --expect-name NAME --expect-token TOKEN
+shk requeue --self --expect-name NAME [--expect-token TOKEN]
 shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all | --job-id ID ...) [--since DAYS] [--details]
 shk cancel (--task T [--campaign C] | --name NAME)
 shk push LOCAL REMOTE [--anywhere]
@@ -143,16 +143,24 @@ shk manifest DIR
   `complete: false`. Availability is a snapshot, not a resource reservation.
 - `allocation` verifies an explicit local worker PID, own UID, physical job/array
   identity, current host and optional numeric step membership. It preserves actual
-  resources, topology, raw records and hashes; missing counts remain null and no
-  project resource policy is inferred. It refuses SSH, exited/reused PIDs and
-  ambiguous or contradictory evidence. See [the allocation contract](docs/allocation.md).
+  resources, node records, raw records and hashes; missing counts remain null and
+  no project resource policy is inferred. It refuses SSH, exited/reused PIDs and
+  ambiguous or contradictory evidence; a scheduler that does not answer is a
+  retryable read failure, never non-membership. See
+  [the allocation contract](docs/allocation.md).
 - `release` checks one exact ID, current UID, expected name/token and user hold
   immediately before `scontrol release`. `requeue --self` has no arbitrary ID
-  option: it requires the local physical allocation ID, actual Slurm PID
-  membership, current UID/name/token, RUNNING state, owners and Requeue=1. For
-  arrays it requeues the physical self element. A lost mutation reply is exit 5;
-  Slurm ownership checks still apply, and concurrent user changes can race the
-  identity read. Checkpoint durability and retry limits belong to the caller.
+  option: it requires the local allocation (`SLURM_JOB_ID`), actual Slurm PID
+  membership in that physical job, current UID and name, the token only when
+  `--expect-token` is given, RUNNING state, a partition whose profile allows
+  requeue (today `owners`) and Requeue=1. These are read from Slurm's record of
+  that physical job, which also names the target: an array element is requeued
+  as its `ArrayJobId_ArrayTaskId`, never the bare array ID, which would requeue
+  every element; inherited `SLURM_ARRAY_*` variables are not trusted. A refusal
+  is exit 3 and keeps Slurm's message when a query failed; a lost or failed
+  mutation reply is exit 5 with Slurm's message in `detail`. Slurm ownership
+  checks still apply, and concurrent user changes can race the identity read.
+  Checkpoint durability and retry limits belong to the caller.
 - `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
   `remote_root` (`--anywhere` lifts that) and never deletes. Pushed files keep
   their local modification times (`rsync -t`, so a re-push skips unchanged

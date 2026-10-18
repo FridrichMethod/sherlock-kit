@@ -7,12 +7,31 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 
-from sherlock_kit import executor, spec
+from sherlock_kit import executor, partitions, spec
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, Outcome, ShkError
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
     from sherlock_kit.slurm import Subparsers
+
+TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
+# Slurm client messages for a controller that did not answer: the read failed, nothing decided.
+TRANSIENT = re.compile(
+    r"Unable to contact slurm controller|Socket timed out on send/recv operation"
+    r"|Zero Bytes were transmitted or received"
+)
+
+
+def transient(action: str, stderr: str) -> ShkError | None:
+    """A retryable read failure when Slurm reports a controller transport error, else None."""
+    if not TRANSIENT.search(stderr):
+        return None
+    return ShkError(
+        EXIT_LOCAL,
+        "malformed_read",
+        f"{action}: Slurm controller unavailable: {stderr.strip()[-2000:]}",
+        hint="retry once after 60 s",
+    )
 
 
 def checked_id(value: str) -> str:
@@ -31,12 +50,16 @@ def register(subparsers: Subparsers) -> None:
         else:
             parser.add_argument("--self", required=True, action="store_true")
         parser.add_argument("--expect-name", required=True)
-        parser.add_argument("--expect-token", required=True)
+        parser.add_argument(
+            "--expect-token",
+            required=command == "release",
+            help="Slurm Comment to match (optional for requeue: checked only when given)",
+        )
         parser.set_defaults(handler=handler)
 
 
 def preflight(built: spec.Spec, ctx: Context) -> Outcome:
-    """Use sbatch --test-only as a read; a quota refusal is exit 3, never unknown."""
+    """Use sbatch --test-only as a read: a Slurm refusal is exit 3, a controller failure exit 1."""
     from sherlock_kit.slurm import _cadence
 
     result = executor.check(
@@ -59,6 +82,8 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
             raise ShkError(
                 EXIT_LOCAL, "malformed_read", "invalid preflight output encoding"
             ) from None
+    if code and (failure := transient("preflight", evidence["stderr"])):
+        raise failure
     return Outcome(
         {
             "ok": code == 0,
@@ -77,27 +102,26 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
     )
 
 
-def _change(action: str, job: str, args: argparse.Namespace, ctx: Context) -> Outcome:
+def _change(action: str, job: str, args: argparse.Namespace, ctx: Context, *extra: str) -> Outcome:
     from sherlock_kit.slurm import _cadence, _mutate, _unknown
 
-    if not args.expect_name or not re.fullmatch(
-        r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", args.expect_token
-    ):
+    token = args.expect_token
+    if not args.expect_name or (token is not None and not TOKEN.fullmatch(token)):
         raise ShkError(
             EXIT_LOCAL,
             "spec_invalid",
-            "expected name and public token must be nonempty, with a valid token",
+            "expected name must be nonempty and a given public token valid",
         )
     reply = _mutate(
-        ctx, "control", [action, job, args.expect_name, args.expect_token], ("SHK_CHANGED",)
+        ctx, "control", [action, job, args.expect_name, token or "", *extra], ("SHK_CHANGED",)
     )
     if reply.marker == "unknown":
         return _unknown(ctx, args.expect_name, f"--job-id {job} --details", reply.value)
     return Outcome({
         "action": "released" if action == "release" else "requeued",
-        "job_id": job,
+        "job_id": reply.value,
         "name": args.expect_name,
-        "submission_token": args.expect_token,
+        "submission_token": token,
         "executor": ctx.executor().kind,
         **_cadence(ctx),
     })
@@ -109,14 +133,20 @@ def release(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 
 def requeue(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """Requeue the physical current allocation only; the shell verifies process membership."""
+    """Requeue the current physical allocation only; the shell verifies Slurm PID membership.
+
+    The shell reads Slurm's record of SLURM_JOB_ID and requeues an array element as its
+    ArrayJobId_ArrayTaskId: the bare id of the element that keeps the array's meta record would
+    requeue every element, and inherited SLURM_ARRAY_* variables can name another job.
+    """
     if ctx.executor().kind != "local":
         raise ShkError(
             EXIT_REFUSED,
             "self_only",
             "self requeue requires --executor local inside the allocation",
         )
-    job = os.environ.get("SLURM_JOB_ID", "")
-    if not spec.JOB_ID.fullmatch(job) or "_" in job:
+    physical = os.environ.get("SLURM_JOB_ID", "")
+    if "_" in physical or not spec.JOB_ID.fullmatch(physical):
         raise ShkError(EXIT_REFUSED, "self_only", "no physical current allocation id")
-    return _change("requeue", job, args, ctx)
+    allowed = ",".join(name for name, found in partitions.profiles().items() if found.requeue)
+    return _change("requeue", physical, args, ctx, allowed)
