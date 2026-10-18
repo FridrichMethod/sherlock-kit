@@ -11,7 +11,8 @@ recommended practice.
 ## Source
 
 Read on 2026-10-10 (Pacific) from a Sherlock login node, one attended read-only
-`cat` over the existing control master:
+`cat` over the existing control master. The last-modified dates are the ones
+seen that day; the later re-reads below recorded no modification dates.
 
 | File | Last modified | Topics |
 |---|---|---|
@@ -23,12 +24,12 @@ Read on 2026-10-10 (Pacific) from a Sherlock login node, one attended read-only
 
 Human documentation: <https://www.sherlock.stanford.edu/docs/>. The workstation
 rules were rechecked on 2026-10-11 against the same five site files fetched
-through the attended control master; the cluster rules retain their 2026-10-10
-review. The added workstation sandbox guidance distinguishes local access
-denials from absent SSH masters. The site's Codex guidance still requires
-per-command approval when its sandbox cannot start, without disabling it.
-Re-read the site files before changing the rules and update the review date
-and this record.
+through the attended control master. Since the 2026-10-13 re-read below, both
+rules files carry that review date. The added workstation sandbox guidance
+distinguishes local access denials from absent SSH masters. The site's Codex
+guidance still requires per-command approval when its sandbox cannot start,
+without disabling it. Re-read the site files before changing the rules and
+update the review date and this record.
 
 The lead re-read all five files on sh02-ln04 on 2026-10-12 via the existing
 attended control master before the 0.5.0 wording changes. Site rule 1 explicitly
@@ -46,6 +47,16 @@ therefore retains the task authorization, and the agent tells the user why;
 ambiguous, unrelated, broad or materially destructive cancellation requires
 clarification.
 No job was cancelled to test this wording.
+
+The 0.5.0 rules edits of 2026-10-18 follow live Slurm observations and the
+kit's own behavior, not a new reading of the site files, so the review date
+stays 2026-10-13. They say that `dev` takes no batch jobs (Sherlock rejects
+them, and `shk submit` refuses them offline), that releasing a job held on a
+borrowed partition counts as submitting it, and that the cancellation reason
+goes to the user, because `shk cancel` records none ("record a reason" had no
+place to go). The profile texts also drop wording that the flags and the block
+introduction already state. Re-read the site files before the next rules
+change that touches site policy.
 
 ## Where each site rule lands
 
