@@ -468,7 +468,7 @@ class PendingEvidenceRegressions(Flow):
         self.assertTrue(report["details"]["allocation_evidence_complete"])
         self.assertFalse(report["names"][0]["current"]["cost"]["final"])
 
-    def test_history_gap_marks_all_summaries_nonfinal(self):
+    def test_history_gap_withdraws_only_its_own_final_cost(self):
         uid = os.getuid()
         records = "".join(
             f"{job}|{job}|sherlock|{job}|COMPLETED|owners|60|1|cpu=1,gres/gpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:01:01|{restarts}|0:0|sh01|{uid}|tok|{name}\n"
@@ -477,4 +477,6 @@ class PendingEvidenceRegressions(Flow):
         self.detail_tools(accounting=records)
         report = self.shk("status", "--job-id", "44", "--job-id", "45", "--details")[1]
         self.assertFalse(report["details"]["complete"])
-        self.assertTrue(all(not entry["current"]["cost"]["final"] for entry in report["names"]))
+        self.assertFalse(report["details"]["history_complete"])
+        final = {entry["name"]: entry["current"]["cost"]["final"] for entry in report["names"]}
+        self.assertEqual(final, {"a-complete": True, "z-gap": False})

@@ -384,3 +384,35 @@ class ArrayCountTests(DetailsFlow):
         self.assertEqual((current["array"]["count"], current["tasks"]["completed"]), (None, 3))
         self.assertFalse(current["cost"]["final"])
         self.assertTrue(report["details"]["complete"])
+
+
+class EntryEvidenceTests(DetailsFlow):
+    """D12: one entry's partial evidence does not withdraw another entry's final cost."""
+
+    def test_element_selection_does_not_withdraw_other_final_costs(self):
+        self.canned(
+            queue=[
+                queue("7700_1", "7700", "PENDING", name="legacy"),
+                queue("7700_2", "7700", "PENDING", name="legacy"),
+            ],
+            accounting=[
+                account("7700_0", "7701", "COMPLETED", name="legacy"),
+                account("7700_[1-2]", "7700", "PENDING", name="legacy"),
+                account("7710", "7710", "COMPLETED", name="other"),
+            ],
+            jobs=[
+                record("7700", name="legacy", array="7700", task="1-2"),
+                record("7701", name="legacy", array="7700", task="0", state="COMPLETED"),
+            ],
+        )
+        code, report = self.details("--job-id", "7710", "--job-id", "7700_1")
+        self.assertEqual(code, 0)
+        entries = {entry["name"]: entry["current"] for entry in report["names"]}
+        self.assertTrue(entries["other"]["cost"]["final"])
+        self.assertTrue(entries["other"]["evidence_complete"])
+        self.assertFalse(entries["legacy"]["cost"]["final"])
+        self.assertFalse(entries["legacy"]["evidence_complete"])
+        self.assertEqual(report["details"]["selection"]["partial_array_ids"], ["7700"])
+        self.assertEqual([job["job_id"] for job in report["details"]["jobs"]], ["7700"])
+        self.assertTrue(report["details"]["control_identities_complete"])
+        self.assertFalse(report["details"]["complete"])
