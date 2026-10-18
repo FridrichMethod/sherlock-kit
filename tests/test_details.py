@@ -360,6 +360,32 @@ class JobIdSummaryTests(DetailsFlow):
             (code, report["names"][0]["current"]["anomalies"]), (6, ["unexpected_preemption"])
         )
 
+    def test_preemption_counts_against_the_partition_it_happened_on(self):
+        """Legacy jobs submitted to owners,normal: preempted on owners, then ran on normal."""
+        self.canned(
+            queue=[queue("7521", "7521", "RUNNING", nodes="sh01-01n01", name="legacy")],
+            accounting=[
+                account("7521", "7521", "PREEMPTED", name="legacy", partition="owners", db="9011"),
+                account("7521", "7521", "RUNNING", name="legacy", db="9012", restarts="1"),
+                account("7522_0", "7523", "COMPLETED", name="array.sbatch"),
+                account("7522_1", "7522", "PREEMPTED", name="array.sbatch", partition="owners"),
+                account(
+                    "7522_1",
+                    "7522",
+                    "COMPLETED",
+                    name="array.sbatch",
+                    partition="owners",
+                    db="9021",
+                    restarts="1",
+                ),
+            ],
+            jobs=[record("7521", name="legacy", state="RUNNING")],
+        )
+        code, report = self.details("--job-id", "7521", "--job-id", "7522")
+        self.assertEqual(code, 0)
+        self.assertEqual([e["current"]["anomalies"] for e in report["names"]], [[], []])
+        self.assertEqual([e["current"]["max_restart"] for e in report["names"]], [1, 1])
+
     def test_shk_name_on_an_unknown_partition_exits_6(self):
         self.canned(accounting=[account("7530", "7530", "COMPLETED", partition="mystery")])
         code, report = self.details("--task", "train-a")

@@ -284,6 +284,27 @@ class ResolveTests(unittest.TestCase):
         )
 
 
+class InterruptedPartitionTests(unittest.TestCase):
+    """A preemption or restart is judged on the partition of the attempt it interrupted."""
+
+    def test_preemption_on_owners_before_a_restart_on_normal_is_routine(self):
+        moved = current(
+            [q("500", "RUNNING")],
+            [a("500", "PREEMPTED", elapsed=30, partition="owners"), a("500", "RUNNING", restart=1)],
+        )
+        self.assertEqual((moved["max_restart"], moved["anomalies"]), (1, []))
+
+    def test_restarts_on_a_non_preemptible_partition_stay_unexpected(self):
+        node_fail = current(acct=[a("500", "NODE_FAIL", elapsed=30), a("500", restart=1)])
+        self.assertEqual(node_fail["anomalies"], ["unexpected_preemption"])
+        aged_out = current(acct=[a("500", restart=1)])
+        self.assertEqual(aged_out["anomalies"], ["unexpected_preemption"])
+        back = current(
+            acct=[a("500", "PREEMPTED", elapsed=30), a("500", restart=1, partition="owners")]
+        )
+        self.assertEqual(back["anomalies"], ["unexpected_preemption"])
+
+
 class FinalHistoryTests(unittest.TestCase):
     def test_missing_restart_rows_prevents_final_legacy_cost(self):
         result = current(acct=[a("500", restart=2, partition="owners")])

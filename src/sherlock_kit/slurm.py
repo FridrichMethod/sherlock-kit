@@ -330,7 +330,7 @@ class Job:
     tasks: dict[str, Any]
     exit_codes: dict[str, int]
     max_restart: int
-    preempted: bool
+    interrupted: frozenset[str]  # partitions of preempted, requeued or restarted attempts
     cost: dict[str, Any]
 
     def current(self, anomalies: list[str]) -> dict[str, Any]:
@@ -403,6 +403,28 @@ def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int | Non
     )
 
 
+def _interrupted(rows: list[Row], restarts: dict[int, set[int]]) -> frozenset[str]:
+    """Partitions on which an attempt was preempted, requeued or restarted.
+
+    sacct --duplicates keeps each superseded attempt with the partition it ran on, which for a
+    job submitted to several partitions can differ from the next attempt's. A restart whose
+    earlier attempt is not visible counts against the partition it restarted on.
+    """
+    return frozenset(
+        row.partition
+        for row in rows
+        if row.state in ("PREEMPTED", "REQUEUED")
+        or (
+            row.from_acct
+            and any(
+                row.restart < max(restarts[index])
+                or (row.restart > 0 and row.restart - 1 not in restarts[index])
+                for index in row.tasks
+            )
+        )
+    )
+
+
 def _job(rows: list[Row], known_count: int | None) -> Job:
     """Summary of one base job; known_count is the task count from its spec file, if any.
 
@@ -438,7 +460,7 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
         tasks=tasks,
         exit_codes=dict(sorted(exits.items())),
         max_restart=max(row.restart for row in rows),
-        preempted=any(row.state in ("PREEMPTED", "REQUEUED") for row in rows),
+        interrupted=_interrupted(rows, restarts),
         cost={
             "cpu_seconds": sum(row.cpu_seconds for row in rows),
             "gpu_seconds": sum(row.gpu_seconds for row in rows),
@@ -448,17 +470,19 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
 
 
 def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> list[str]:
-    """invariants: shk names, where one name is one task on a packaged partition."""
-    profile = partitions.profiles().get(job.partition)
+    """invariants: shk names, where one name is one task on a packaged partition.
+
+    A preemption or restart is unexpected on a packaged non-preemptible partition it happened on.
+    """
+    profiles = partitions.profiles()
     found = []
     if invariants and live_jobs > 1:
         found.append("duplicate_live")
     if malformed:
         found.append("malformed_rows")
-    if profile is None:
-        if invariants:
-            found.append("unknown_partition")
-    elif not profile.preemptible and (job.preempted or job.max_restart > 0):
+    if invariants and job.partition not in profiles:
+        found.append("unknown_partition")
+    if any(name in profiles and not profiles[name].preemptible for name in job.interrupted):
         found.append("unexpected_preemption")
     return sorted(found)
 
