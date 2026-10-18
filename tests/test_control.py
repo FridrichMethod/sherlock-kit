@@ -196,6 +196,39 @@ class SelfRequeue(ControlFlow):
             [["listpids", "80"], ["show", "job", "80", "--oneliner"], ["requeue", "80"]],
         )
 
+    def test_free_text_comments_never_retarget_the_requeue(self):
+        # Slurm prints Comment (like SubmitLine and paths) after the real fields, as free text.
+        cases = (
+            ("51", "50", "0", "sweep ArrayTaskId=[0-99]", "50_0"),
+            ("80", None, None, "rerun of ArrayJobId=70 ArrayTaskId=7", "80"),
+        )
+        for job, array, task, comment, target in cases:
+            with self.subTest(job=job):
+                self.calls_file.unlink(missing_ok=True)
+                self.allocation(job, array, task)
+                record = job_record(job, array=array, task=task, token=comment)
+                self.scontrol({
+                    f"listpids {job}": {"out": listpids(job)},
+                    f"show job {job} --oneliner": {"out": record + "\n"},
+                    f"requeue {target}": {},
+                })
+                code, report = self.requeue()
+                self.assertEqual((code, report.get("job_id")), (0, target), report)
+                self.assertEqual(self.calls()[-1], ["requeue", target])
+
+    def test_free_text_comments_never_satisfy_the_policy_checks(self):
+        self.allocation("80")
+        record = job_record(
+            "80", partition="normal", Requeue="0", token="note Partition=owners Requeue=1"
+        )
+        self.scontrol({
+            "listpids 80": {"out": listpids("80")},
+            "show job 80 --oneliner": {"out": record + "\n"},
+        })
+        code, report = self.requeue()
+        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED partition"))
+        self.assertEqual(len(self.calls()), 2)
+
     def test_record_must_be_this_physical_allocation(self):
         # Only the record whose JobId is the PID-verified physical id is ever acted on.
         self.allocation("51", "50", "0")
@@ -338,6 +371,15 @@ class ExactRelease(ControlFlow):
             self.release()
         self.assertEqual(raised.exception.code, 2)
         self.assertEqual(self.calls(), [])
+
+    def test_release_ignores_scontrol_warnings_beside_the_record(self):
+        warning = "scontrol: error: _parse_next_key: Parsing error at unrecognized key: Foo\n"
+        self.scontrol({
+            "show job 44 --oneliner": {"out": self.held(), "err": warning},
+            "release 44": {},
+        })
+        code, report = self.release("--expect-token", "tok-1")
+        self.assertEqual((code, report.get("action")), (0, "released"), report)
 
     def test_release_query_failure_keeps_slurm_evidence(self):
         self.scontrol({
