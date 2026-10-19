@@ -1,9 +1,9 @@
 """shk submit, status, cancel and occupancy, with Slurm as the only record.
 
-Submit and status make one read (data/remote/query.sh: one squeue and one sacct for all
-selected names; status --details and --job-id read through details.py instead) and occupancy
-one squeue read; submit adds one mutation (submit.sh, the script on stdin) and cancel is only
-one mutation (cancel.sh: scancel -u USER --name=NAME). resolve_name() is pure: one name's
+Status makes one read (data/remote/query.sh: one squeue and one sacct for all selected names;
+details.py for --details and --job-id), as do submit (unless --dry-run or --preflight) and
+occupancy (one squeue per partition); submit adds one mutation (submit.sh, the script on
+stdin) and cancel is only one mutation (cancel.sh: scancel -u USER --name=NAME). resolve_name() is pure: one name's
 rows grouped by base job id give new | live | done | failed | stale. live refuses even with
 --resubmit, done and failed need --resubmit REASON, stale (spec files, no rows) submits
 like new. Remote calls print next_check_after (now + 60 s); a lost mutation reply is
