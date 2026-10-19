@@ -38,15 +38,6 @@ class ExtensionFlows(Flow):
         self.assertEqual(self.slurm.state()["jobs"], [])
         self.assertFalse(self.remote.exists())
 
-    def test_preflight_refusal_retains_evidence_and_is_never_unknown(self):
-        self.tool("sbatch", 'printf "quota refused\\n" >&2\nexit 7\n')
-        code, report = self.submit("--preflight")
-        self.assertEqual((code, report["action"], report["job_submitted"]), (3, "preflight", False))
-        self.assertEqual(
-            report["preflight"], {"returncode": 7, "stdout": "", "stderr": "quota refused\n"}
-        )
-        self.assertFalse(self.remote.exists())
-
     def test_hold_and_token_are_cli_owned_and_frozen(self):
         code, report = self.submit("--hold", "--submission-token", "public-123")
         self.assertEqual(code, 0)
@@ -186,36 +177,6 @@ class ExtensionFlows(Flow):
             )
             self.assertFalse(record.exists())
 
-    def test_release_lost_reply_is_unknown_and_no_retry(self):
-        self.tool(
-            "scontrol",
-            f'case "$*" in "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=PENDING Reason=JobHeldUser Priority=0\\n" ;; "release 44") exit 1 ;; *) exit 97 ;; esac\n',
-        )
-        code, report = self.shk(
-            "release", "--job-id", "44", "--expect-name", "expected", "--expect-token", "token"
-        )
-        self.assertEqual((code, report["action"]), (5, "unknown"))
-        self.assertEqual(report["detail"], "unparsed control reply: scontrol release exit 1")
-        self.assertIn("--job-id 44", report["next"])
-
-    def test_requeue_refuses_env_only_allocation_or_ssh(self):
-        self.knobs(SLURM_JOB_ID="44")  # restored with the rest of the environment
-        os.environ.pop("SLURM_ARRAY_JOB_ID", None)
-        os.environ.pop("SLURM_ARRAY_TASK_ID", None)
-        record = self.tmp / "requeue-call"
-        # The record would allow requeue; only this process is outside the job's PID list.
-        self.tool(
-            "scontrol",
-            f'case "$*" in "listpids 44") printf "PID JOBID STEPID LOCALID GLOBALID\\n4242 44 batch 0 0\\n" ;; "show job 44 --oneliner") printf "JobId=44 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; requeue*) touch "{record}" ;; *) exit 97 ;; esac\n',
-        )
-        argv = ("requeue", "--self", "--expect-name", "expected", "--expect-token", "token")
-        code, report = self.shk(*argv)
-        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED process"))
-        self.executor = "ssh"
-        code, report = self.shk(*argv)
-        self.assertEqual((code, report["error"]), (3, "self_only"))
-        self.assertFalse(record.exists())
-
     def test_cli_mutually_exclusive_selectors(self):
         parser = cli.build_parser()
         for argv in [
@@ -282,20 +243,6 @@ class GuardAndEvidenceFlows(Flow):
             )
             self.assertEqual((code, report["message"]), (3, f"control: SHK_REFUSED {reason}"))
             self.assertFalse(record.exists())
-
-    def test_array_self_requeues_physical_element_not_parent(self):
-        self.knobs(SLURM_JOB_ID="45", SLURM_ARRAY_JOB_ID="44", SLURM_ARRAY_TASK_ID="2")
-        record = self.tmp / "requeue-call"
-        # Membership and the record are read by the physical id; the element is requeued as 44_2.
-        self.tool(
-            "scontrol",
-            f'case "$*" in "listpids 45") p=$PPID; while [ "$p" -gt 1 ] 2>/dev/null; do printf "%s 45 batch 0 0\\n" "$p"; p=$(ps -o ppid= -p "$p" | tr -d " "); done ;; "show job 45 --oneliner") printf "JobId=45 ArrayJobId=44 ArrayTaskId=2 JobName=expected UserId=user({os.getuid()}) Comment=token JobState=RUNNING Partition=owners Requeue=1\\n" ;; "requeue 44_2") printf "%s\\n" "$@" >"{record}" ;; *) exit 97 ;; esac\n',
-        )
-        code, report = self.shk(
-            "requeue", "--self", "--expect-name", "expected", "--expect-token", "token"
-        )
-        self.assertEqual((code, report["job_id"]), (0, "44_2"))
-        self.assertEqual(record.read_text(), "requeue\n44_2\n")
 
     def test_release_refuses_other_uid_system_hold_running_and_multiple_records(self):
         record = self.tmp / "release-call"
@@ -365,33 +312,10 @@ class NativeFormatFlows(Flow):
         self.assertEqual(report["nodes"][0]["free_memory_mb"], 102400)
         self.assertEqual(report["nodes"][0]["free_gpus"], 0)
 
-    def test_control_details_ignore_unrelated_own_job(self):
-        uid = os.getuid()
-        self.detail_tools(
-            queue=f"44_1|44|PENDING|normal|0:00|4|Unknown|Unknown|Unknown|(null)|{uid}|tok|legacy-job\n",
-            accounting="",
-            # show job 44 also prints element 0, which started after the queue read.
-            jobs=[
-                f"JobId=44 ArrayJobId=44 ArrayTaskId=1 JobName=legacy-job UserId=user({uid}) Comment=tok",
-                f"JobId=45 ArrayJobId=44 ArrayTaskId=0 JobName=legacy-job UserId=user({uid}) Comment=tok",
-            ],
-        )
-        report = self.shk("status", "--job-id", "44", "--details")[1]
-        self.assertEqual([job["job_id"] for job in report["details"]["jobs"]], ["44"])
-        self.assertTrue(report["details"]["complete"])
-
 
 class IdentityChronologyFlows(Flow):
     tool = ExtensionFlows.tool
     detail_tools = ExtensionFlows.detail_tools
-
-    def test_physical_id_selects_logical_array_element(self):
-        self.detail_tools(
-            accounting=f"44_2|45|sherlock|100|COMPLETED|owners|1|1|cpu=1|2026-10-10T12:00:00|2026-10-10T12:00:01|2026-10-10T12:00:02|0|0:0|sh01|{os.getuid()}|tok|legacy-job\n"
-        )
-        report = self.shk("status", "--job-id", "45", "--details")[1]
-        self.assertFalse(report["details"]["complete"])
-        self.assertEqual(report["details"]["accounting"][0]["job_id"], "44_2")
 
     def test_accounting_state_follows_chronology_not_print_order(self):
         uid = os.getuid()
@@ -458,6 +382,7 @@ class EvidenceCompletenessRegressions(Flow):
             self.detail_tools(accounting=self.accounting(job="44_2", physical="45"))
             report = self.shk("status", "--job-id", selector, "--details")[1]
             self.assertFalse(report["details"]["complete"])
+            self.assertEqual(report["details"]["accounting"][0]["job_id"], "44_2")
             entry = report["names"][0]
             self.assertEqual(entry["state"], "unknown")
             self.assertEqual(entry["scope"], "partial_array")

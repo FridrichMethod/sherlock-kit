@@ -5,7 +5,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,7 +13,7 @@ import unittest
 from pathlib import Path
 from typing import ClassVar
 
-from fakes import ROOT, SRC, install_fake_ssh
+from fakes import ROOT, SRC, in_git, install_fake_ssh
 
 sys.path.insert(0, str(SRC))
 import sherlock_kit
@@ -46,25 +45,6 @@ def git(*args) -> str:
     return subprocess.run(
         ["git", "-C", str(ROOT), *args], capture_output=True, text=True, check=True
     ).stdout
-
-
-def in_git() -> bool:
-    """True when ROOT itself is the top of a git checkout (not, say, an sdist unpacked inside one)."""
-    top = (
-        subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if shutil.which("git")
-        else None
-    )
-    return (
-        top is not None
-        and top.returncode == 0
-        and Path(top.stdout.strip()).resolve() == ROOT.resolve()
-    )
 
 
 def snippets(text: str) -> list[str]:

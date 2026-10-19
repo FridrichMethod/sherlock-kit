@@ -403,6 +403,7 @@ class ExactRelease(ControlFlow):
         self.assertEqual((code, report["action"]), (5, "unknown"))
         self.assertIn("scontrol release exit 1", report["detail"])
         self.assertIn("Access/permission denied for job 44", report["detail"])
+        self.assertIn("--job-id 44", report["next"])
 
 
 class PreflightClassification(ControlFlow):
@@ -446,3 +447,4 @@ class PreflightClassification(ControlFlow):
         code, report = self.submit("--preflight")
         self.assertEqual((code, report["ok"], report["action"]), (3, False, "preflight"))
         self.assertEqual(report["preflight"], {"returncode": 1, "stdout": "", "stderr": stderr})
+        self.assertFalse(self.remote.exists())

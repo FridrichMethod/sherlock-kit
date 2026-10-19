@@ -8,7 +8,6 @@ user agent runs `rustc --version`, and a rustup shim then writes ~/.rustup).
 
 import json
 import os
-import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -16,7 +15,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from fakes import ROOT
+from fakes import ROOT, in_git
 from test_expired_status import assert_expiry_report, expiry_fixture
 
 BUILD_PYTHON = os.environ.get("SHK_BUILD_PYTHON")
@@ -28,25 +27,6 @@ CONTENT = (
     "partitions.json",
 )
 VERSION = "sherlock-kit 0.5.0 "
-
-
-def in_git() -> bool:
-    """True when ROOT itself is the top of a git checkout (not, say, an sdist unpacked inside one)."""
-    top = (
-        subprocess.run(
-            ["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if shutil.which("git")
-        else None
-    )
-    return (
-        top is not None
-        and top.returncode == 0
-        and Path(top.stdout.strip()).resolve() == ROOT.resolve()
-    )
 
 
 class HeadCase(unittest.TestCase):

@@ -22,7 +22,8 @@ runs ``fake_ssh.py`` with the test interpreter, and returns a ``FakeSsh``:
 FAKE_SSH_RECORD plus knobs such as FAKE_SSH_MODE / FAKE_SSH_MASTER /
 FAKE_SSH_HANG, for ``unittest.mock.patch.dict(os.environ, ...)``) and
 ``.calls()`` (every recorded argv[1:], in order). ``SRC`` is the package source
-root for tests that import ``sherlock_kit`` without installing it.
+root for tests that import ``sherlock_kit`` without installing it; ``in_git()`` tells
+whether ``ROOT`` is the top of a git checkout.
 """
 
 import atexit
@@ -138,6 +139,25 @@ class FakeSsh:
         if not self.record.exists():
             return []
         return [json.loads(line) for line in self.record.read_text(encoding="utf-8").splitlines()]
+
+
+def in_git() -> bool:
+    """True when ROOT itself is the top of a git checkout (not, say, an sdist unpacked inside one)."""
+    top = (
+        subprocess.run(
+            ["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if shutil.which("git")
+        else None
+    )
+    return (
+        top is not None
+        and top.returncode == 0
+        and Path(top.stdout.strip()).resolve() == ROOT.resolve()
+    )
 
 
 def install_fake_ssh(directory) -> FakeSsh:

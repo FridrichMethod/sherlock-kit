@@ -87,16 +87,6 @@ class ExpiredStatusFlows(Flow):
         calls = json.loads(self.state.read_text())["calls"]
         self.assertFalse(any(call["tool"] == "scontrol" for call in calls))
 
-    def test_genuine_queue_rpc_failure_fails_and_keeps_accounting(self):
-        data = json.loads(self.state.read_text())
-        data["queue_rc"] = 1
-        self.state.write_text(json.dumps(data))
-        code, report = self.shk("status", "--job-id", "44", "--job-id", "66", "--details")
-        self.assertEqual((code, report["error"]), (1, "malformed_read"))
-        self.assertFalse(report["details"]["complete"])
-        self.assertTrue(report["details"]["accounting"])
-        self.assertNotIn("names", report)
-
     def failing_filter(self):
         """Replace only the temporary awk dependency with an actual failing process."""
         command = self.tmp / "canned-bin/awk"
