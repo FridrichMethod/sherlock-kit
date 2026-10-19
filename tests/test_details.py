@@ -523,6 +523,7 @@ class EntryEvidenceTests(DetailsFlow):
         code, report, found = self.finished_pair(accounting=hetjob, ids=["7724"])
         self.assertEqual(code, 6)
         self.assertEqual(found, [("7720", False, False), ("7721", False, False)])
+        self.assertEqual(report["details"]["missing_job_ids"], ["7724"])
         self.assertEqual([m["source"] for m in report["details"]["malformed"]], ["accounting"])
         self.assertIn("7724+0", [row["job_id"] for row in report["details"]["accounting"]])
         self.assertEqual(
@@ -532,7 +533,7 @@ class EntryEvidenceTests(DetailsFlow):
 
 
 class UnreadableNameTests(DetailsFlow):
-    """A selected name whose rows all fail to parse is not new, as in plain status."""
+    """Unreadable rows of a selected name are its own, as in plain status."""
 
     def test_name_with_only_unreadable_rows_is_exit_1_with_evidence(self):
         self.canned(
@@ -556,6 +557,32 @@ class UnreadableNameTests(DetailsFlow):
         code, report = self.details("--task", "train-a")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
         self.assertTrue(report["message"].startswith("details query incomplete"))
+
+    def test_unreadable_row_withdraws_only_its_own_names_final_cost(self):
+        self.canned(
+            accounting=[
+                account("7740", "7740", "COMPLETED"),
+                account("7741+0", "7741", "COMPLETED"),
+                account("7742", "7742", "COMPLETED", name=spec.job_name("demo", "default", "b")),
+            ]
+        )
+        code, report = self.details("--task", "train-a", "--task", "b")
+        current = {entry["task"]: entry["current"] for entry in report["names"]}
+        self.assertEqual(code, 6)
+        self.assertEqual(
+            (current["train-a"]["anomalies"], current["b"]["anomalies"]), (["malformed_rows"], [])
+        )
+        self.assertEqual(
+            [current[task]["cost"]["final"] for task in ("train-a", "b")], [False, True]
+        )
+        self.assertFalse(report["details"]["complete"])
+
+    def test_requested_id_whose_rows_all_fail_to_parse_is_missing(self):
+        self.canned(accounting=[account("7730+0", "7730", "COMPLETED")])
+        code, report = self.details("--job-id", "7730")
+        self.assertEqual((code, report["names"]), (0, []))
+        self.assertEqual(report["details"]["missing_job_ids"], ["7730"])
+        self.assertFalse(report["details"]["complete"])
 
 
 class WindowTests(DetailsFlow):

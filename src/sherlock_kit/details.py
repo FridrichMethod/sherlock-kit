@@ -163,6 +163,7 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
     by_name: dict[str, list[slurm.Row]] = {}
     malformed: Counter[str | None] = Counter()
     gaps: set[str] = set()
+    seen: set[str] = set()  # job ids of rows that parsed: an unreadable ID stays missing
     for label, columns, lines in (
         ("queue", QUEUE, read.queue),
         ("accounting", ACCOUNTING, read.acct),
@@ -210,16 +211,10 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                         if data[key] in MISSING:
                             legacy[key] = "0"
                 found.append(slurm._row(legacy))
+                seen.update(data[key] for key in ("JobID", "JobIDRaw") if data[key] not in MISSING)
             except ValueError:
                 report["malformed"].append({"source": label, "raw": line})
                 malformed[name] += 1
-    seen = [
-        value
-        for label in ("queue", "accounting")
-        for row in report[label]
-        for value in (row["job_id"], row["job_id_raw"])
-        if value is not None
-    ]
     report["missing_job_ids"] = [
         job for job in ids if not any(_selected(value, [job]) for value in seen)
     ]
@@ -271,8 +266,9 @@ def _summary_evidence(
 ) -> None:
     """Mark history gaps and exact element selections without inventing sibling states.
 
-    Each entry's evidence_complete (and so its final cost) rests on its own job's evidence and
-    on lines that no job can be told apart from; complete covers the whole query.
+    Each entry's evidence_complete (and so its final cost) rests on its own job's evidence, its
+    own name's unreadable rows and lines that no job can be told apart from; complete covers
+    the whole query.
     """
     partial = {
         str(row.base)
@@ -300,7 +296,8 @@ def _summary_evidence(
             current["array"].update(count=None, count_known=False)
             current["tasks"].update(count=None, missing=None)
         current["evidence_complete"] = (
-            not (report["malformed"] or job in gaps or job in partial)
+            not (rows.malformed[None] or rows.malformed[entry["name"]])
+            and not (job in gaps or job in partial)
             and not current["tasks"]["incomplete_history"]
         )
         current["cost"]["final"] = current["cost"]["final"] and current["evidence_complete"]

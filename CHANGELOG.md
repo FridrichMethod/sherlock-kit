@@ -28,7 +28,8 @@
     `current.evidence_complete` covers its own job.
   - A selected name whose rows all fail to parse (for example hetjob ids `N+k`)
     is exit 1 `malformed_read` like plain status, keeping the evidence, instead
-    of `new`.
+    of `new`; a name's unreadable row withdraws only its own final cost. A
+    requested ID without readable rows is listed in `missing_job_ids`.
   - `duplicate_live` and `unknown_partition` apply to `shk.` names only, and
     `unexpected_preemption` is judged on the partition of each interrupted
     attempt, so legacy jobs sharing a script name or running on another group's

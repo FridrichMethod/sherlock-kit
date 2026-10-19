@@ -258,9 +258,11 @@ often share a script name, so `duplicate_live` (across the selected jobs) and
 `current.evidence_complete` covers its own job (accounting identity and
 allocation, control records, restart history, partial scope) and malformed
 lines that no job can be told apart from; `cost.final` requires it, while
-`complete` is the conjunction over the whole query. A requested ID without rows
-has no entry and is listed only in `missing_job_ids`, so a batch's cost is final
-only when that list is empty and every entry has `cost.final`.
+`complete` is the conjunction over the whole query. A requested ID without
+readable rows (a hetjob's `N+k`, for example) has no entry and is listed only in
+`missing_job_ids`, so a batch's cost is final only when that list is empty and
+every entry has `cost.final`. By task or name, an unreadable row withdraws only
+its own name's final cost.
 An exact array-element selection reports `selection.partial_array_ids`, entry
 `scope: partial_array`, unknown whole-array state/count/missing values, and
 nonfinal cost; sibling states cannot be inferred from a selected element.
