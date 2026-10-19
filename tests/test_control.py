@@ -401,7 +401,9 @@ class ExactRelease(ControlFlow):
         })
         code, report = self.release("--expect-token", "tok-1")
         self.assertEqual((code, report["action"]), (5, "unknown"))
-        self.assertIn("scontrol release exit 1", report["detail"])
+        self.assertTrue(
+            report["detail"].startswith("unparsed control reply: scontrol release exit 1")
+        )
         self.assertIn("Access/permission denied for job 44", report["detail"])
         self.assertIn("--job-id 44", report["next"])
 
