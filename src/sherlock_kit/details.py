@@ -179,6 +179,7 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
     ):
         for line in lines:
             values = line.split(SEPARATOR)
+            name: str | None = None
             try:
                 if len(values) != len(columns):
                     raise ValueError("field count")
@@ -189,6 +190,10 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                     _selected(data["JobID"], ids) or (ids and data["JobIDRaw"] in ids)
                 ) or not keep(data["JobName"]):
                     continue
+                # As in plain status, a selected name's unreadable row is its own (so the name is
+                # listed); selected by job id, it belongs to no entry and so to every one.
+                found = by_name.setdefault(data["JobName"], [])
+                name = None if ids else data["JobName"]
                 record = normalized(data, line)
                 report[label].append(record)
                 base = data["JobID"].partition("_")[0]
@@ -214,10 +219,10 @@ def parse(read: Read, uid: int, keep: Any, ids: list[str]) -> tuple[dict[str, An
                     for key in ("ElapsedRaw", "AllocCPUS", "Restarts"):
                         if data[key] in MISSING:
                             legacy[key] = "0"
-                by_name.setdefault(data["JobName"], []).append(slurm._row(legacy))
+                found.append(slurm._row(legacy))
             except ValueError:
                 report["malformed"].append({"source": label, "raw": line})
-                malformed[None] += 1
+                malformed[name] += 1
     seen = [
         value
         for label in ("queue", "accounting")
@@ -393,10 +398,13 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         names = _by_job(rows)
     else:
         listed = selected or [slurm.Selected(name) for name in sorted(rows.by_name)]
-        names = [
-            {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
-            for item in listed
-        ]
+        try:
+            names = [
+                {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
+                for item in listed
+            ]
+        except ShkError as exc:  # a name with rows but none readable, as in plain status
+            return Outcome({**exc.payload(), **meta, "details": report}, exc.code)
     _summary_evidence(names, rows, ids, report, gaps)
     if not ended or codes["squeue"] != 0 or codes["sacct"] != 0:
         # Like plain status: states derived from a failed queue or accounting read could

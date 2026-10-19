@@ -531,6 +531,27 @@ class EntryEvidenceTests(DetailsFlow):
         self.assertEqual(self.finished_pair()[2], [("7720", True, True), ("7721", True, True)])
 
 
+class UnreadableNameTests(DetailsFlow):
+    """A selected name whose rows all fail to parse is not new, as in plain status."""
+
+    def test_name_with_only_unreadable_rows_is_exit_1_with_evidence(self):
+        self.canned(
+            accounting=[
+                account("7730+0", "7730", "COMPLETED"),
+                account("7730+1", "7731", "COMPLETED"),
+            ]
+        )
+        for argv in (("--task", "train-a"), ("--all",)):
+            with self.subTest(argv=argv):
+                code, report = self.details(*argv)
+                self.assertEqual((code, report["error"]), (1, "malformed_read"))
+                self.assertNotIn("names", report)
+                self.assertEqual(len(report["details"]["malformed"]), 2)
+                self.assertIn("7730+0", [row["job_id"] for row in report["details"]["accounting"]])
+        code, report = self.shk("status", "--task", "train-a")
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
+
+
 class WindowTests(DetailsFlow):
     """Sherlock's slurmdbd refuses sacct windows wider than 31 days."""
 

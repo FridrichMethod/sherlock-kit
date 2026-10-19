@@ -26,6 +26,9 @@
     status, keeping the evidence and `details.returncodes` but no name summaries;
     a failed control read alone exits 0 with `complete: false`. Each entry's
     `current.evidence_complete` covers its own job.
+  - A selected name whose rows all fail to parse (for example hetjob ids `N+k`)
+    is exit 1 `malformed_read` like plain status, keeping the evidence, instead
+    of `new`.
   - `duplicate_live` and `unknown_partition` apply to `shk.` names only, and
     `unexpected_preemption` is judged on the partition of each interrupted
     attempt, so legacy jobs sharing a script name or running on another group's
