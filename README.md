@@ -241,11 +241,11 @@ selection are ignored, and each queued physical ID needs its own record.
 `fields` retains original Slurm names and string values (times in UTC),
 including request TRES, Features, TimeLimit, Requeue and array identity. All
 records are restricted to the current UID. `returncodes` holds each tool's
-exit status. A failed `squeue` or `sacct` read exits 1 `malformed_read` like
-plain status, with `details` and without `names`. A failed control read,
-missing requested IDs, malformed rows or missing accounting cost identity make
-`complete` false and retain available facts; a failed control read alone still
-exits 0.
+exit status. A failed `squeue` or `sacct` read, or a selected name none of
+whose rows parse, exits 1 `malformed_read` like plain status, with `details` and
+without `names`. A failed control read, missing requested IDs, malformed rows or
+missing accounting cost identity make `complete` false and retain available
+facts; a failed control read alone still exits 0.
 Accounting rows of jobs that never had an allocation (AllocCPUS 0, ElapsedRaw
 0, no Start and no AllocTRES, in any state such as PENDING or
 `CANCELLED by UID`) are structurally complete, and a terminal one has a final

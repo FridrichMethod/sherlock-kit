@@ -383,6 +383,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         **slurm._cadence(ctx),
     }
     report.update(queried_at=meta["queried_at"], history_window_days=since)
+    unreadable: ShkError | None = None
     if ids:
         names = _by_job(rows)
     else:
@@ -393,7 +394,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
                 for item in listed
             ]
         except ShkError as exc:  # a name with rows but none readable, as in plain status
-            return Outcome({**exc.payload(), **meta, "details": report}, exc.code)
+            names, unreadable = [], exc
     _summary_evidence(names, rows, ids, report, gaps)
     if not ended or codes["squeue"] != 0 or codes["sacct"] != 0:
         # Like plain status: states derived from a failed queue or accounting read could
@@ -409,6 +410,8 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
             },
             EXIT_LOCAL,
         )
+    if unreadable is not None:
+        return Outcome({**unreadable.payload(), **meta, "details": report}, unreadable.code)
     anomaly = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
     payload = {**meta, "names": names, "truncated": False, "details": report}
     return Outcome(payload, EXIT_ANOMALY if anomaly else 0)

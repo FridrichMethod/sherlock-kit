@@ -546,10 +546,16 @@ class UnreadableNameTests(DetailsFlow):
                 code, report = self.details(*argv)
                 self.assertEqual((code, report["error"]), (1, "malformed_read"))
                 self.assertNotIn("names", report)
+                self.assertIn("none of its 2 Slurm rows", report["message"])
                 self.assertEqual(len(report["details"]["malformed"]), 2)
                 self.assertIn("7730+0", [row["job_id"] for row in report["details"]["accounting"]])
+                self.assertIn("selection", report["details"])
         code, report = self.shk("status", "--task", "train-a")
         self.assertEqual((code, report["error"]), (1, "malformed_read"))
+        self.fake.update(sacct_rc=1)  # an incomplete read outranks it, as in plain status
+        code, report = self.details("--task", "train-a")
+        self.assertEqual((code, report["error"]), (1, "malformed_read"))
+        self.assertTrue(report["message"].startswith("details query incomplete"))
 
 
 class WindowTests(DetailsFlow):
