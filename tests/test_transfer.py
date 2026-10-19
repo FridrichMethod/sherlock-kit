@@ -23,7 +23,8 @@ from sherlock_kit import cli, executor, transfer
 from sherlock_kit.errors import ShkError
 
 H, G = "ab" * 32, "cd" * 32
-# The documented job-side command (`cd DIR && find ...`), run here with DIR as "$1".
+# A manifest with "./" paths as plain `find | xargs sha256sum` writes it, run with DIR as "$1"
+# (the skill's own one-liner is tested in test_release_metadata).
 ONE_LINER = (
     "cd \"$1\" && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -print0 "
     "| sort -z | xargs -0 sha256sum > SHA256SUMS"

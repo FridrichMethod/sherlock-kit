@@ -1,7 +1,8 @@
 """shk submit, status, cancel and occupancy, with Slurm as the only record.
 
-Every command makes one read (data/remote/query.sh: one squeue and one sacct for all
-selected names); submit adds one mutation (submit.sh, the script on stdin) and cancel is
+Submit and status make one read (data/remote/query.sh: one squeue and one sacct for all
+selected names; status --details and --job-id read through details.py instead) and occupancy
+one squeue read; submit adds one mutation (submit.sh, the script on stdin) and cancel is only
 one mutation (cancel.sh: scancel -u USER --name=NAME). resolve_name() is pure: one name's
 rows grouped by base job id give new | live | done | failed | stale. live refuses even with
 --resubmit, done and failed need --resubmit REASON, stale (spec files, no rows) submits
@@ -225,7 +226,7 @@ def gpus(tres: str) -> int:
 class Row:
     """One squeue or sacct line of a shk job."""
 
-    key: tuple[Any, ...]  # (from sacct, JobID, Restarts): one row per task and restart
+    key: tuple[Any, ...]  # from sacct, JobID, Restarts, Cluster, DBIndex, JobIDRaw, Start, End
     base: int  # the base job id (the array id for array tasks)
     tasks: tuple[int, ...]  # task indices covered; an aggregate covers several
     from_acct: bool
@@ -680,7 +681,7 @@ def _register_occupancy(subparsers: Subparsers) -> None:
 
 
 def register(subparsers: Subparsers) -> None:
-    """Add the submit, status, cancel and occupancy commands."""
+    """Add submit, status, cancel and occupancy, then resources, release and requeue."""
     _register_submit(subparsers)
     _register_status(subparsers)
     _register_cancel(subparsers)

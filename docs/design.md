@@ -16,7 +16,7 @@ script does) stays with the user, the site rules and the project.
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
 | `partitions.py` | the packaged partition table and the generated rules block |
 | `doctor.py` | read-only checks |
-| `spec.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv; `submit`, `status`, `cancel`, `occupancy` |
+| `spec.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv; `submit`, `status`, `cancel`, `occupancy`, `resources`, `release`, `requeue` |
 | `allocation.py` | local worker PID and allocation/step evidence, strict field parsing and actual resources |
 | `transfer.py` | `push`, `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
@@ -267,8 +267,8 @@ the same.
   by a file.
 - A master can die between the check and the dial; `-oProxyCommand=false` makes
   that dial fail instead of logging in, at most once per command.
-- The remote side trusts `sh`, `sha256sum`, `squeue`, `sacct` and `sbatch` on the
-  login shell's `PATH`.
+- The remote side trusts `sh`, `sha256sum` and the Slurm clients (`squeue`,
+  `sacct`, `sbatch`, `scancel`, `scontrol`) on the login shell's `PATH`.
 - Provenance lives in the run directory and is purged with scratch.
 
 ## Rules, skill and delivery
