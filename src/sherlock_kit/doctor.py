@@ -1,9 +1,9 @@
 """`shk doctor [--remote]`: read-only checks; without --remote nothing is dialled.
 
-Python, ssh and rsync, the configuration, the executor, leftover SHERLOCK_KIT_* variables and
-`ssh -O check` of both hosts; --remote adds data/remote/doctor.sh (uname -n, id -un, the Slurm
-tools, sha256sum, /etc/agents/AGENTS.md). Exit 0 healthy, 1 problem, 4 unreachable (also: no
-usable control master with the ssh executor; a missing data master is only a warning).
+Python, ssh and rsync, the configuration, the executor and `ssh -O check` of both hosts; --remote
+adds data/remote/doctor.sh (uname -n, id -un, the Slurm tools, sha256sum, /etc/agents/AGENTS.md).
+Exit 0 healthy, 1 problem, 4 unreachable (also: no usable control master with the ssh executor; a
+missing data master is only a warning).
 """
 
 from __future__ import annotations
@@ -122,12 +122,6 @@ def handle(args: argparse.Namespace, ctx: Context) -> Outcome:
         report["executor"] = executor.kind
     except ShkError as exc:
         problems.append(exc.message)
-    leftovers = sorted(name for name in ctx.env if name.startswith("SHERLOCK_KIT_"))
-    if leftovers:
-        warnings.append(
-            f"obsolete 0.3 variables set: {', '.join(leftovers)}; "
-            "remove them from profiles/launchers"
-        )
     if report["executor"] == "ssh":  # a missing ssh shows up as the ssh_missing master state
         report["masters"] = _masters(found, problems, warnings)
     code = EXIT_UNREACHABLE if report["masters"].get("control", "running") != "running" else EXIT_OK

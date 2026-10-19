@@ -103,6 +103,8 @@ def _elapsed(value: str) -> int | None:
 
 def normalized(values: dict[str, str], raw: str) -> dict[str, Any]:
     """The public record contract, with absent evidence represented by null."""
+    from sherlock_kit.slurm import TERMINAL
+
     record: dict[str, Any] = dict.fromkeys(NORMALIZED.values())
     for key, label in NORMALIZED.items():
         value = values.get(key, "")
@@ -114,25 +116,13 @@ def normalized(values: dict[str, str], raw: str) -> dict[str, Any]:
             record[label] = value + "Z" if "T" in value and not value.endswith("Z") else value
         else:
             record[label] = value
-    if "Elapsed" in values:
+    if "Elapsed" in values:  # a squeue row
         record["elapsed_seconds"] = _elapsed(values["Elapsed"])
-    # squeue prints requested CPUs, and a placeholder start, for a job without nodes (pending,
-    # or cancelled before any allocation); pending end times are estimates.
-    if "Elapsed" in values:
+        # squeue prints requested CPUs, and a placeholder start, for a job without nodes
+        # (pending, or cancelled before any allocation); pending end times are estimates.
         if values.get("State") == "PENDING" or values.get("NodeList", "") in MISSING:
             record.update(allocated_cpus=None, started_at=None)
-        if values.get("State") not in {
-            "COMPLETED",
-            "FAILED",
-            "CANCELLED",
-            "TIMEOUT",
-            "PREEMPTED",
-            "NODE_FAIL",
-            "OUT_OF_MEMORY",
-            "BOOT_FAIL",
-            "DEADLINE",
-            "REVOKED",
-        }:
+        if values.get("State") not in TERMINAL:
             record["ended_at"] = None
     record["raw"] = raw
     return record
@@ -370,8 +360,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     lines = result.stdout.splitlines()
     ended, codes = "SHK_END" in lines, _returncodes(lines)
     # Partial tool evidence stays reviewable: parse it all, then refuse to summarize below.
-    safe = result.stdout + "\nSHK_RC squeue 0\nSHK_RC sacct 0\nSHK_END\n"
-    read = slurm.parse_read(safe, ("squeue", "sacct"))
+    read = slurm.parse_read(result.stdout + "\nSHK_END\n", ())
     uid_line = [line.removeprefix("SHK_UID ") for line in lines if line.startswith("SHK_UID ")]
     if len(uid_line) != 1 or not uid_line[0].isdecimal():
         raise ShkError(EXIT_LOCAL, "malformed_read", "details query has no verified current UID")
@@ -421,7 +410,5 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
             EXIT_LOCAL,
         )
     anomaly = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
-    payload: dict[str, Any] = {**meta, "names": names, "truncated": False}
-    if args.details or ids:
-        payload["details"] = report
+    payload = {**meta, "names": names, "truncated": False, "details": report}
     return Outcome(payload, EXIT_ANOMALY if anomaly else 0)

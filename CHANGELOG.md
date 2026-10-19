@@ -115,6 +115,9 @@
 - `docs/validation/observed-slurm.md` records the 2026-10-18 live verification on
   Slurm 25.11.8 and corrects the old DTN note.
 
+- `shk doctor` no longer warns about leftover 0.3 `SHERLOCK_KIT_*` variables, and
+  dead or duplicated code is removed.
+
 ## 0.4.1
 
 - Recovery commands after an unknown submit or cancel outcome preserve the

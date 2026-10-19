@@ -242,7 +242,6 @@ class LocalExecutor:
     """Runs argv directly on Sherlock (a login node or inside a job)."""
 
     kind = "local"
-    host: str | None = None
 
     def __init__(self, *, command_timeout: float = 60) -> None:
         """Use command_timeout seconds unless a run passes its own timeout."""

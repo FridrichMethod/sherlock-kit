@@ -21,7 +21,6 @@ if TYPE_CHECKING:
 HOST = re.compile(r"[A-Za-z0-9_.-]+")
 HOSTLIST = re.compile(r"[A-Za-z0-9_.\[\],-]+")
 NULL = {"", "(null)", "N/A", "None", "Unknown"}
-ACTUAL_NULL = NULL - {"Unknown"}
 # The ids Slurm prints for a record: a job is selected by its physical JobId or by
 # ArrayJobId_ArrayTaskId, a step by StepId (A_T.S for an array element), a node by NodeName.
 IDENTITIES: dict[str, Callable[[dict[str, str]], tuple[str | None, ...]]] = {
@@ -105,7 +104,7 @@ def tres_counts(value: str | None) -> tuple[int | None, int | None]:
     """Normalize actual CPU/GPU TRES, including totals plus typed GPU subsets."""
     if value is not None and value.lower() == "unknown":
         raise invalid("unknown actual allocation TRES")
-    if value is None or value in ACTUAL_NULL:
+    if value is None or value in NULL:
         return None, None
     parsed: dict[str, str] = {}
     for entry in value.split(","):

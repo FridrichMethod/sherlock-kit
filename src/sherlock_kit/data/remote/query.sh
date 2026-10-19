@@ -8,7 +8,7 @@ done
 mode=$1 since=$2 occ=$3
 shift 3
 u=$(id -un)
-printf "SHK_USER %s\nSHK_HOST %s\nSHK_NOW %s\n" "$u" "$(uname -n)" "$(date -u +%s)"
+printf "SHK_USER %s\nSHK_HOST %s\n" "$u" "$(uname -n)"
 
 specs() { # NAME RUN_DIR: count the spec files, print the newest NAME.<jobid>.json
     n=0 best=0

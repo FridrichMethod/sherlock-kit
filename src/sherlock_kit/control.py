@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from sherlock_kit.cli import Context
     from sherlock_kit.slurm import Subparsers
 
-TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 # Slurm client messages for a controller that did not answer: the read failed, nothing decided.
 TRANSIENT = re.compile(
     r"Unable to contact slurm controller|Socket timed out on send/recv operation"
@@ -106,7 +105,7 @@ def _change(action: str, job: str, args: argparse.Namespace, ctx: Context, *extr
     from sherlock_kit.slurm import _cadence, _mutate, _unknown
 
     token = args.expect_token
-    if not args.expect_name or (token is not None and not TOKEN.fullmatch(token)):
+    if not args.expect_name or (token is not None and not spec.TOKEN.fullmatch(token)):
         raise ShkError(
             EXIT_LOCAL,
             "spec_invalid",

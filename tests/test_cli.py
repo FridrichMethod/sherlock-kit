@@ -229,11 +229,10 @@ class DoctorTests(TempCase):
 
     def test_local_doctor_only_queries_master_sockets(self):
         checks = [[*CHECK, "sherlock-plain"], [*CHECK, "sherlock-dtn"]]
-        code, report = self.doctor("--executor", "ssh", "doctor", SHERLOCK_KIT_STATE_ROOT="/old")
+        code, report = self.doctor("--executor", "ssh", "doctor")
         self.assertEqual((code, report["ok"], report["problems"]), (0, True, []))
         self.assertEqual(report["masters"], {"control": "running", "data": "running"})
         self.assertEqual(self.fake.calls(), checks)
-        self.assertTrue(any("SHERLOCK_KIT_STATE_ROOT" in w for w in report["warnings"]))
         self.assertRegex(report["version"] + "\n", VERSION)
         code, report = self.doctor("--executor", "ssh", "doctor", FAKE_SSH_MASTER="none")
         self.assertEqual((code, report["ok"]), (4, False))

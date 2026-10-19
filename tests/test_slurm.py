@@ -13,9 +13,8 @@ N = "shk.demo.train-a.0123456789"
 READ = (
     "\n".join([
         "banner from a login shell",
-        "SHK_USER zyli",
+        "SHK_USER demo",
         "SHK_HOST sh02-ln04.stanford.edu",
-        "SHK_NOW 1",
         "SHK_Q|1|PENDING|normal|n",
         "SHK_A|x",
         "SHK_S|n|2",
@@ -103,7 +102,7 @@ class ParsingTests(unittest.TestCase):
 
     def test_read_is_complete_only_with_end_and_every_tool(self):
         read = slurm.parse_read(READ, ("squeue", "sacct"))
-        self.assertEqual((read.user, read.host), ("zyli", "sh02-ln04.stanford.edu"))
+        self.assertEqual((read.user, read.host), ("demo", "sh02-ln04.stanford.edu"))
         self.assertEqual((read.queue, read.acct), (["1|PENDING|normal|n"], ["x"]))
         self.assertEqual((read.occupancy, read.spec_files), ({"owners": ["row"]}, {"n": 2}))
         self.assertEqual(
