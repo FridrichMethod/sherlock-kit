@@ -91,6 +91,16 @@
   the reason for a cancellation goes to the user. Array grammar is `N[%M]`
   throughout. The skill documents allocation, release, requeue and resources.
 
+- Both rules files are reviewed against all five site files as of 2026-10-18.
+  They carry the site's new ban on SSH servers on any node (rule 5, added
+  2026-10-13) and summarize the numbered rules more fully: `sherlock-plain` is a
+  login node for light commands, intensive job I/O stays off the home
+  filesystems, no help in extending scratch lifetime, no shell polling loops,
+  large or shared environments in `$GROUP_HOME`, no probing of shared
+  infrastructure, only one's own or shared directories (never merely readable
+  ones) and one's own processes, and no `--resubmit` after a failure before its
+  cause is found.
+
 - The offline suite stays hermetic inside Slurm jobs: importing `tests/fakes`
   removes inherited `SLURM_*`, `SBATCH_*`, `SQUEUE_*`, `SACCT_*`, `SCANCEL_*`,
   `SHK_*` and `SHERLOCK_KIT_*` variables and exported shell functions, puts

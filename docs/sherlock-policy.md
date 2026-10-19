@@ -10,21 +10,22 @@ recommended practice.
 
 ## Source
 
-Read on 2026-10-10 (Pacific) from a Sherlock login node, one attended read-only
-`cat` over the existing control master. The last-modified dates are the ones
-seen that day; the later re-reads below recorded no modification dates.
+First read on 2026-10-10 (Pacific) from a Sherlock login node, one attended
+read-only `cat` over the existing control master. The last-modified dates are
+the ones listed at the full re-read of 2026-10-18 below; the re-reads between
+recorded none.
 
 | File | Last modified | Topics |
 |---|---|---|
-| `/etc/agents/AGENTS.md` | 2026-10-09 | conditions of use, where you are, numbered rules 1-11, support |
-| `/etc/agents/policy.md` | 2026-09-28 | data risk, sanctions, prohibited mechanisms, unattended sessions, processes, agent notes |
+| `/etc/agents/AGENTS.md` | 2026-10-13 | conditions of use, where you are, numbered rules 1-11, support |
+| `/etc/agents/policy.md` | 2026-10-13 | data risk, sanctions, prohibited mechanisms, unattended sessions, processes, agent notes |
 | `/etc/agents/slurm.md` | 2026-10-01 | login and compute nodes, discovery, requests, monitoring, arrays, Slurm outages |
 | `/etc/agents/software.md` | 2026-10-09 | modules, preference order, Python environments, compiling, licenses |
 | `/etc/agents/storage.md` | 2026-10-06 | filesystems, purge, I/O patterns, transfers, usage |
 
 Human documentation: <https://www.sherlock.stanford.edu/docs/>. The workstation
 rules were rechecked on 2026-10-11 against the same five site files fetched
-through the attended control master. Since the 2026-10-13 re-read below, both
+through the attended control master. Since the 2026-10-18 re-read below, both
 rules files carry that review date. The added workstation sandbox guidance
 distinguishes local access denials from absent SSH masters. The site's Codex
 guidance still requires per-command approval when its sandbox cannot start,
@@ -55,25 +56,64 @@ them, and `shk submit` refuses them offline), that releasing a job held on a
 borrowed partition counts as submitting it, and that the cancellation reason
 goes to the user, because `shk cancel` records none ("record a reason" had no
 place to go). The profile texts also drop wording that the flags and the block
-introduction already state. Re-read the site files before the next rules
-change that touches site policy.
+introduction already state.
+
+The lead re-read all five site files on 2026-10-18 through the attended control
+master and listed their modification dates. `AGENTS.md` and `policy.md` changed
+on 2026-10-13. Against the copies read at 2026-10-11 04:26 UTC (2026-10-10
+Pacific), the only change in `AGENTS.md` is in rule 5: no SSH server of any kind on any node, login or compute, under any name or
+port, bound to localhost, inside a job or a container, or attended; a tool that
+starts one is disabled or not used, and running one can lead to suspension.
+`policy.md` repeats it under Sanctions and Processes and cleanup and drops "SSH
+daemons" from its list of unattended mechanisms. Neither rules file carried the
+ban, so the review of 2026-10-13 either preceded the change or missed it. Four
+readers compared the site files with both rules files, and two refuters checked
+each finding. Within the 7 KiB cap the rules files now say:
+
+- Both files carry the SSH-server ban; the workstation file also says never to
+  share credentials or sessions.
+- Workstation: `sherlock-plain` is a login node for light commands; limits and
+  features come from `sh_part` and `sh_node_feat` in a login shell (a
+  non-login ssh command does not find them); intensive job I/O stays off
+  `$HOME` and `$GROUP_HOME`; the agent works only with its own processes; a
+  `--resubmit` reason without a diagnosis is only for a job that did not fail.
+- Cluster: on login nodes no listener for anything but the user's own
+  interactive tools and no model, web or API serving (the site allows the
+  former and forbids the latter); no `watch` or shell polling loops; large or
+  shared environments go in `$GROUP_HOME`; no probing of shared infrastructure;
+  only one's own or shared directories, never merely readable ones; inspect and
+  stop only one's own processes, and never stop a job by killing its processes.
+- Both: no helping to extend scratch lifetime (the site also forbids
+  recommending it); the cluster file names DTN and Globus transfers rather than
+  all external transfers, since fetching sources from Sherlock is allowed.
+
+The additions are paid for by shorter wording and by dropping text found
+elsewhere: the `sacct` field list (slurm.md), `shk doctor --remote` and the
+read-only note on `shk doctor` in the cluster file (both in the skill), and the
+SIGTERM remark, whose evidence stays in docs/validation/observed-slurm.md while
+"checkpoint periodically" remains. Left out on purpose, as before: rule 11's
+preference for fewer, larger files; rule 3's naming of filesystems by variable
+in the workstation file (`remote_root` takes a literal absolute path, a kit
+choice); "alternate login services" in the workstation list; and recommended
+practice generally. The review date is now 2026-10-18. Re-read the site files
+before the next rules change that touches site policy.
 
 ## Where each site rule lands
 
 | Site rule | Workstation file | Cluster file |
 |---|---|---|
-| 1 Login nodes | Connection (bounded calls only) | Where you are |
+| 1 Login nodes | Connection (light, bounded calls only) | Login nodes |
 | 2 Job requests | Jobs | Slurm |
 | 3 Storage defaults | Data | Filesystems |
 | 4 Purge | Data | Filesystems |
 | 5 Access controls | Connection | Where you are |
-| 6 Authorized access only | Data | Filesystems, Slurm |
+| 6 Authorized access only | Data, Jobs | Filesystems, Slurm |
 | 7 Data risk | Data | Filesystems |
 | 8 Software installs | n/a | Software |
 | 9 System configuration | n/a | Software |
 | 10 Scheduler etiquette | Jobs | Slurm |
 | 11 Filesystem etiquette | n/a | Filesystems |
-| Support, agent notes | n/a | Where you are |
+| Support, agent notes | Connection (Codex sandbox) | Where you are, Login nodes |
 
 Corrections against the 0.3 policy text: purge evasion is termination of the
 account on the first occurrence (it said suspension), and no agent module is
@@ -99,7 +139,13 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   submission token sets it) or start a heterogeneous job.
 - A live job name is never submitted twice; a finished one only with
   `--resubmit REASON`.
-- `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; tell the user why, since `shk cancel` records no reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results.
+- `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; tell the user why, since `shk cancel` records no reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results. Never cancel all of the user's jobs (`scancel -u $USER`), although the site does not forbid it.
+- Remote work goes only through `shk` or bounded OpenSSH over the user's
+  control masters, and jobs only through `shk submit`, never raw `sbatch` over
+  ssh.
+- Jobs on `owners` must checkpoint periodically (the site accepts checkpoint or
+  requeue); live requeues gave no usable SIGTERM window
+  (docs/validation/observed-slurm.md).
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.
