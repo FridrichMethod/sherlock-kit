@@ -45,7 +45,7 @@ jobs:
       - name: Create isolated packaging interpreter
         run: |
           python -m venv .venv-build
-          .venv-build/bin/python -m pip install 'setuptools>=80' wheel
+          .venv-build/bin/python -m pip install 'setuptools>=80'
           echo "SHK_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
       - name: Run full offline suite (skips fail under CI)
         run: python tests/run_suite.py

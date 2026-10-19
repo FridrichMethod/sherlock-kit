@@ -1,7 +1,7 @@
 """Packaging from committed HEAD: sdist, wheel, wheel and editable installs, bin/shk via symlinks.
 
-The build steps need SHK_BUILD_PYTHON, an interpreter with setuptools>=80 and wheel, used
-read-only with --no-build-isolation and no index, so nothing touches the network. Every
+The build steps need SHK_BUILD_PYTHON, an interpreter with setuptools>=80, used read-only
+with --no-build-isolation and no index, so nothing touches the network. Every
 command runs with a temporary HOME; no shk command may change it (pip itself may: its
 user agent runs `rustc --version`, and a rustup shim then writes ~/.rustup).
 """
@@ -123,9 +123,7 @@ class BinShkTests(HeadCase):
 
 
 @unittest.skipUnless(in_git(), "needs a git checkout to archive HEAD")
-@unittest.skipUnless(
-    BUILD_PYTHON, "set SHK_BUILD_PYTHON to an interpreter with setuptools>=80 and wheel"
-)
+@unittest.skipUnless(BUILD_PYTHON, "set SHK_BUILD_PYTHON to an interpreter with setuptools>=80")
 class BuildTests(HeadCase):
     def build(self) -> tuple[Path, Path]:
         dist = self.tmp / "dist"

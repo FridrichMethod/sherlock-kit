@@ -116,7 +116,9 @@
   Slurm 25.11.8 and corrects the old DTN note.
 
 - `shk doctor` no longer warns about leftover 0.3 `SHERLOCK_KIT_*` variables, and
-  dead or duplicated code is removed.
+  dead or duplicated code is removed. Building needs only `setuptools>=80` (no
+  `wheel`) and no longer warns that the packaged data directories are absent from
+  `packages`.
 
 ## 0.4.1
 

@@ -2,9 +2,9 @@
 
 When CI or SHK_REQUIRE_ALL is set (to anything but "", "0", "false" or "no"),
 any skipped test fails the run, so missing rsync, dash, ssh or packaging
-prerequisites cannot pass silently (shellcheck runs in pre-commit). SHK_BUILD_PYTHON (an interpreter with
-setuptools>=80 and wheel) is inherited by the packaging tests; when set it must
-name an existing file. A file entry point keeps multiprocessing spawn workers
+prerequisites cannot pass silently (shellcheck runs in pre-commit). SHK_BUILD_PYTHON (an
+interpreter with setuptools>=80) is inherited by the packaging tests; when set it must name an
+existing file. A file entry point keeps multiprocessing spawn workers
 from re-running the suite on import.
 
 Importing fakes makes the run hermetic (see tests/fakes/__init__.py); a TMPDIR that

@@ -42,7 +42,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/pre-commit install
 python3 -m venv .venv-build
-.venv-build/bin/python -m pip install 'setuptools>=80' wheel
+.venv-build/bin/python -m pip install 'setuptools>=80'
 ```
 
 Before each commit (the installed hook runs the same checks on staged files):
