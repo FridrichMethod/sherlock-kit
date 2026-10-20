@@ -90,7 +90,7 @@ shk doctor [--remote]
 shk rules {workstation,cluster}
 shk install-skill --project DIR [--client claude|codex|all] [--rules workstation|cluster] [--check] [--force]
 shk occupancy --partition P [--partition P ...]
-shk submit --task T [--campaign C] --script FILE --partition P --cpus N --mem SIZE --time DUR
+shk submit --task T [--campaign C] --script FILE --partition P --cpus N [--cpu-thread-budget [N]] --mem SIZE --time DUR
            [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--signal S] [--requeue|--no-requeue]
            [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--submission-token TOKEN] [--hold] [--dry-run|--preflight]
 shk resources --partition P [--partition P ...]
@@ -301,6 +301,7 @@ Unknown keys are errors; nothing secret belongs here.
 | `control_host` | `sherlock-plain` | every remote call |
 | `data_host` | `sherlock-dtn` | `push`, `pull` |
 | `connect_timeout`, `command_timeout`, `transfer_timeout` | 15, 60, 3600 s | ssh and rsync |
+| `cpu_thread_budget` | none (off); positive integer, at most `--cpus` | `submit` numerical thread defaults per task, overridden by `--cpu-thread-budget`; see [CPU thread budgets](docs/cpu-threads.md) |
 | `[tool.sherlock-kit.validators]` | none; `NAME = ["argv", ...]` | `pull --validate NAME` runs argv plus the stage directory, only from a configuration file you own |
 
 `doctor`, `rules` and `occupancy` work without a configuration. On Sherlock
@@ -347,6 +348,7 @@ The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` an
 wheel and editable-install checks, which build committed `HEAD`. See
 [CONTRIBUTING.md](CONTRIBUTING.md), [docs/design.md](docs/design.md),
 [docs/sherlock-policy.md](docs/sherlock-policy.md),
+[docs/cpu-threads.md](docs/cpu-threads.md),
 [observed Slurm behavior](docs/validation/observed-slurm.md) and
 [CHANGELOG.md](CHANGELOG.md).
 
