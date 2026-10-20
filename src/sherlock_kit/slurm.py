@@ -589,6 +589,14 @@ def _register_submit(subparsers: Subparsers) -> None:
     parser.add_argument("--script", required=True, help="job script, at most 1 MiB")
     parser.add_argument("--partition", required=True)
     parser.add_argument("--cpus", type=int, required=True, help="CPUs per task")
+    parser.add_argument(
+        "--cpu-thread-budget",
+        type=int,
+        nargs="?",
+        const=1,
+        metavar="N",
+        help="opt-in host/container numerical thread defaults per task (default 1, at most --cpus)",
+    )
     parser.add_argument("--mem", required=True, help="16G or 16000M")
     parser.add_argument("--time", required=True, help="2h, 90m or H:MM:SS")
     parser.add_argument("--gpus", type=int, default=0)
