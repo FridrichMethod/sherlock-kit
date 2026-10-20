@@ -27,7 +27,8 @@ def policy(budget: int | None, cpus: int) -> dict[str, Any] | None:
         raise ShkError(
             EXIT_LOCAL,
             "spec_invalid",
-            "--cpu-thread-budget must be an integer from 1 through --cpus (per task)",
+            "the CPU thread budget (--cpu-thread-budget or cpu_thread_budget) must be an integer"
+            " from 1 through --cpus (per task)",
         )
     values = dict.fromkeys(NUMERICAL, str(budget))
     values.update(OMP_MAX_ACTIVE_LEVELS="1", OMP_DYNAMIC="FALSE", MKL_DYNAMIC="FALSE")
