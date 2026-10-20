@@ -62,6 +62,18 @@ class CpuThreadTests(Case):
             with self.subTest(config=bad), self.assertRaises(ShkError):
                 config.parse({"cpu_thread_budget": bad})
 
+    def test_configured_budget_above_cpus_names_both_sources(self):
+        self.cfg = config.parse({
+            "project": "demo",
+            "remote_root": "/scratch/u/demo",
+            "cpu_thread_budget": 3,
+        })
+        with self.assertRaises(ShkError) as caught:
+            self.build()
+        self.assertEqual(caught.exception.token, "spec_invalid")
+        self.assertIn("cpu_thread_budget", caught.exception.message)
+        self.assertIn("--cpu-thread-budget", caught.exception.message)
+
     def test_real_submit_shell_executes_guard_before_python_payload_and_cleanenv(self):
         """No Slurm runs: real packaged shell, fake sbatch, real Python children."""
         observed = self.tmp / "observed.json"
