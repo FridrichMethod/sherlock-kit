@@ -10,6 +10,7 @@ ProjectConfig is frozen and DEFAULTS is the no-config value. Keys (no secrets):
   control_host "sherlock-plain", data_host "sherlock-dtn": distinct OpenSSH aliases
   connect_timeout 15, command_timeout 60, transfer_timeout 3600: positive integer seconds
   [validators] NAME = ["argv", ...]: `pull --validate NAME` runs argv + [stage dir]
+  cpu_thread_budget: optional positive per-task numerical thread defaults for submit
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ PATTERNS = {
     "data_host": HOST,
 }
 TIMEOUTS = ("connect_timeout", "command_timeout", "transfer_timeout")
-KEYS = frozenset({*PATTERNS, *TIMEOUTS, "validators"})
+KEYS = frozenset({*PATTERNS, *TIMEOUTS, "validators", "cpu_thread_budget"})
 
 Invalid = Callable[[str], ShkError]
 
@@ -50,6 +51,7 @@ class ProjectConfig:
     connect_timeout: int = 15
     command_timeout: int = 60
     transfer_timeout: int = 3600
+    cpu_thread_budget: int | None = None
     validators: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: MappingProxyType({}))
 
     @property
@@ -72,6 +74,10 @@ def _validators(bad: Invalid, table: object) -> Mapping[str, tuple[str, ...]]:
 
 
 def _value(bad: Invalid, key: str, value: object) -> Any:
+    if key == "cpu_thread_budget":
+        if type(value) is not int or value < 1:
+            raise bad("cpu_thread_budget must be a positive integer (omit to disable)")
+        return value
     if key in TIMEOUTS:
         if type(value) is not int or value <= 0:
             raise bad(f"{key} must be a positive integer")

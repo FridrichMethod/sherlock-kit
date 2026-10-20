@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sherlock_kit import partitions, version_line
+from sherlock_kit import cpu_threads, partitions, version_line
 from sherlock_kit.config import ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, ShkError
 
@@ -354,6 +354,10 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
             hint="use sh_dev or salloc there, or submit to a batch partition such as normal",
         )
     wanted = resources(args, profile)
+    thread_budget = getattr(args, "cpu_thread_budget", None)
+    thread_policy = cpu_threads.policy(
+        config.cpu_thread_budget if thread_budget is None else thread_budget, wanted.cpus
+    )
     run = run_directory(args.run_dir, config, name)
     script = read_script(args.script, owns_comment=args.submission_token is not None)
     if profile.borrowed and not args.courtesy_ack:
@@ -369,6 +373,7 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     if hold and token is None:
         raise _invalid("--hold needs --submission-token, which shk release checks")
     argv, digest = sbatch_argv(name, run, wanted, token, hold), hashlib.sha256(script).hexdigest()
+    argv = cpu_threads.command(argv, thread_policy)
     document = {
         "schema": 1,
         "submission_token": token,
@@ -386,4 +391,6 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
         "git": git_state(config.root),
         "created_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if thread_policy is not None:
+        document["cpu_thread_policy"] = thread_policy
     return Spec(name, run, argv, script, digest, profile, document)

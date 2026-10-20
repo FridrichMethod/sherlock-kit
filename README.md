@@ -14,6 +14,12 @@ script does or certify scientific results. The operating rules for agents ship
 with the package (`shk rules workstation`, `shk rules cluster`); Sherlock's own
 `/etc/agents/AGENTS.md` takes precedence over them.
 
+Submission can opt in to explicit host/container numerical thread defaults with
+`--cpu-thread-budget [N]` or project `cpu_thread_budget = 1`; the default when the
+flag has no value is 1. This does not cap OS thread creation or replace Slurm CPU
+isolation. See [CPU thread budgets](docs/cpu-threads.md) for provenance, limits and
+controller compatibility.
+
 ## Install
 
 Install from a release tag, as below; `main` can be ahead of the latest release.
