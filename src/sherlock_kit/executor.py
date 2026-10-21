@@ -2,7 +2,8 @@ r"""Run argv on Sherlock: OpenSSH from a workstation, or locally on Sherlock (fr
 
 Result.status is complete, failed (a read exited nonzero), unknown (a mutation exited nonzero
 or timed out after dispatch: never retry it blind), auth_required or unavailable (ssh exit 255
-with or without authentication text, or no ssh) or timeout (a read). Banner lines are dropped,
+with or without authentication text, or no ssh) or timeout (a read). Banner lines leave the
+parsed output and go to stderr once each (site rule 12: never filter out instruction reminders),
 and a timeout or an interrupt kills the child's whole process group.
 
 Every ssh dial follows `ssh -O check -oBatchMode=yes HOST`, which only asks the local control
@@ -25,6 +26,7 @@ import shlex
 import signal
 import socket
 import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -35,6 +37,7 @@ from sherlock_kit.config import DEFAULTS, ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNKNOWN, EXIT_UNREACHABLE, ShkError
 
 BANNER = "Automated tools: read and follow /etc/agents/AGENTS.md"
+_reminded: set[str] = set()  # banner lines this process already wrote to stderr
 AUTH_TEXT = (
     "permission denied",
     "authentication failed",
@@ -75,9 +78,16 @@ class Result:
 
 
 def _text(value: bytes | str | None) -> str:
-    """Decoded output without Sherlock's login banner lines."""
+    """Decoded output without Sherlock's login banner lines, each written once to stderr."""
     text = value.decode("utf-8", "replace") if isinstance(value, bytes) else (value or "")
-    return "".join(line for line in text.splitlines(keepends=True) if not line.startswith(BANNER))
+    kept = []
+    for line in text.splitlines(keepends=True):
+        if not line.startswith(BANNER):
+            kept.append(line)
+        elif (reminder := line.rstrip("\r\n")) not in _reminded:
+            _reminded.add(reminder)
+            print(reminder, file=sys.stderr)
+    return "".join(kept)
 
 
 def _spawn(command: Sequence[str], data: bytes | None, timeout: float) -> tuple[int, bytes, bytes]:

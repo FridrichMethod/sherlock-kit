@@ -85,7 +85,9 @@ Results map to `complete`, `failed` (a read exited nonzero), `unknown` (a
 mutation exited nonzero or timed out after dispatch: never retried),
 `auth_required` or `unavailable` (ssh exit 255 with or without authentication
 text, such as a dropped network) and `timeout` (a read); these exit 4 with the
-hint `run shk doctor`. The Sherlock login banner is dropped. A timeout or
+hint `run shk doctor`. The Sherlock login banner leaves the parsed output and
+goes to stderr once per process, since site rule 12 forbids filtering out
+instruction reminders. A timeout or
 interrupt kills the child's whole process group. The local executor runs the
 same programs with `sh -c` and no preflight; the data executor on any Sherlock
 host refuses (exit 3), because transfers start outside Sherlock and the site

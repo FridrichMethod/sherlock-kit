@@ -1,5 +1,6 @@
 """Transport: literal argv, master-only preflight, status mapping, detection."""
 
+import io
 import json
 import os
 import shlex
@@ -10,11 +11,12 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import suppress
+from contextlib import redirect_stderr, suppress
 from pathlib import Path
 from unittest.mock import patch
 
 from fakes import SRC, install_fake_ssh
+from fakes.fake_ssh import BANNER
 
 sys.path.insert(0, str(SRC))
 from sherlock_kit import config, executor
@@ -53,12 +55,16 @@ class SshExecutorTests(unittest.TestCase):
         environment.start()
         self.addCleanup(environment.stop)
 
-    def test_literal_argv_exact_prefix_and_banner_removed(self):
+    def test_literal_argv_exact_prefix_and_banner_moved_to_stderr_once(self):
         self.knobs(FAKE_SSH_MODE="echo")
-        result = self.ssh.run(ARGV)
+        err = io.StringIO()
+        with patch.object(executor, "_reminded", set()), redirect_stderr(err):
+            result, again = self.ssh.run(ARGV), self.ssh.run(ARGV)
         self.assertEqual((result.status, result.returncode, result.stderr), ("complete", 0, ""))
+        self.assertEqual(again.stderr, "")
+        self.assertEqual(err.getvalue(), BANNER + "\n")
         self.assertEqual(json.loads(result.stdout), ARGV)
-        check, dial = self.fake.calls()
+        check, dial = self.fake.calls()[:2]
         self.assertEqual(check, [*CHECK, "sherlock-plain"])
         self.assertEqual(dial[:-1], [*PREFIX, "sherlock-plain"])
         self.assertEqual(shlex.split(dial[-1]), ARGV)
