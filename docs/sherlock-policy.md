@@ -12,12 +12,12 @@ recommended practice.
 
 First read on 2026-10-10 (Pacific) from a Sherlock login node, one attended
 read-only `cat` over the existing control master. The last-modified dates are
-the ones listed at the full re-read of 2026-10-18 below; the re-reads between
-recorded none.
+the ones listed at the re-read of 2026-10-21 below; the re-reads before
+2026-10-18 recorded none.
 
 | File | Last modified | Topics |
 |---|---|---|
-| `/etc/agents/AGENTS.md` | 2026-10-13 | conditions of use, where you are, numbered rules 1-11, support |
+| `/etc/agents/AGENTS.md` | 2026-10-19 | conditions of use, where you are, numbered rules 1-12, support |
 | `/etc/agents/policy.md` | 2026-10-13 | data risk, sanctions, prohibited mechanisms, unattended sessions, processes, agent notes |
 | `/etc/agents/slurm.md` | 2026-10-01 | login and compute nodes, discovery, requests, monitoring, arrays, Slurm outages |
 | `/etc/agents/software.md` | 2026-10-09 | modules, preference order, Python environments, compiling, licenses |
@@ -25,7 +25,7 @@ recorded none.
 
 Human documentation: <https://www.sherlock.stanford.edu/docs/>. The workstation
 rules were rechecked on 2026-10-11 against the same five site files fetched
-through the attended control master. Since the 2026-10-18 re-read below, both
+through the attended control master. Since the 2026-10-21 re-read below, both
 rules files carry that review date. The added workstation sandbox guidance
 distinguishes local access denials from absent SSH masters. The site's Codex
 guidance still requires per-command approval when its sandbox cannot start,
@@ -98,6 +98,29 @@ choice); "alternate login services" in the workstation list; and recommended
 practice generally. The review date is now 2026-10-18. Re-read the site files
 before the next rules change that touches site policy.
 
+The lead re-read the site files on 2026-10-21 through the attended control
+master, before the 0.6.0 rules edits. The four topic files are byte for byte the
+copies of 2026-10-18. `AGENTS.md` changed on 2026-10-19 only by a new rule 12,
+read current instructions: read `AGENTS.md` at the start of each session on
+Sherlock and after resuming from a summary or context compaction, and the
+relevant topic files before continuing; memory, summaries and an earlier
+session's read are not substitutes; handoff summaries keep the requirement; and
+instruction reminders are not filtered out. Changes:
+
+- Both rules files carry rule 12 in their introductions.
+- `shk` still removes the login banner from the output it parses, but now writes
+  each banner line once per process to stderr instead of dropping it.
+- The cluster file's `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` (slurm.md: set the
+  application's thread count to the allocation) yields to `--cpu-thread-budget`,
+  an opt-in budget at most the allocation.
+
+To stay within the 7 KiB cap, both files drop "the rest is recommended practice"
+(implied by "only numbered rules are requirements") and shorten the exit 5
+wording. The cluster file also drops its configuration line, which the skill
+covers. The workstation file also drops the owners checkpoint sentence, which
+the owners profile and the skill keep, and "Keep `shk cancel` UID/name-scoped",
+since `shk cancel` has no other scope. The review date is now 2026-10-21.
+
 ## Where each site rule lands
 
 | Site rule | Workstation file | Cluster file |
@@ -113,6 +136,7 @@ before the next rules change that touches site policy.
 | 9 System configuration | n/a | Software |
 | 10 Scheduler etiquette | Jobs | Slurm |
 | 11 Filesystem etiquette | n/a | Filesystems |
+| 12 Read current instructions | Introduction | Introduction |
 | Support, agent notes | Connection (Codex sandbox) | Where you are, Login nodes |
 
 Corrections against the 0.3 policy text: purge evasion is termination of the

@@ -1,6 +1,6 @@
 ## Sherlock: agent running on Sherlock
 
-Read `/etc/agents/AGENTS.md` first. It and its topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it) override this file; only its numbered rules are requirements, the rest is recommended practice. Reviewed 2026-10-18 against the site files.
+Read `/etc/agents/AGENTS.md` and the task's topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md` beside it) at session start and after any summary or compaction; memory or an earlier read is no substitute. Keep this rule in handoffs; never filter out instruction reminders. They override this file; only numbered rules are requirements. Reviewed 2026-10-21 against the site files.
 
 ### Where you are
 - Run `hostname` and check `$SLURM_JOB_ID` first: login node names contain `-ln` and have no job id.
@@ -21,14 +21,13 @@ Read `/etc/agents/AGENTS.md` first. It and its topic files (`storage.md`, `slurm
 
 ### Software
 - `ml spider NAME` first; prefer a module, a group install, your own build (both in `$GROUP_HOME`), then a container. Large or shared environments go in `$GROUP_HOME`; none in `$SCRATCH`. No `sudo`, system-wide installs or unreviewed remote install scripts. Compile and do heavy installs in a job; compute nodes may lack outbound network, so fetch sources first.
-- Job scripts: `#!/bin/bash -l` (a non-login shell has no `ml`), `ml purge`, load modules, activate the environment, record versions, `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK`. Do not probe or change system configuration or shared infrastructure (reading `/etc/agents/` is fine) or add slow `~/.bashrc` startup. `ml spider` finds agent CLIs and Python 3.11+ for `shk`.
+- Job scripts: `#!/bin/bash -l` (a non-login shell has no `ml`), `ml purge`, load modules, activate the environment, record versions, `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` unless `--cpu-thread-budget` set it. Do not probe or change system configuration or shared infrastructure (reading `/etc/agents/` is fine) or add slow `~/.bashrc` startup. `ml spider` finds agent CLIs and Python 3.11+ for `shk`.
 
 ### Slurm
 - Use `shk submit`, `shk status` and `shk cancel` (local executor). Plain `sbatch` follows the same rules and the profiles below: explicit `--time`; GPU jobs `-G n` on a GPU partition; `-C` instead of `--exclude`; no `--account`. `sh_part`/`sh_node_feat` (login shell) list limits and features; never guess.
-- At least 60 s between checks (`squeue --me`, `sacct -j ID`, `seff ID`); no `watch` or shell polling loops; prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; diagnose before resubmitting; jobs do at least 10 minutes of work. `shk` exit 5: run the `shk status` command in the reply's `next`, not before the time it names, never a blind resubmit; exit 6: stop and report.
+- At least 60 s between checks (`squeue --me`, `sacct -j ID`, `seff ID`); no `watch` or shell polling loops; prefer `--dependency=afterok` or `sbatch --wait`; a pending reason is never grounds for a duplicate; diagnose before resubmitting; jobs do at least 10 minutes of work. `shk` exit 5: run the reply's `next` command, not before the time it names, never a blind resubmit; exit 6: stop and report.
 - Never schedule future agent/LLM sessions (`scrontab`, `--begin`, self-resubmitting agents). Bounded deterministic compute controllers may submit and poll authorized stages inside an allocation via `shk --executor local`, no workstation needed.
 - Cancel only exact verified own jobs (`scancel ID` or UID/name-scoped `shk cancel`); in an authorized task this may proceed; tell the user why. Ask for unclear scope/ownership, unrelated work, broad cancellation or material irreversible loss of important progress/results. Never `scancel -u $USER` or kill a job's processes to stop it; inspect and stop only your own processes.
-- Config: `[tool.sherlock-kit]` in the nearest `pyproject.toml` or `sherlock-kit.toml` at/above cwd; elsewhere use `--project-dir DIR`.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
