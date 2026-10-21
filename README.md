@@ -56,7 +56,7 @@ python3 -m venv "$GROUP_HOME/demo/.venv-shk"
 ```
 
 Use the environment's absolute executable path in batch scripts and controllers;
-activation and a workstation's PATH do not carry across jobs. The project records
+do not assume the intended environment is active in every job. The project records
 the pinned version and environment path. For example, inside the appropriate job:
 
 ```sh
