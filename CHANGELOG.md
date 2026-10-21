@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Document project-pinned standalone installations and project-local agent content,
+  including absolute-path commands inside Sherlock allocations. Remove the skill's
+  global-launcher fallback; runtime behavior, version and packaged rules stay the same.
+
 ## 0.6.0
 
 - `shk submit --cpu-thread-budget [N]` (N defaults to 1 and is at most `--cpus`)

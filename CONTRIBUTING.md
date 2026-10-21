@@ -9,8 +9,8 @@ explicit path and carry no agent attribution.
 
 The owner's development checkout lives at `~/data/repos/sherlock-kit`. It is a
 working copy only: apart from its own development environment, never install
-from it, link to it or point a project at it; installs come from a tag, the
-dotfiles submodule or an editable install of a tree you chose (see the README).
+from it, link to it or point a project at it; installs come from a pinned release
+or an editable install of a tree you chose (see the README).
 Concurrent writers each use their own branch and Git worktree (for example
 `.worktrees/<name>`, ignored by Git); reviewers are read-only. Only the lead
 merges to `main` and tags releases.
@@ -68,7 +68,7 @@ git diff --check
 - The packaging tests build committed `HEAD` (`git archive`), not the working tree:
   commit first, then rerun on the clean revision.
 - Use `python3 -B` (or `PYTHONDONTWRITEBYTECODE=1`) so no `__pycache__` lands in
-  a tree that rsync or the dotfiles submodule would see. `python3 -I` ignores
+  a source checkout that package consumers or rsync would see. `python3 -I` ignores
   `PYTHONPATH`; use `PYTHONPATH=src python3 -B -m sherlock_kit` for repository code.
 
 ## Boundaries
@@ -85,8 +85,9 @@ git diff --check
 - Contract paths: `src/sherlock_kit/data/rules/workstation.md`,
   `src/sherlock_kit/data/rules/cluster.md`,
   `src/sherlock_kit/data/skills/sherlock-kit/SKILL.md` and `bin/shk` (mode
-  100755). dotfiles links them; renaming one is a breaking change that needs a
-  coordinated dotfiles change. Symlinks in the repository are relative.
+  100755). Package consumers may reference them directly; renaming one is a
+  breaking change that needs coordination with those consumers. Symlinks in the
+  repository are relative.
 - The rules files start with an H2, have no front matter, HTML comments, `@`
   imports or relative links, stay within 7 KiB, and mention only released CLI.
   The skill's front matter holds `name` and `description` only.

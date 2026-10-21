@@ -9,8 +9,8 @@ description: Run, track and cancel Slurm jobs and job arrays on Stanford's Sherl
 
 ## Setup check
 
-1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` and `python -m sherlock_kit` in the activated environment), else the global `~/.local/bin/shk`. Not `uv run shk`: it locks and syncs the project environment first. Ask before any `pip install`, upgrade or version switch.
-2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>` (the dotfiles copy), `source <path>` (a development checkout: never use it for real work) or `unknown`. The controller extensions require shk 0.5 or newer; with an older one, or when a flag here is missing, follow `shk <cmd> --help` instead.
+1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` and `python -m sherlock_kit` in the activated environment). Not `uv run shk`: it locks and syncs the project environment first. Ask before any `pip install`, upgrade or version switch.
+2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>`, `source <path>` (a development checkout: never use it for real work) or `unknown`. The controller extensions require shk 0.5 or newer; with an older one, or when a flag here is missing, follow `shk <cmd> --help` instead.
 3. If no Sherlock rules are loaded in this session, read them first: `shk rules workstation` on a workstation, `shk rules cluster` on Sherlock.
 4. `shk doctor` is read-only and offline (`--remote` adds one read-only call on Sherlock).
 5. In Codex, a sandbox startup failure or local SSH socket `Permission denied` / `Operation not permitted` does not mean a missing master. Request per-command approval for the blocked command, then retry once; never disable the sandbox or grant writes to all of HOME. Even offline `doctor` needs control-socket access; `submit --dry-run` does not. On Sherlock, per-command approval is expected because the Codex sandbox cannot start there.

@@ -119,9 +119,37 @@ class ContractTests(unittest.TestCase):
             project["tool"]["setuptools"]["dynamic"]["version"],
             {"attr": "sherlock_kit.__version__"},
         )
-        heading = re.search(r"^## (\S+)", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"), re.M)
-        self.assertIsNotNone(heading, "CHANGELOG.md needs a '## VERSION' heading")
-        self.assertEqual(heading.group(1), sherlock_kit.__version__)
+        self.assert_latest_release((ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
+
+    def assert_latest_release(self, changelog: str):
+        headings = re.findall(r"^##(?:[ \t]+(.*))?$", changelog, re.M)
+        if headings[:1] == ["Unreleased"]:
+            headings = headings[1:]
+        self.assertTrue(headings, "CHANGELOG.md needs a '## VERSION' heading")
+        self.assertEqual(headings[0], sherlock_kit.__version__)
+
+    def test_latest_release_allows_one_optional_leading_unreleased(self):
+        for prefix in ("", "## Unreleased\n\n- Pending change.\n\n"):
+            with self.subTest(prefix=prefix):
+                self.assert_latest_release(
+                    f"# Changelog\n\n{prefix}## {sherlock_kit.__version__}\n\n## 0.1.0\n"
+                )
+
+    def test_latest_release_rejects_missing_mismatched_or_malformed_headings(self):
+        for changelog in (
+            "# Changelog\n",
+            "## Unreleased\n",
+            f"## Unreleased\n\n## Unreleased\n\n## {sherlock_kit.__version__}\n",
+            "## 999.0.0\n",
+            f"## 999.0.0\n\n## {sherlock_kit.__version__}\n",
+            "## Unreleased\n\n## 999.0.0\n",
+            "## VERSION\n",
+            "##\n",
+            f"## {sherlock_kit.__version__} extra\n",
+            f"## Unreleased extra\n\n## {sherlock_kit.__version__}\n",
+        ):
+            with self.subTest(changelog=changelog), self.assertRaises(AssertionError):
+                self.assert_latest_release(changelog)
 
 
 class RulesFormatTests(unittest.TestCase):

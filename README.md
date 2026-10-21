@@ -30,20 +30,46 @@ Older installs should follow their own `shk <command> --help`.
 | Form | How | FORM |
 |---|---|---|
 | Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.6.0'`, or a uv source with `tag = "v0.6.0"` | `git <commit>` |
-| Dotfiles submodule | dotfiles carries this repository as a submodule and links its `bin/shk` to `~/.local/bin/shk`; `bin/shk` is a stdlib-only entry point that runs the submodule's source | `submodule <path>` |
+| Submodule | a consumer checks out this repository as a Git submodule and invokes its stdlib-only `bin/shk` entry point | `submodule <path>` |
 | Editable | `pip install -e <path>` into an environment you choose; it follows that tree | `editable <path>` |
 
 A wheel or path install reports `unknown`; a plain checkout run through `bin/shk`
-reports `source <path>` and is for development only. A project environment's
-`shk` takes precedence over the global one while that environment is active.
+reports `source <path>` and is for development only. Invoke the project
+environment's executable directly, or activate that environment before using `shk`.
+Installation and updates belong to the project; no global launcher is required.
 
 ```toml
 [tool.uv.sources]
 sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.6.0" }
 ```
 
-On Sherlock, run `shk` with Python 3.11 or newer from a module or a `$GROUP_HOME`
-environment; heavier installs belong in an `sh_dev` session.
+On Sherlock, create the project-pinned environment under `$GROUP_HOME`, inside a
+Slurm allocation (for example an `sh_dev` session), with Python 3.11 or newer.
+Fetch sources or build artifacts beforehand if compute nodes cannot reach their
+source. Do not create the environment on a login node or under scratch.
+For example, inside the allocation, using a release wheel fetched beforehand:
+
+```sh
+python3 -m venv "$GROUP_HOME/demo/.venv-shk"
+"$GROUP_HOME/demo/.venv-shk/bin/python" -m pip install --no-index --no-deps /path/to/sherlock_kit-0.6.0-py3-none-any.whl
+"$GROUP_HOME/demo/.venv-shk/bin/shk" --version
+```
+
+Use the environment's absolute executable path in batch scripts and controllers;
+activation and a workstation's PATH do not carry across jobs. The project records
+the pinned version and environment path. For example, inside the appropriate job:
+
+```sh
+"$GROUP_HOME/demo/.venv-shk/bin/shk" manifest /path/to/run/out
+"$GROUP_HOME/demo/.venv-shk/bin/shk" --executor local --project-dir /path/to/project status --all
+"$GROUP_HOME/demo/.venv-shk/bin/shk" --executor local allocation --pid "$WORKER_PID" --job-id "$SLURM_JOB_ID"
+"$GROUP_HOME/demo/.venv-shk/bin/shk" --executor local requeue --self --expect-name "$SHK_NAME"
+```
+
+A local controller uses that same absolute path for its authorized `submit` and
+status calls. Allocation evidence requires the actual worker PID; self-requeue
+requires the job identity, partition and checkpoint/retry conditions documented
+below. These examples do not allocate resources or authorize a workload.
 
 ## Quick start
 
@@ -330,8 +356,11 @@ Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
   partition profiles generated from `data/partitions.json`.
 - Skill: `src/sherlock_kit/data/skills/sherlock-kit/SKILL.md`, for Claude Code and
   Codex alike.
-- Global delivery: dotfiles links both into `~/.claude/rules/`, `~/.claude/skills/`
-  and `~/.agents/skills/`. Per project: `shk install-skill --project .`.
+- Per-project delivery: use the pinned environment's `shk install-skill --project .`
+  (optionally `--rules workstation` or `--rules cluster`). Read rules directly with
+  `shk rules workstation` or `shk rules cluster` when they are not already loaded.
+  An existing global Claude rules file remains supported: `install-skill --rules`
+  skips its project copy unless `--force` is given.
 
 ## Development
 

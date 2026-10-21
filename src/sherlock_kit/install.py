@@ -7,7 +7,8 @@ DIR/.claude/skills/sherlock-kit/ (Claude Code) and DIR/.agents/skills/sherlock-k
 (Codex), with a marker line after the front matter that names the shk version.
 `--rules KIND` also copies the rules to DIR/.claude/rules/sherlock-kit.md, unless
 ~/.claude/rules/sherlock-kit.md already loads in Claude Code (`--force` copies
-anyway). Codex has no rules import, so it gets a hint instead of a file.
+anyway). This compatibility check does not require a global shk executable.
+Codex has no rules import, so it gets a hint instead of a file.
 
 Copies are idempotent. `--check` writes nothing and exits 1 when a copy is missing
 or stale. It never writes into HOME itself or through a link that leaves DIR.
@@ -113,7 +114,7 @@ def wanted_files(args: argparse.Namespace, home: Path) -> Wanted:
 
 
 def refuse_links_out_of(project: Path, paths: list[str]) -> None:
-    """A link inside the project is fine; one that leads elsewhere (HOME, a dotfiles submodule) is not."""
+    """A link inside the project is fine; one that leads elsewhere (HOME, another checkout) is not."""
     outside = []
     for rel in paths:
         resolved = (project / rel).resolve()
