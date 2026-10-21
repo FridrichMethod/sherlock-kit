@@ -1,4 +1,4 @@
-# Design (0.5.0)
+# Design (0.6.0)
 
 `shk` is a thin, stateless interface between an agent and Sherlock's Slurm and
 filesystems. It answers three questions with as little machinery as possible:

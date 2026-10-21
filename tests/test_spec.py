@@ -351,7 +351,7 @@ class ProfileAndArgvTests(Case):
             },
         )
         self.assertEqual((doc["resubmit_reason"], doc["git"]), ("fixed the input path", None))
-        self.assertTrue(doc["shk"].startswith("sherlock-kit 0.5.0 ("))
+        self.assertTrue(doc["shk"].startswith("sherlock-kit 0.6.0 ("))
 
     def test_git_provenance_of_the_project(self):
         env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}

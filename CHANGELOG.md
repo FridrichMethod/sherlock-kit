@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.6.0
+
+- `shk submit --cpu-thread-budget [N]` (N defaults to 1 and is at most `--cpus`)
+  or project `cpu_thread_budget = N` runs sbatch under `env` with the OpenMP,
+  MKL, OpenBLAS, BLIS, vecLib and NumExpr thread variables set to N per task,
+  also with `APPTAINERENV_` and `SINGULARITYENV_` prefixes, and records
+  `cpu_thread_policy` in the spec. They are launch defaults that a script can
+  override, not an OS-thread limit; without the option or the key, argv and spec
+  are unchanged. See [CPU thread budgets](docs/cpu-threads.md).
+- Sherlock's login banner still leaves parsed output, but each banner line is now
+  written once per process to stderr: site rule 12 (added 2026-10-19) forbids
+  filtering out instruction reminders.
+- Both rules files carry site rule 12: read `AGENTS.md` and the task's topic
+  files at session start and after any summary or compaction, since memory or an
+  earlier read is no substitute, and keep the rule in handoffs. In the cluster
+  file `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` yields to `--cpu-thread-budget`.
+  Both files were reviewed against the site files on 2026-10-21; see
+  [docs/sherlock-policy.md](docs/sherlock-policy.md) for what made room.
+
 ## 0.5.0
 
 - Operational JSON adds `schema_version: 1`; existing result keys and exits,
