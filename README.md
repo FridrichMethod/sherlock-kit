@@ -73,10 +73,32 @@ below. These examples do not allocate resources or authorize a workload.
 
 ## Quick start
 
-`shk` never logs in. Open the control and data masters yourself first
-(`ssh sherlock-plain`, `ssh -fN sherlock-dtn`); `~/.ssh/config` needs
-`ControlMaster auto`, `ControlPersist yes` and `ControlPath ~/.ssh/%C` for both
-aliases. Then add the project configuration and work from the project directory:
+`shk` never logs in: it rides OpenSSH control masters that you open yourself,
+one on a Sherlock login node and one on a data transfer node (DTN). A minimal
+`~/.ssh/config` for both, with your SUNet ID in place of `SUNETID`:
+
+```sshconfig
+Host sherlock-plain
+  HostName login.sherlock.stanford.edu
+  User SUNETID
+  ControlMaster auto
+  ControlPersist yes
+  ControlPath ~/.ssh/%C
+
+Host sherlock-dtn
+  HostName dtn.sherlock.stanford.edu
+  User SUNETID
+  ControlMaster auto
+  ControlPersist yes
+  ControlPath ~/.ssh/%C
+```
+
+These two names are only the defaults of `control_host` and `data_host`; any
+other OpenSSH aliases work when set in `[tool.sherlock-kit]`, as long as the two
+differ and each sets `ControlMaster`, `ControlPersist` and `ControlPath` as
+above. Open both masters yourself first (`ssh sherlock-plain`,
+`ssh -fN sherlock-dtn`), then add the project configuration and work from the
+project directory:
 
 ```toml
 [tool.sherlock-kit]
