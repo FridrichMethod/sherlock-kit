@@ -27,7 +27,7 @@ the real remote `sh` programs locally through a fake `ssh`, fake Slurm binaries
 and real `rsync`. The suite stays hermetic even inside a Slurm job: importing
 `tests/fakes` (both `tests/run_suite.py` and `python3 -m unittest discover -s tests`
 do) removes inherited `SLURM_*`, `SBATCH_*`, `SQUEUE_*`, `SACCT_*`, `SCANCEL_*`,
-`SHK_*` (except `SHK_BUILD_PYTHON` and `SHK_REQUIRE_ALL`) and `SHERLOCK_KIT_*`
+`SHK_*` (except `SHK_BUILD_PYTHON`, `SHK_TEST_WHEELHOUSE` and `SHK_REQUIRE_ALL`) and `SHERLOCK_KIT_*`
 variables and exported shell functions, and puts blocking stubs for every Slurm
 client on `PATH` behind each test's fakes and ahead of the system ones. A stub
 blocks the call (exit 97, a message on stderr) and logs it. `tests/run_suite.py`,
@@ -42,14 +42,18 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/pre-commit install
 python3 -m venv .venv-build
-.venv-build/bin/python -m pip install 'setuptools>=80'
+.venv-build/bin/python -m pip install 'build>=1.2.2,<2' 'setuptools>=80'
+.venv-build/bin/python -B tests/prepare_wheelhouse.py --project . --dest .state/test-wheelhouse
 ```
 
-Before each commit (the installed hook runs the same checks on staged files):
+Run the hooks before each commit (the installed hook checks staged files).
+Run the authoritative suite after committing so packaging checks that revision:
 
 ```sh
 .venv/bin/pre-commit run --all-files
-SHK_BUILD_PYTHON="$PWD/.venv-build/bin/python" SHK_REQUIRE_ALL=1 python3 -B tests/run_suite.py
+SHK_BUILD_PYTHON="$PWD/.venv-build/bin/python" \
+SHK_TEST_WHEELHOUSE="$PWD/.state/test-wheelhouse" \
+SHK_REQUIRE_ALL=1 .venv/bin/python -B tests/run_suite.py
 git diff --check
 ```
 
@@ -61,12 +65,24 @@ git diff --check
   not type-checked. The `ruff` and `mypy`
   pins in the `dev` extra equal the ruff-pre-commit and mirrors-mypy `rev`s;
   bump each pin together with its hook.
-- Tests stay on `unittest`; `tests/run_suite.py` runs them all.
+- Tests use `unittest` and bounded Hypothesis properties; `tests/run_suite.py`
+  runs them all. Hypothesis has no example database and stores temporary data
+  under the suite's disposable tripwire directory, regardless of inherited settings.
 - Run the suite on the oldest and newest supported Pythons (3.11 and 3.14; CI runs
   both). With `CI` or `SHK_REQUIRE_ALL` set, any skip fails the run; without
-  `SHK_BUILD_PYTHON` the packaging tests skip, so that run is not a release check.
+  both `SHK_BUILD_PYTHON` and `SHK_TEST_WHEELHOUSE` the packaging tests skip,
+  so that run is not a release check. Supplied paths must be absolute and valid.
 - The packaging tests build committed `HEAD` (`git archive`), not the working tree:
   commit first, then rerun on the clean revision.
+- Preparation may download wheels; the suite and its installation subprocesses
+  are offline. `prepare_wheelhouse.py` reads committed metadata and backend hooks,
+  putting runtime wheels in `runtime/` and build requirements in `build/`. Use a
+  fresh destination after dependency changes and for each Python/platform pair;
+  `--constraint FILE` can constrain a dedicated lower-bound check. The helper
+  refuses stale nonempty destinations. No environment is borrowed by target installs.
+- Packaging uses the default PyPA build flow: sdist first, then wheel from the
+  sdist. Wheel, sdist, editable and two-hop source-launcher checks use fresh
+  environments, normal dependency resolution and the prepared wheelhouse.
 - Use `python3 -B` (or `PYTHONDONTWRITEBYTECODE=1`) so no `__pycache__` lands in
   a source checkout that package consumers or rsync would see. `python3 -I` ignores
   `PYTHONPATH`; use `PYTHONPATH=src python3 -B -m sherlock_kit` for repository code.

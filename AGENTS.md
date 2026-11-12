@@ -5,8 +5,11 @@ The lead owns main, integration and publication. Each writer
 uses a separate branch and worktree; reviewers are read-only. Preserve user changes.
 Use Python 3.11+ and standard-library mechanisms where sufficient. Run
 `pre-commit run --all-files` (ruff, mypy, shellcheck, shfmt, mdformat),
-`python3 -B tests/run_suite.py` (authoritative: unlike `python3 -m unittest discover -s tests -v`
+the development environment's `python -B tests/run_suite.py` (authoritative: unlike `python -m unittest discover -s tests -v`
 it fails a run that reached the Slurm tripwire) and isolated installation checks.
+Prepare the build interpreter and per-Python wheelhouse as described in
+CONTRIBUTING.md; set `SHK_BUILD_PYTHON`, `SHK_TEST_WHEELHOUSE` and `SHK_REQUIRE_ALL=1`
+for required checks. Test both Python 3.11 and 3.14 from committed HEAD.
 Never publish credentials, private configuration, research code/data, or runtime state.
 Implement small independently written mechanisms; references do not license copying.
 The rules files under `src/sherlock_kit/data/rules/` own the delivered policy; Slurm is

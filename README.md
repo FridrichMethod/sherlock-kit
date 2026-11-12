@@ -391,13 +391,21 @@ Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
 python3 -m venv .venv && .venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/pre-commit install
 .venv/bin/pre-commit run --all-files    # ruff, mypy, shellcheck, shfmt, mdformat
-python3 -B tests/run_suite.py
+python3 -m venv .venv-build
+.venv-build/bin/python -m pip install 'build>=1.2.2,<2' 'setuptools>=80'
+.venv-build/bin/python -B tests/prepare_wheelhouse.py --project . --dest .state/test-wheelhouse
+SHK_BUILD_PYTHON="$PWD/.venv-build/bin/python" \
+SHK_TEST_WHEELHOUSE="$PWD/.state/test-wheelhouse" \
+SHK_REQUIRE_ALL=1 .venv/bin/python -B tests/run_suite.py
 ```
 
 The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` and
 `dash`. A skipped test fails the run when `CI` or `SHK_REQUIRE_ALL` is set.
-`SHK_BUILD_PYTHON` (an interpreter with `setuptools>=80`) enables the sdist,
-wheel and editable-install checks, which build committed `HEAD`. See
+`SHK_BUILD_PYTHON` (an absolute interpreter path with `build` and the backend
+requirements) and `SHK_TEST_WHEELHOUSE` (the prepared absolute wheelhouse path)
+enable the sdist, wheel, editable and source-launcher checks. They build committed
+`HEAD`, so commit changes before using them as release evidence. Prepare a fresh
+wheelhouse for each Python/platform and whenever dependencies change. See
 [CONTRIBUTING.md](CONTRIBUTING.md), [docs/design.md](docs/design.md),
 [docs/sherlock-policy.md](docs/sherlock-policy.md),
 [docs/cpu-threads.md](docs/cpu-threads.md),

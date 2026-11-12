@@ -42,10 +42,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends rsync dash
-      - name: Create isolated packaging interpreter
+      - name: Prepare suite and build environments (online)
         run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e '.[dev]'
           python -m venv .venv-build
-          .venv-build/bin/python -m pip install 'setuptools>=80'
+          .venv-build/bin/python -m pip install 'build>=1.2.2,<2' 'setuptools>=80'
+          .venv-build/bin/python -B tests/prepare_wheelhouse.py --project . --dest .state/ci-wheelhouse
           echo "SHK_BUILD_PYTHON=$PWD/.venv-build/bin/python" >> "$GITHUB_ENV"
+          echo "SHK_TEST_WHEELHOUSE=$PWD/.state/ci-wheelhouse" >> "$GITHUB_ENV"
+          echo "SHK_REQUIRE_ALL=1" >> "$GITHUB_ENV"
       - name: Run full offline suite (skips fail under CI)
-        run: python tests/run_suite.py
+        run: .venv/bin/python -B tests/run_suite.py
