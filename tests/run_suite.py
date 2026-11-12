@@ -2,9 +2,10 @@
 
 When CI or SHK_REQUIRE_ALL is set (to anything but "", "0", "false" or "no"),
 any skipped test fails the run, so missing rsync, dash, ssh or packaging
-prerequisites cannot pass silently (shellcheck runs in pre-commit). SHK_BUILD_PYTHON (an
-interpreter with setuptools>=80) is inherited by the packaging tests; when set it must name an
-existing file. A file entry point keeps multiprocessing spawn workers
+prerequisites cannot pass silently (shellcheck runs in pre-commit). SHK_BUILD_PYTHON names
+an absolute executable with build and backend requirements. SHK_TEST_WHEELHOUSE names an
+absolute directory with runtime/ and build/ wheel directories. Supplied paths are validated
+before discovery. A file entry point keeps multiprocessing spawn workers
 from re-running the suite on import.
 
 Importing fakes makes the run hermetic (see tests/fakes/__init__.py); a TMPDIR that
@@ -23,10 +24,20 @@ def _flag(name):
 
 
 def main():
-    build_python = os.environ.get("SHK_BUILD_PYTHON")
-    if build_python and not Path(build_python).is_file():
-        print(f"SHK_BUILD_PYTHON={build_python} does not exist", file=sys.stderr)
-        return 1
+    for name in ("SHK_BUILD_PYTHON", "SHK_TEST_WHEELHOUSE"):
+        if name not in os.environ:
+            continue
+        value = os.environ[name]
+        path = Path(value)
+        if name == "SHK_BUILD_PYTHON":
+            valid = path.is_file() and os.access(path, os.X_OK)
+            expected = "an absolute executable interpreter"
+        else:
+            valid = all((path / part).is_dir() for part in ("runtime", "build"))
+            expected = "an absolute directory containing runtime/ and build/"
+        if not value or not path.is_absolute() or not valid:
+            print(f"{name}={value!r} must name {expected}", file=sys.stderr)
+            return 1
     try:
         import fakes  # the hermetic setup runs on import
     except RuntimeError as exc:
