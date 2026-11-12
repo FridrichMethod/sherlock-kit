@@ -314,15 +314,29 @@ class BuildTests(HeadCase):
         self.install(bin_dir, sdist)
         self.assert_cli(bin_dir / "shk", "unknown")
 
-    def test_missing_runtime_wheel_fails_offline(self):
-        if not self.runtime_requirements():
-            # The runtime closure can be empty when the validation pilot is rejected.
-            return
-        wheel, _ = self.build()
+    def missing_runtime_wheel_install(self):
+        if self.runtime_requirements():
+            wheel, _ = self.build()
+        else:
+            # A runtime-free project still exercises pip's failure to resolve an
+            # unavailable dependency, using a bounded synthetic distribution.
+            wheel = self.tmp / "shk_offline_probe-1.0-py3-none-any.whl"
+            info = "shk_offline_probe-1.0.dist-info"
+            with zipfile.ZipFile(wheel, "w") as bundle:
+                bundle.writestr(
+                    f"{info}/METADATA",
+                    "Metadata-Version: 2.1\nName: shk-offline-probe\nVersion: 1.0\n"
+                    "Requires-Dist: shk-unavailable-runtime-probe==1.0\n",
+                )
+                bundle.writestr(
+                    f"{info}/WHEEL",
+                    "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+                )
+                bundle.writestr(f"{info}/RECORD", "")
         bin_dir = self.venv("incomplete-env")
         empty = self.tmp / "empty-runtime"
         empty.mkdir()
-        result = self.run_command(
+        return self.run_command(
             bin_dir / "python",
             "-B",
             "-m",
@@ -333,8 +347,21 @@ class BuildTests(HeadCase):
             empty,
             wheel,
         )
-        self.assertNotEqual(result.returncode, 0)
+
+    def test_missing_runtime_wheel_fails_offline(self):
+        result = self.missing_runtime_wheel_install()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
         self.assertIn("No matching distribution found", result.stderr)
+
+    def test_empty_runtime_declaration_still_checks_offline_resolution(self):
+        # This archived-tree fixture exercises the runtime-free integration outcome
+        # independently of the task branch's current dependency declaration.
+        (self.tree / "pyproject.toml").write_text("[project]\ndependencies = []\n")
+        self.assertEqual(self.runtime_requirements(), [])
+        result = self.missing_runtime_wheel_install()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("No matching distribution found", result.stderr)
+        self.assertIn("shk-unavailable-runtime-probe", result.stderr)
 
     def test_editable_install(self):
         bin_dir = self.venv("editable-env")
