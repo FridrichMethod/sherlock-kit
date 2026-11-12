@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from fakes import SRC, TRIPWIRE
+from fakes import ROOT, SRC, TRIPWIRE
 from fakes.fakeslurm import BIN, FakeSlurm
 
 TESTS = Path(__file__).resolve().parent
@@ -87,11 +87,72 @@ class HermeticSuite(unittest.TestCase):
             **injected,
             SHK_REQUIRE_ALL="1",
             SHK_BUILD_PYTHON="/synthetic/python",
+            SHK_TEST_WHEELHOUSE="/synthetic/wheelhouse",
+            SHK_UNRECOGNIZED="leaky",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         names = set(json.loads(result.stdout))
         self.assertEqual(names & set(injected), set())
-        self.assertLessEqual({"SHK_REQUIRE_ALL", "SHK_BUILD_PYTHON"}, names)
+        self.assertEqual(
+            {name for name in names if name.startswith("SHK_")},
+            {"SHK_REQUIRE_ALL", "SHK_BUILD_PYTHON", "SHK_TEST_WHEELHOUSE"},
+        )
+
+    def test_run_suite_rejects_invalid_supplied_packaging_paths(self):
+        noexec = self.tmp / "not-executable"
+        noexec.write_text("not a Python executable")
+        for knob, values in {
+            "SHK_BUILD_PYTHON": ("", "relative/python", str(self.tmp), str(noexec)),
+            "SHK_TEST_WHEELHOUSE": ("", "relative/wheels", str(noexec), str(self.tmp)),
+        }.items():
+            for value in values:
+                with self.subTest(knob=knob, value=value):
+                    result = child(
+                        "import run_suite, unittest; "
+                        "unittest.defaultTestLoader.discover = lambda *a, **kw: "
+                        "unittest.TestSuite(); raise SystemExit(run_suite.main())",
+                        **{knob: value},
+                    )
+                    self.assertEqual(result.returncode, 1, result.stderr)
+                    self.assertIn(knob, result.stderr)
+                    self.assertNotIn("Ran ", result.stderr)
+
+    def test_hypothesis_storage_is_private_and_removed_at_exit(self):
+        for inherited in (self.tmp / "home" / ".hypothesis", ROOT / ".hypothesis"):
+            with self.subTest(inherited=inherited):
+                result = child(
+                    "import json, os, fakes\n"
+                    "from hypothesis.configuration import storage_directory\n"
+                    "from pathlib import Path\n"
+                    "storage = storage_directory('examples')\n"
+                    "path = Path(getattr(storage, 'path', storage))\n"
+                    "path.mkdir(parents=True, exist_ok=True)\n"
+                    "(path / 'probe').write_text('private')\n"
+                    "print(json.dumps([str(path), str(fakes.TRIPWIRE.parent)]))\n",
+                    HYPOTHESIS_STORAGE_DIRECTORY=str(inherited),
+                    HOME=str(self.tmp / "home"),
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                storage, temporary = map(Path, json.loads(result.stdout))
+                self.assertEqual(storage, temporary / "hypothesis" / "examples")
+                self.assertFalse(temporary.exists())
+                self.assertFalse(inherited.exists())
+
+    def test_run_suite_fails_skips_when_required(self):
+        code = (
+            "import unittest, run_suite\n"
+            "class Skipped(unittest.TestCase):\n"
+            "    @unittest.skip('missing prerequisite')\n"
+            "    def test_skip(self): pass\n"
+            "suite = unittest.TestSuite([Skipped('test_skip')])\n"
+            "unittest.defaultTestLoader.discover = lambda *a, **kw: suite\n"
+            "raise SystemExit(run_suite.main())\n"
+        )
+        for knob in ("CI", "SHK_REQUIRE_ALL"):
+            with self.subTest(knob=knob):
+                result = child(code, **{knob: "1"})
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("skipped tests are failures", result.stderr)
 
     def test_real_clients_are_blocked_through_exported_functions_and_path_fallthrough(self):
         bash = shutil.which("bash")

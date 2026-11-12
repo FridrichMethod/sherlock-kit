@@ -5,7 +5,7 @@ Every test module imports this package, so both entry points (``tests/run_suite.
 
 - an inherited SIGCHLD disposition is reset, and inherited scheduler and kit state is removed
   from ``os.environ``: ``SLURM_*``, ``SBATCH_*``, ``SQUEUE_*``, ``SACCT_*``, ``SCANCEL_*``,
-  ``SHK_*`` (except the suite knobs ``SHK_BUILD_PYTHON`` and ``SHK_REQUIRE_ALL``),
+  ``SHK_*`` (except the suite knobs ``SHK_BUILD_PYTHON``, ``SHK_TEST_WHEELHOUSE`` and ``SHK_REQUIRE_ALL``),
   ``SHERLOCK_KIT_*`` and exported shell functions (``BASH_FUNC_*``, which bash, Sherlock's
   ``sh``, runs instead of a command on PATH);
 - a tripwire of blocking stubs for every Slurm client is put first on PATH, so per-test fakes
@@ -51,7 +51,7 @@ SCRUBBED = (
     "SHERLOCK_KIT_",
     "BASH_FUNC_",
 )
-SUITE_KNOBS = ("SHK_BUILD_PYTHON", "SHK_REQUIRE_ALL")
+SUITE_KNOBS = ("SHK_BUILD_PYTHON", "SHK_TEST_WHEELHOUSE", "SHK_REQUIRE_ALL")
 SLURM_CLIENTS = (
     "sacct",
     "sacctmgr",
@@ -120,6 +120,8 @@ def tripwire_hits() -> list:
 
 _scrub()
 TRIPWIRE = _tripwire()
+# Override inherited Hypothesis paths before any test imports Hypothesis.
+os.environ["HYPOTHESIS_STORAGE_DIRECTORY"] = str(TRIPWIRE.parent / "hypothesis")
 
 
 @dataclass(frozen=True)
