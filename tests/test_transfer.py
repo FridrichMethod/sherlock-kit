@@ -208,6 +208,81 @@ class ManifestCommandTests(TransferCase):
 
 
 class PullTests(TransferCase):
+    def test_historical_receipts_keep_identity_behavior_and_are_not_rewritten(self):
+        self.assertEqual(self.pull()[0], 0)
+        path = self.dest.parent / ".run1.shk-receipt.json"
+        digest = self.receipt()["manifest_sha256"]
+        for receipt in (
+            {"manifest_sha256": digest},
+            {"manifest_sha256": digest, "validator": None},
+            {"manifest_sha256": digest, "validator": "ok", "shk_version": "0.0.1"},
+            {"manifest_sha256": digest, "metadata": {"future": [1, None]}, "bytes": "old"},
+        ):
+            with self.subTest(receipt=receipt):
+                raw = json.dumps(receipt)
+                path.write_text(raw)
+                before = len(self.fake.calls())
+                code, body = self.pull()
+                self.assertEqual((code, body["action"]), (0, "already_present"), body)
+                self.assertNotIn(DTN_CHECK, self.fake.calls()[before:])
+                self.assertEqual(path.read_text(), raw)
+                self.assertEqual(transfer._read_receipt(path), receipt)
+        for receipt in ({}, {"manifest_sha256": None}):
+            with self.subTest(receipt=receipt):
+                path.write_text(json.dumps(receipt))
+                self.assert_error(self.pull(), 3, "destination_exists")
+                self.assertEqual(self.pull("--replace")[0], 0)
+        path.unlink()
+        self.assertIsNone(transfer._read_receipt(path))
+        self.assert_error(self.pull(), 3, "destination_exists")
+        self.assertEqual(self.pull("--replace")[0], 0)
+
+    def test_malformed_receipts_are_named_local_errors_and_preserve_files(self):
+        self.assertEqual(self.pull()[0], 0)
+        path = self.dest.parent / ".run1.shk-receipt.json"
+        contents = tree(self.dest)
+        for raw in (
+            "{",
+            "[]",
+            "null",
+            "1",
+            '"text"',
+            '{"manifest_sha256": 1}',
+            '{"manifest_sha256": false}',
+            '{"manifest_sha256": []}',
+            '{"validator": 1}',
+            '{"validator": []}',
+        ):
+            for extra in ((), ("--replace",)):
+                with self.subTest(raw=raw, extra=extra):
+                    path.write_text(raw)
+                    self.assert_error(result := self.pull(*extra), 1, "receipt_invalid")
+                    self.assertIn(str(path), result[1]["message"])
+                    self.assertEqual(path.read_text(), raw)
+                    self.assertEqual(tree(self.dest), contents)
+                    self.assertFalse(self.stage.exists())
+                    self.assertEqual(list(self.dest.parent.glob(".run1.shk-old-*")), [])
+
+    def test_new_receipt_has_exact_existing_fields_and_write_does_not_revalidate(self):
+        self.assertEqual(self.pull()[0], 0)
+        self.assertEqual(
+            set(self.receipt()),
+            {
+                "manifest_sha256",
+                "remote",
+                "files",
+                "bytes",
+                "validator",
+                "shk_version",
+                "created_utc",
+            },
+        )
+        # The writer serializes trusted, already constructed receipts; only reads validate.
+        path = self.tmp / "trusted-receipt.json"
+        receipt = {"manifest_sha256": 7}
+        transfer._write_receipt(path, receipt)
+        self.assertEqual(json.loads(path.read_text()), receipt)
+
     def test_exact_inventory_receipt_and_idempotent_rerun(self):
         code, body = self.pull()
         self.assertEqual(

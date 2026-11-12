@@ -16,27 +16,38 @@ ProjectConfig is frozen and DEFAULTS is the no-config value. Keys (no secrets):
 from __future__ import annotations
 
 import os
-import re
 import tomllib
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError, with_config
+from typing_extensions import TypedDict
 
 from sherlock_kit.errors import EXIT_LOCAL, ShkError
 
-HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.@-]*")
-PATTERNS = {
-    "project": re.compile(r"[a-z0-9][a-z0-9-]{0,23}"),
-    "remote_root": re.compile(r"/[A-Za-z0-9_./-]+"),
-    "control_host": HOST,
-    "data_host": HOST,
-}
-TIMEOUTS = ("connect_timeout", "command_timeout", "transfer_timeout")
-KEYS = frozenset({*PATTERNS, *TIMEOUTS, "validators", "cpu_thread_budget"})
+_PositiveInt = Annotated[int, Field(gt=0)]
+_Host = Annotated[str, Field(pattern=r"\A[A-Za-z0-9][A-Za-z0-9_.@-]*\z")]
 
-Invalid = Callable[[str], ShkError]
+
+@with_config(ConfigDict(strict=True, extra="forbid"))
+class _ConfigTable(TypedDict, total=False):
+    """Only explicitly supplied settings; ProjectConfig owns all defaults."""
+
+    project: Annotated[str, Field(pattern=r"\A[a-z0-9][a-z0-9-]{0,23}\z")]
+    remote_root: Annotated[str, Field(pattern=r"\A/[A-Za-z0-9_./-]+\z")]
+    control_host: _Host
+    data_host: _Host
+    connect_timeout: _PositiveInt
+    command_timeout: _PositiveInt
+    transfer_timeout: _PositiveInt
+    cpu_thread_budget: _PositiveInt
+    validators: dict[str, Annotated[list[str], Field(min_length=1)]]
+
+
+_CONFIG = TypeAdapter(_ConfigTable)
 
 
 @dataclass(frozen=True)
@@ -63,36 +74,6 @@ class ProjectConfig:
 DEFAULTS = ProjectConfig()
 
 
-def _validators(bad: Invalid, table: object) -> Mapping[str, tuple[str, ...]]:
-    argv_lists = isinstance(table, dict) and all(
-        isinstance(argv, list) and argv and all(isinstance(arg, str) for arg in argv)
-        for argv in table.values()
-    )
-    if not isinstance(table, dict) or not argv_lists:
-        raise bad('validators must be a table of NAME = ["argv", ...]')
-    return MappingProxyType({name: tuple(argv) for name, argv in table.items()})
-
-
-def _value(bad: Invalid, key: str, value: object) -> Any:
-    if key == "cpu_thread_budget":
-        if type(value) is not int or value < 1:
-            raise bad("cpu_thread_budget must be a positive integer (omit to disable)")
-        return value
-    if key in TIMEOUTS:
-        if type(value) is not int or value <= 0:
-            raise bad(f"{key} must be a positive integer")
-        return value
-    if key == "validators":
-        return _validators(bad, value)
-    if not isinstance(value, str) or not PATTERNS[key].fullmatch(value):
-        raise bad(f"{key} = {value!r} must match {PATTERNS[key].pattern}")
-    if key == "remote_root":
-        value = value.rstrip("/")
-        if not value or ".." in value.split("/"):
-            raise bad("remote_root must be below / and contain no '..'")
-    return value
-
-
 def parse(table: object, path: Path | None = None) -> ProjectConfig:
     """Validate a [tool.sherlock-kit] table read from path."""
 
@@ -100,12 +81,29 @@ def parse(table: object, path: Path | None = None) -> ProjectConfig:
         where = path or "sherlock-kit configuration"
         return ShkError(EXIT_LOCAL, "config_invalid", f"{where}: {message}", hint)
 
-    if not isinstance(table, dict):
-        raise bad("[tool.sherlock-kit] must be a table")
-    unknown = set(table) - KEYS
-    if unknown:
-        raise bad(f"unknown keys {sorted(unknown)}", hint=f"allowed: {', '.join(sorted(KEYS))}")
-    values = {key: _value(bad, key, value) for key, value in table.items()}
+    try:
+        supplied = _CONFIG.validate_python(table)
+    except ValidationError as exc:
+        errors = exc.errors(include_url=False, include_input=False)
+        hint = None
+        if any(error["type"] in ("extra_forbidden", "invalid_key") for error in errors):
+            hint = f"allowed: {', '.join(sorted(_ConfigTable.__annotations__))}"
+        message = "; ".join(
+            f"{'.'.join(map(str, error['loc'])) or '[tool.sherlock-kit]'}: {error['msg']}"
+            for error in errors
+        )
+        raise bad(message, hint) from None
+    # Adapt the validated table to the public dataclass without mirroring its defaults.
+    values: dict[str, Any] = dict(supplied)
+    if "validators" in supplied:
+        values["validators"] = MappingProxyType({
+            name: tuple(argv) for name, argv in supplied["validators"].items()
+        })
+    if "remote_root" in supplied:
+        root = supplied["remote_root"].rstrip("/")
+        if not root or ".." in root.split("/"):
+            raise bad("remote_root must be below / and contain no '..'")
+        values["remote_root"] = root
     found = ProjectConfig(path=path, **values)
     if found.control_host == found.data_host:
         raise bad("control_host and data_host must differ")

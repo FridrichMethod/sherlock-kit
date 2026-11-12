@@ -82,6 +82,65 @@ class ConfigTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.invalid(text)
 
+    def test_omitted_and_explicit_empty_or_null_values_differ(self):
+        self.assertEqual(config.parse({}), config.DEFAULTS)
+        self.assertIsNone(config.parse({}).cpu_thread_budget)
+        for key in ("project", "remote_root", "cpu_thread_budget"):
+            for value in ("", None):
+                with self.subTest(key=key, value=value), self.assertRaises(ShkError):
+                    config.parse({key: value})
+
+    def test_all_integer_fields_are_strict_positive_integers(self):
+        for key in ("connect_timeout", "command_timeout", "transfer_timeout", "cpu_thread_budget"):
+            for value in (True, False, 1.0, 1.5, "1", 0, -1, None):
+                with self.subTest(key=key, value=value), self.assertRaises(ShkError) as caught:
+                    config.parse({key: value})
+                self.assertEqual(
+                    (caught.exception.code, caught.exception.token), (1, "config_invalid")
+                )
+            self.assertEqual(getattr(config.parse({key: 2}), key), 2)
+
+    def test_regexes_require_full_matches_and_errors_retain_location_and_hint(self):
+        path = Path("/p/sherlock-kit.toml")
+        for key, valid in (
+            ("project", "demo"),
+            ("remote_root", "/x/y"),
+            ("control_host", "login"),
+            ("data_host", "data"),
+        ):
+            for suffix in ("\n", "\r", "\x00", "\t"):
+                with self.subTest(key=key, suffix=suffix), self.assertRaises(ShkError):
+                    config.parse({key: valid + suffix}, path)
+        for key in ("path", "unknown", 1, None):
+            with self.subTest(key=key), self.assertRaises(ShkError) as caught:
+                config.parse({key: "x"}, path)
+            self.assertEqual((caught.exception.code, caught.exception.token), (1, "config_invalid"))
+            self.assertIn(str(path), caught.exception.message)
+            self.assertIn("allowed:", caught.exception.hint)
+            self.assertIn("cpu_thread_budget", caught.exception.hint)
+
+    def test_validator_arguments_are_copied_and_nested_output_is_immutable(self):
+        original = {"bundle": ["python", "-m", "v"]}
+        found = config.parse({"validators": original})
+        original["bundle"].append("changed")
+        original["new"] = ["other"]
+        self.assertEqual(dict(found.validators), {"bundle": ("python", "-m", "v")})
+        with self.assertRaises(TypeError):
+            found.validators["bundle"][0] = "changed"
+        for argv in (("python",), [], [1], "python", None):
+            with self.subTest(argv=argv), self.assertRaises(ShkError):
+                config.parse({"validators": {"bundle": argv}})
+
+    def test_public_dataclass_positional_keyword_equality_and_root(self):
+        path = Path("/p/sherlock-kit.toml")
+        found = config.ProjectConfig(path, "demo", "/x")
+        self.assertEqual(found, config.ProjectConfig(path=path, project="demo", remote_root="/x"))
+        self.assertEqual(found, config.parse({"project": "demo", "remote_root": "/x"}, path))
+        self.assertEqual(found.root, path.parent)
+        self.assertTrue(dataclasses.is_dataclass(found))
+        with self.assertRaises(dataclasses.FrozenInstanceError):
+            found.validators = {}
+
     def test_grammar(self):
         for text in (
             'project = ""',

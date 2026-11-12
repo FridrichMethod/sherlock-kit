@@ -39,6 +39,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ConfigDict, TypeAdapter, ValidationError, with_config
+from typing_extensions import TypedDict
+
 from sherlock_kit import __version__, executor
 from sherlock_kit.config import DEFAULTS, ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNREACHABLE, Outcome, ShkError
@@ -329,13 +332,25 @@ def _locked(path: Path) -> Iterator[None]:
 # Pull steps --------------------------------------------------------------------------------------
 
 
+@with_config(ConfigDict(strict=True, extra="allow"))
+class _ReceiptIdentity(TypedDict, total=False):
+    """Historical receipts need only optional identity fields, with opaque metadata."""
+
+    manifest_sha256: str | None
+    validator: str | None
+
+
+_RECEIPT = TypeAdapter(_ReceiptIdentity)
+
+
 def _read_receipt(path: Path) -> dict[str, Any] | None:
     try:
         text = path.read_text(encoding="utf-8")
+        return dict(_RECEIPT.validate_python(json.loads(text)))
     except FileNotFoundError:
         return None
-    receipt: dict[str, Any] = json.loads(text)  # written by _write_receipt, atomically
-    return receipt
+    except (UnicodeError, ValueError, ValidationError) as exc:
+        raise ShkError(EXIT_LOCAL, "receipt_invalid", f"{path}: {exc}") from None
 
 
 def _write_receipt(path: Path, receipt: dict[str, Any]) -> None:
