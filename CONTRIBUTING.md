@@ -73,8 +73,9 @@ git diff --check
 
 ## Boundaries
 
-- Python is standard library only and runs on 3.11 to 3.14 (no newer syntax or
-  APIs). Keep it lean and readable: small functions, external input validated
+- Python runs on 3.11 to 3.14 (no newer syntax or APIs). Prefer standard-library
+  mechanisms where sufficient; dependencies need a concrete maintenance benefit
+  and supported installation checks. Keep it lean and readable: small functions, external input validated
   once at the boundary, and no defensive code against situations that cannot
   realistically happen. Lean is not a line count; do not compress code to save
   lines.

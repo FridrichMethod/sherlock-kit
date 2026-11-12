@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 readme = "README.md"
 description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["pydantic>=2.12,<3"]
 classifiers = [
     "Environment :: Console",
     "Operating System :: POSIX",
@@ -27,6 +27,8 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = [
+    "build>=1.2.2,<2",
+    "hypothesis>=6.142,<7",
     # Same versions as the mirrors-mypy and ruff-pre-commit revs in .pre-commit-config.yaml,
     # so a local `mypy` or `ruff check` agrees with the hooks and with CI.
     "mypy==1.19.1",
