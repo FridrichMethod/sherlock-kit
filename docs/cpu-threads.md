@@ -6,7 +6,9 @@ integer no greater than `--cpus` (CPUs per task). In a multi-task job the budget
 is per task, not an additional allocation or a limit for the whole process tree.
 Projects may opt in by adding `cpu_thread_budget = 1` to `[tool.sherlock-kit]` or
 `sherlock-kit.toml`. An explicit CLI value overrides this configured budget.
-Without either setting, the prior script/argv/spec behavior is unchanged.
+Without either setting, `shk` sets no thread variables and the budget leaves no
+trace in the frozen argv or spec: the argv starts with `sbatch`, with no `env`
+prefix, and the spec has no `cpu_thread_policy`.
 
 The policy is intentionally explicit: enabling it replaces inherited numerical
 thread settings, including conflicting container-prefixed values. If a scientific
@@ -18,7 +20,7 @@ submitting shell's ambient values.
 
 The frozen `argv` becomes `env NAME=VALUE ... sbatch ...`. Both packaged POSIX
 submit and preflight programs execute this command directly. `env` sets these
-values in the actual sbatch process; existing `--export=ALL` passes them to the
+values in the actual sbatch process; the argv's `--export=ALL` passes them to the
 job before its script begins. The user script remains byte-identical, with its
 original interpreter/shebang and SHA. No shell syntax is inserted into arbitrary
 Python, shell or other scripts. No additional remote protocol or wrapper file is
@@ -63,12 +65,14 @@ nor monitors/kills processes based on their OS thread count.
 Guarded argv deliberately starts with `env`, rather than `sbatch`. A project
 controller or frozen native/SubmitLine verifier that insists on argv[0] being
 sbatch must explicitly accept and validate this exact frozen environment prefix
-before enabling the option. Existing deployed toolkit copies do not gain this
-feature automatically; CLI/config/source hashes must be upgraded through their
-normal reviewed deployment. Do not point a live job at a development checkout or
-change a frozen scientific runtime to bypass its source/argv gates.
+before enabling the option. The option exists in sherlock-kit 0.6.0 and later;
+a project gets it by upgrading its pinned toolkit, CLI/config/source hashes
+included, through its normal reviewed deployment. Do not point a live job at a
+development checkout or change a frozen scientific runtime to bypass its
+source/argv gates.
 
 Tests run actual packaged submit/preflight shell programs against fake Slurm,
 verify the effective payload/container environment despite inherited 52-thread
-settings, validate config/CLI boundaries and preserve unguarded legacy behavior.
-No remote job, container installation or GPU is used by these tests.
+settings, validate config/CLI boundaries and check that a submission without a
+budget stays unguarded. No remote job, container installation or GPU is used by
+these tests.

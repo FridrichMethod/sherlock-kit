@@ -381,8 +381,9 @@ Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
 - Per-project delivery: use the pinned environment's `shk install-skill --project .`
   (optionally `--rules workstation` or `--rules cluster`). Read rules directly with
   `shk rules workstation` or `shk rules cluster` when they are not already loaded.
-  An existing global Claude rules file remains supported: `install-skill --rules`
-  skips its project copy unless `--force` is given.
+  When `~/.claude/rules/sherlock-kit.md` exists, `install-skill --rules` skips the
+  project copy, because Claude Code already loads that file; `--force` copies it
+  anyway.
 
 ## Development
 

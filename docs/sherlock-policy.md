@@ -10,10 +10,10 @@ recommended practice.
 
 ## Source
 
-First read on 2026-10-10 (Pacific) from a Sherlock login node, one attended
-read-only `cat` over the existing control master. The last-modified dates are
-the ones listed at the re-read of 2026-10-21 below; the re-reads before
-2026-10-18 recorded none.
+The rules follow Sherlock's agent instructions, `/etc/agents/AGENTS.md` and the
+four topic files beside it, as last modified on the dates below. Both rules
+files carry `Reviewed 2026-10-21`, the date of their last comparison with those
+files; `tests/test_release_metadata.py` pins that date.
 
 | File | Last modified | Topics |
 |---|---|---|
@@ -23,103 +23,16 @@ the ones listed at the re-read of 2026-10-21 below; the re-reads before
 | `/etc/agents/software.md` | 2026-10-09 | modules, preference order, Python environments, compiling, licenses |
 | `/etc/agents/storage.md` | 2026-10-06 | filesystems, purge, I/O patterns, transfers, usage |
 
-Human documentation: <https://www.sherlock.stanford.edu/docs/>. The workstation
-rules were rechecked on 2026-10-11 against the same five site files fetched
-through the attended control master. Since the 2026-10-21 re-read below, both
-rules files carry that review date. The added workstation sandbox guidance
-distinguishes local access denials from absent SSH masters. The site's Codex
-guidance still requires per-command approval when its sandbox cannot start,
-without disabling it. Re-read the site files before changing the rules and
-update the review date and this record.
+Human documentation: <https://www.sherlock.stanford.edu/docs/>.
 
-The lead re-read all five files on sh02-ln04 on 2026-10-12 via the existing
-attended control master before the 0.5.0 wording changes. Site rule 1 explicitly
-allows workflow managers that only submit and poll jobs. Rule 10 prohibits
-scheduling future agent sessions. The updated rules distinguish bounded
-deterministic compute controllers inside an allocation, using `--executor local`
-without a workstation dependency, from agent or LLM rescheduling. Site limits,
-login-node restrictions, the 60 s cadence and access controls still bind.
-
-The lead re-read the site rules on 2026-10-13 before updating cancellation
-guidance. The numbered ownership rule permits stopping only one's own
-processes and uses scheduler cancellation for jobs. It does not impose
-per-job user consent. Routine exact cancellation inside an authorized task
-therefore retains the task authorization, and the agent tells the user why;
-ambiguous, unrelated, broad or materially destructive cancellation requires
-clarification.
-No job was cancelled to test this wording.
-
-The 0.5.0 rules edits of 2026-10-18 follow live Slurm observations and the
-kit's own behavior, not a new reading of the site files, so the review date
-stays 2026-10-13. They say that `dev` takes no batch jobs (Sherlock rejects
-them, and `shk submit` refuses them offline), that releasing a job held on a
-borrowed partition counts as submitting it, and that the cancellation reason
-goes to the user, because `shk cancel` records none ("record a reason" had no
-place to go). The profile texts also drop wording that the flags and the block
-introduction already state.
-
-The lead re-read all five site files on 2026-10-18 through the attended control
-master and listed their modification dates. `AGENTS.md` and `policy.md` changed
-on 2026-10-13. Against the copies read at 2026-10-11 04:26 UTC (2026-10-10
-Pacific), the only change in `AGENTS.md` is in rule 5: no SSH server of any kind on any node, login or compute, under any name or
-port, bound to localhost, inside a job or a container, or attended; a tool that
-starts one is disabled or not used, and running one can lead to suspension.
-`policy.md` repeats it under Sanctions and Processes and cleanup and drops "SSH
-daemons" from its list of unattended mechanisms. Neither rules file carried the
-ban, so the review of 2026-10-13 either preceded the change or missed it. Four
-readers compared the site files with both rules files, and two refuters checked
-each finding. Within the 7 KiB cap the rules files now say:
-
-- Both files carry the SSH-server ban; the workstation file also says never to
-  share credentials or sessions.
-- Workstation: `sherlock-plain` is a login node for light commands; limits and
-  features come from `sh_part` and `sh_node_feat` in a login shell (a
-  non-login ssh command does not find them); intensive job I/O stays off
-  `$HOME` and `$GROUP_HOME`; the agent works only with its own processes; a
-  `--resubmit` reason without a diagnosis is only for a job that did not fail.
-- Cluster: on login nodes no listener for anything but the user's own
-  interactive tools and no model, web or API serving (the site allows the
-  former and forbids the latter); no `watch` or shell polling loops; large or
-  shared environments go in `$GROUP_HOME`; no probing of shared infrastructure;
-  only one's own or shared directories, never merely readable ones; inspect and
-  stop only one's own processes, and never stop a job by killing its processes.
-- Both: no helping to extend scratch lifetime (the site also forbids
-  recommending it); the cluster file names DTN and Globus transfers rather than
-  all external transfers, since fetching sources from Sherlock is allowed.
-
-The additions are paid for by shorter wording and by dropping text found
-elsewhere: the `sacct` field list (slurm.md), `shk doctor --remote` and the
-read-only note on `shk doctor` in the cluster file (both in the skill), and the
-SIGTERM remark, whose evidence stays in docs/validation/observed-slurm.md while
-"checkpoint periodically" remains. Left out on purpose, as before: rule 11's
-preference for fewer, larger files; rule 3's naming of filesystems by variable
-in the workstation file (`remote_root` takes a literal absolute path, a kit
-choice); "alternate login services" in the workstation list; and recommended
-practice generally. The review date is now 2026-10-18. Re-read the site files
-before the next rules change that touches site policy.
-
-The lead re-read the site files on 2026-10-21 through the attended control
-master, before the 0.6.0 rules edits. The four topic files are byte for byte the
-copies of 2026-10-18. `AGENTS.md` changed on 2026-10-19 only by a new rule 12,
-read current instructions: read `AGENTS.md` at the start of each session on
-Sherlock and after resuming from a summary or context compaction, and the
-relevant topic files before continuing; memory, summaries and an earlier
-session's read are not substitutes; handoff summaries keep the requirement; and
-instruction reminders are not filtered out. Changes:
-
-- Both rules files carry rule 12 in their introductions.
-- `shk` still removes the login banner from the output it parses, but now writes
-  each banner line once per process to stderr instead of dropping it.
-- The cluster file's `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` (slurm.md: set the
-  application's thread count to the allocation) yields to `--cpu-thread-budget`,
-  an opt-in budget at most the allocation.
-
-To stay within the 7 KiB cap, both files drop "the rest is recommended practice"
-(implied by "only numbered rules are requirements") and shorten the exit 5
-wording. The cluster file also drops its configuration line, which the skill
-covers. The workstation file also drops the owners checkpoint sentence, which
-the owners profile and the skill keep, and "Keep `shk cancel` UID/name-scoped",
-since `shk cancel` has no other scope. The review date is now 2026-10-21.
+Read the site files from the workstation with an attended, read-only `cat`
+over the user's existing control master, as the workstation rules file does for
+`AGENTS.md`; the command rides the master and cannot log in. Before a rules
+change that touches site policy, re-read all five site files, note each file's
+last-modified date and compare any changed file with both rules files. Then set
+the `Reviewed` date to the date of that re-read, whether or not a site file
+changed, in both rules files and in `tests/test_release_metadata.py`, and
+update the table above and the sections below.
 
 ## Where each site rule lands
 
@@ -139,9 +52,81 @@ since `shk cancel` has no other scope. The review date is now 2026-10-21.
 | 12 Read current instructions | Introduction | Introduction |
 | Support, agent notes | Connection (Codex sandbox) | Where you are, Login nodes |
 
-Corrections against the 0.3 policy text: purge evasion is termination of the
-account on the first occurrence (it said suspension), and no agent module is
-named (the site files name none; agents find modules with `ml spider`).
+How the rules files carry particular site rules:
+
+- Rule 1 allows workflow managers that only submit and poll jobs; rule 10
+  forbids scheduling future agent sessions. The rules files therefore allow
+  bounded deterministic compute controllers inside an allocation, using
+  `--executor local` without a workstation dependency, and forbid agent or LLM
+  rescheduling. Site limits, login-node restrictions, the 60 s cadence and
+  access controls still bind.
+- Rule 5 forbids any SSH server on any node, login or compute, under any name
+  or port, bound to localhost, inside a job or a container, or attended; a tool
+  that starts one is disabled or not used, and running one can lead to
+  suspension. `policy.md` repeats it under "Sanctions" and "Processes and
+  cleanup". Both rules files carry the ban and forbid sharing credentials or
+  sessions.
+- The site's numbered ownership rule permits stopping only one's own processes
+  and uses scheduler cancellation for jobs; it imposes no per-job user consent.
+  Routine exact cancellation inside an authorized task therefore retains the
+  task authorization, and the agent tells the user why; ambiguous, unrelated,
+  broad or materially destructive cancellation requires clarification. This
+  guidance rests on that reading of the site rules, not on a live test.
+- Rule 12 (read current instructions) requires reading `AGENTS.md` at the start
+  of each session on Sherlock and after resuming from a summary or context
+  compaction, and the relevant topic files before continuing; memory, summaries
+  and an earlier session's read are no substitute, handoff summaries keep the
+  requirement, and instruction reminders are never filtered out. Both files
+  carry it in their introductions. `shk` removes the login banner from the
+  output it parses but writes each banner line once per process to stderr, so
+  the reminder still reaches the agent.
+- The site sanctions purge evasion with account termination on the first
+  occurrence. Both files forbid helping to extend scratch lifetime; the site
+  also forbids recommending it.
+- On login nodes the cluster file allows listeners only for the user's own
+  interactive tools and forbids model, web or API serving, as the site does.
+- The cluster file names DTN and Globus transfers rather than all external
+  transfers, since fetching sources from Sherlock is allowed.
+- `slurm.md` asks to set the application's thread count to the allocation. The
+  cluster file's `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` yields to
+  `--cpu-thread-budget`, an opt-in budget of at most the allocation.
+- The site's Codex note requires per-command approval when the Codex sandbox
+  cannot start, never disabling it. Both files carry it, and the workstation
+  file tells local access denials apart from absent SSH masters.
+- Both files take limits and features from `sh_part` and `sh_node_feat` in a
+  login shell; a non-login ssh command does not find them.
+- No agent module is named: the site files name none, and agents find modules
+  with `ml spider`.
+
+The rules files also say that `dev` takes no batch jobs. This comes from
+[observed Slurm behavior](validation/observed-slurm.md#submission), not from
+the site files: Sherlock rejects them, so `shk submit` refuses them offline.
+
+## Left out of the rules files
+
+By design, the rules files leave out:
+
+- recommended practice generally;
+- rule 11's preference for fewer, larger files;
+- in the workstation file, rule 3's naming of filesystems by variable
+  (`remote_root` takes a literal absolute path, a kit choice) and "alternate
+  login services" in its list of forbidden mechanisms.
+
+To stay within the 7 KiB cap, they also leave out text that is implied or
+stated elsewhere:
+
+- a statement that everything but the numbered rules is recommended practice,
+  which "only numbered rules are requirements" implies;
+- the `sacct` field list, which the site's `slurm.md` gives;
+- in the cluster file, `shk doctor --remote`, the note that `shk doctor` is
+  read-only and the `[tool.sherlock-kit]` configuration line that the
+  workstation file has; the skill covers all three;
+- in the workstation file, a separate item saying that `owners` jobs must
+  checkpoint periodically, which the `owners` profile and the skill state, and
+  the "UID/name-scoped" qualifier for `shk cancel`, which has no other scope;
+- any note on SIGTERM handling: live requeues gave no usable SIGTERM window
+  ([observed live](validation/observed-slurm.md#requeue-and-preemption)), and
+  the `owners` profile requires scripts to checkpoint and resume instead.
 
 ## Toolkit choices stricter than the site
 
