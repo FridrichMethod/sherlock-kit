@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 readme = "README.md"
 description = "Small standard-library interface for agents to run Slurm jobs and move data on Stanford Sherlock"
 requires-python = ">=3.11"
-dependencies = ["pydantic>=2.12,<3"]
+dependencies = []
 classifiers = [
     "Environment :: Console",
     "Operating System :: POSIX",

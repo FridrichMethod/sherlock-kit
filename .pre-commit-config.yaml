@@ -40,7 +40,6 @@ repos:
     rev: v1.19.1 # keep the dev extra's mypy pin in pyproject.toml equal to this
     hooks:
       - id: mypy
-        additional_dependencies: ["pydantic>=2.12,<3"]
         args: [--config-file=pyproject.toml]
         files: ^(src/|bin/shk$)
 
