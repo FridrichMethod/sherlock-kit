@@ -104,10 +104,11 @@ At each bounded decision point:
    per-unit exports so durable collection need not wait for the whole bundle.
    Preserve failed attempts, costs and raw outputs even when they are not accepted.
 3. Assign independent ready work to idle compatible local capacity and refill
-   admitted remote lanes toward the authorized live-bundle target, within both
-   caps. Whenever below target, report ready-but-unsubmitted count, age and reason.
-   Explain each idle slot by its actual blocker; queued reservations are not
-   running GPUs.
+   admitted remote lanes toward the authorized live-bundle target, within the
+   campaign cap. The smaller pilot cap limits only unadmitted pilots, not admitted
+   production jobs. Whenever below target, report ready-but-unsubmitted count, age
+   and reason. Explain each idle slot by its actual blocker; queued reservations
+   are not running GPUs.
 4. Reassess measured runtime, peak memory and queue delay when they can change a
    decision. A resources snapshot is not a reservation: apparent free GPUs alone
    do not prove that a pending request is wrong or will start immediately.
