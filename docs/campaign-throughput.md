@@ -35,7 +35,7 @@ Record the following before dispatch:
   for a first GPU pilot is distinct from permission to scale an admitted lane.
 - An authorized target of unique live remote bundles and local workers, distinct
   from the hard campaign cap and smaller pilot cap. Count pending, held, running,
-  unknown and auto-requeue-pending jobs as reserved slots until reconciled; a
+  unknown and auto-requeue-pending jobs as reserved slots until Slurm evidence permits release; a
   changed source hash does not create capacity or release an old owner. Set
   bounded technical retry and no-progress requeue budgets.
 
@@ -97,8 +97,8 @@ must still meet current partition permissions, occupancy requirements and caps.
 At each bounded decision point:
 
 1. Read the local UTC clock. Batch due status checks, respect every
-   `next_check_after` and keep checks at least 60 seconds apart. Reconcile unknown
-   mutations before making a replacement submission; incomplete evidence leaves
+   `next_check_after` and keep checks at least 60 seconds apart. Resolve unknown
+   mutations from Slurm evidence before making a replacement submission; incomplete evidence leaves
    ownership and capacity reservations intact.
 2. Ingest verified completed units and update the ledger. Publish immutable
    per-unit exports so durable collection need not wait for the whole bundle.
@@ -161,7 +161,7 @@ score. Other checkpoint schemes must state their equivalent guarantees up front.
 | A GPU job spends startup time on general CPU tests | Startup timeline | Move those tests into local preparation; retain mandatory in-allocation gates. |
 | Many jobs are pending despite free-looking GPUs | Complete status, frozen request and schedulable resources | Consider a bounded request change or safe transfer; do not assume a scheduler defect. |
 | Local GPU is idle while work is ready | Compatibility, ownership and admission leases | Dispatch an unowned ready unit, or complete a verified ownership transfer first. |
-| A mutation reply is lost, or an owners job is pending again | Saved token, known job ID and detailed status | Reconcile; retain ownership and the reserved slot. |
+| A mutation reply is lost, or an owners job is pending again | Saved token, known job ID and detailed status | Check Slurm evidence; retain ownership and the reserved slot. |
 | A seed restarts or a low-quality result is produced | Unit completeness versus scientific QC | Rerun only interrupted technical units; retain complete low-quality outputs. |
 | Setup dominates many small jobs | Measured startup and unit walltime | Bundle more units without changing their scientific budgets. |
 | Preparation appears stalled with an idle agent | Agent state and last dispatched task | Explicitly wake it with a bounded task; a queued message is not execution. |
