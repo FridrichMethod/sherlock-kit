@@ -2,9 +2,12 @@
 
 ## Unreleased
 
+- Add a parallel GPU campaign guide and self-contained skill checklist for CPU preparation, independent first pilots, bounded dispatch, explicit work-state counts and safe ownership transfer. Documentation only; no CLI or partition policy changes.
+
 - Document project-pinned standalone installations and project-local agent content,
   including absolute-path commands inside Sherlock allocations. Remove the skill's
   global-launcher fallback; runtime behavior, version and packaged rules stay the same.
+
 - Give the README Quick start a minimal `~/.ssh/config` for the default
   `sherlock-plain` (login node) and `sherlock-dtn` (DTN) aliases, and state that
   `control_host` and `data_host` accept any other OpenSSH aliases as long as the
