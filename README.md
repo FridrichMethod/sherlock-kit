@@ -20,6 +20,8 @@ flag has no value is 1. This does not cap OS thread creation or replace Slurm CP
 isolation. See [CPU thread budgets](docs/cpu-threads.md) for provenance, limits and
 controller compatibility.
 
+For multi-model or multi-stage GPU work, see [Running a parallel GPU campaign](docs/campaign-throughput.md) for independent pilot admission, explicit work-state counts, productive local capacity and safe rebalancing.
+
 ## Install
 
 Install from a release tag, as below; `main` can be ahead of the latest release.
