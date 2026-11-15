@@ -485,6 +485,7 @@ class SubmitFlows(Flow):
 
     def test_borrowed_array_gets_a_factual_total_work_advisory(self):
         cases = (
+            ("3", 3, None, "(no throttle)"),  # the smallest array that gets the advisory
             ("8", 8, None, "(no throttle)"),
             ("100", 100, None, "(no throttle)"),
             ("100%2", 100, 2, "(at most 2 at a time)"),

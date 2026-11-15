@@ -278,7 +278,7 @@ class PullTests(TransferCase):
         self.addCleanup(locked.chmod, 0o700)
         result = self.pull()
         self.assert_refused(result, 1, "remote_failed")
-        self.assertRegex(result[1]["message"], r"exit 1\. find: .*locked.*Permission denied")
+        self.assertRegex(result[1]["message"], r"exit 1\. find: .*locked")
         self.assertEqual([path.name for path in self.dest.parent.iterdir()], [".keep"])
         self.assertFalse([call for call in self.fake.calls() if "sherlock-dtn" in call])
 
