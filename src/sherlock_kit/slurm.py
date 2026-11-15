@@ -6,8 +6,9 @@ occupancy (one squeue per partition); submit adds one mutation (submit.sh, the s
 stdin) and cancel is only one mutation (cancel.sh: scancel -u USER --name=NAME). resolve_name() is pure: one name's
 rows grouped by base job id give new | live | done | failed | stale. live refuses even with
 --resubmit, done and failed need --resubmit REASON, stale (spec files, no rows) submits
-like new. Remote calls print next_check_after (now + 60 s); a lost mutation reply is
-action "unknown" (exit 5); exit 6 when the newest job of a listed name has an anomaly.
+like new. Remote calls print next_check_after (now + 60 s); a dispatched mutation without a
+confirmed result (a lost reply, sbatch without a job id, a nonzero scancel) is action "unknown"
+(exit 5); exit 6 when the newest job of a listed name has an anomaly.
 """
 
 from __future__ import annotations
@@ -92,17 +93,14 @@ BUDGET_JOBS, BUDGET_MINUTES = 2, 120
 
 @dataclass(frozen=True)
 class Refusal:
-    """The error token and hint of a remote marker that means nothing happened."""
+    """The error token and hint of a remote marker printed before dispatch: nothing ran."""
 
     token: str
     hint: str
 
 
-REFUSALS = {  # remote markers that mean nothing was submitted or cancelled (exit 3)
+REFUSALS = {  # printed before sbatch, scancel or scontrol is dispatched (exit 3)
     "SHK_LIVE": Refusal("live", "wait; check shk status at most once per 60 s"),
-    "SHK_REJECTED": Refusal(
-        "slurm_rejected", "read the message; shk status shows whether anything was queued"
-    ),
     "SHK_REFUSED": Refusal("remote_refused", "nothing ran; fix the cause, then retry once"),
 }
 
@@ -738,7 +736,12 @@ def _refusal(program: str, marker: str, value: str, errors: str) -> ShkError:
 def _mutate(
     ctx: Context, program: str, args: list[str], done: tuple[str, ...], stdin: bytes | None = None
 ) -> Reply:
-    """Run one mutation program: refusals raise exit 3; a lost or ambiguous reply is unknown."""
+    """Run one mutation program: refused before dispatch is exit 3, unconfirmed after is unknown.
+
+    Only the program's own success marker confirms a result. A lost reply, more or fewer than
+    one terminal marker and SHK_UNPARSED (the Slurm client failed, or printed no job id) all
+    leave the outcome unknown, whatever the client's message says.
+    """
     result = executors.run_program(ctx.executor(), program, args, stdin=stdin, mutation=True)
     if result.status == "unknown":
         return Reply("unknown", "no reply", [])
@@ -748,7 +751,7 @@ def _mutate(
     if len(markers) != 1:
         return Reply("unknown", f"{len(markers)} terminal markers", lines)
     marker, _, value = markers[0]
-    # SHK_ERR| lines carry the Slurm client's own message as evidence.
+    # SHK_ERR| lines carry the Slurm client's own message as evidence, never as a verdict.
     errors = " ".join(
         line.removeprefix("SHK_ERR|") for line in lines if line.startswith("SHK_ERR|")
     ).strip()
@@ -756,7 +759,7 @@ def _mutate(
         raise _refusal(program, marker, value, errors)
     if marker == "SHK_UNPARSED":
         evidence = " ".join(part for part in (value, errors[-2000:]) if part)
-        detail = f"unparsed {program} reply" + (f": {evidence}" if evidence else "")
+        detail = f"{program} outcome not confirmed" + (f": {evidence}" if evidence else "")
         return Reply("unknown", detail, lines)
     return Reply(marker, value, lines)
 

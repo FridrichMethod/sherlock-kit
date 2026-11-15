@@ -1,8 +1,11 @@
 # shk submit NAME RUN_DIR STAMP SHA256 SPEC_JSON -- sbatch ...   (job script on stdin)
-# Refuses a live NAME, stages RUN_DIR/.shk/NAME.STAMP.{sh,json}, runs sbatch once on the staged
-# script and renames both to NAME.<jobid>.*; prints exactly one of SHK_SUBMITTED <jobid>,
-# SHK_LIVE <ids>, SHK_REJECTED <rc> (+ SHK_ERR| lines, files removed), SHK_UNPARSED (files
-# kept) or SHK_REFUSED <why> (nothing ran); always exits 0.
+# Refuses a live NAME, stages RUN_DIR/.shk/NAME.STAMP.{sh,json} and runs sbatch once on the staged
+# script; prints exactly one marker and always exits 0. Before sbatch: SHK_LIVE <ids> or
+# SHK_REFUSED <why> (nothing ran). After sbatch its stdout is the only evidence, whatever the exit
+# code (with --wait that is the exit code of the job): a stdout that is, trailing newlines aside,
+# the one line N or N;cluster with N positive and no leading zero prints SHK_SUBMITTED <jobid> and
+# renames both files to NAME.<jobid>.*; anything else prints SHK_UNPARSED sbatch exit <rc>
+# (+ SHK_ERR| lines) and keeps NAME.STAMP.{sh,json,err}, because the job may or may not exist.
 for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
     case $v in SLURM_CONF) ;; SBATCH_* | SQUEUE_* | SACCT_* | SLURM_* | SHK_SUBMISSION_TOKEN) unset "$v" ;; esac
 done
@@ -27,19 +30,15 @@ got=$(sha256sum <"$base.sh") || refuse digest
 printf "%s\n" "$spec" >"$base.json" || refuse write
 out=$("$@" "$base.sh" 2>"$base.err" </dev/null)
 rc=$?
-if [ "$rc" -ne 0 ]; then
-    printf "SHK_REJECTED %s\n" "$rc"
+job=${out%%;*} cluster=${out#"$job"}
+case $job in "" | 0* | *[!0-9]*) job="" ;; esac
+case $cluster in ";" | ";"*[!A-Za-z0-9_.-]*) job="" ;; esac
+if [ -z "$job" ]; then
+    printf "SHK_UNPARSED sbatch exit %s\n" "$rc"
     head -c 2000 "$base.err" | sed "s/^/SHK_ERR|/"
-    rm -f "$base.sh" "$base.json" "$base.err"
     exit 0
 fi
 rm -f "$base.err"
-job=${out%%;*} # sbatch --parsable prints N or N;cluster
-case $job in "" | *[!0-9]*)
-    printf "SHK_UNPARSED\n"
-    exit 0
-    ;;
-esac
 mv "$base.sh" "$run/.shk/$name.$job.sh"
 mv "$base.json" "$run/.shk/$name.$job.json"
 printf "SHK_SUBMITTED %s\n" "$job"

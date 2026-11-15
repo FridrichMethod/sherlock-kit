@@ -4,6 +4,7 @@ import io
 import json
 import os
 import pwd
+import re
 import shlex
 import shutil
 import subprocess
@@ -23,8 +24,24 @@ from sherlock_kit import cli, executor, partitions, slurm, spec
 
 NOW = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)
 NEXT = "2026-10-10T12:01:00Z"
+STAMP = r"20261010T120000Z-[0-9a-f]{4}"  # NOW plus the random suffix of one submit attempt
 SCRIPT = "#!/bin/bash -l\n#SBATCH --mail-type=END\necho work\n"
 USER = pwd.getpwuid(os.getuid()).pw_name
+REFUSAL = "sbatch: error: Batch job submission failed: Invalid partition name specified"
+NOT_A_JOB_ID = (  # sbatch stdout that is not exactly one line N or N;cluster
+    "",
+    "0",
+    "007",
+    "12;",
+    "12 13",
+    "12\n13",
+    "12;clu ster",
+    "12\r",
+    "abc",
+    "-12",
+    "12;a;b",
+    "12;sherlock\n13",
+)
 REMOTE = SRC / "sherlock_kit" / "data" / "remote"
 PROGRAMS = sorted(REMOTE.glob("*.sh"))
 
@@ -90,6 +107,154 @@ class Flow(unittest.TestCase):
 
     def shk_dir(self, task="train-a"):
         return self.remote / "runs" / spec.job_name("demo", "default", task) / ".shk"
+
+    def or_expressions_reach_sbatch_intact(self):
+        """A feature expression is one sbatch argument, byte for byte, and frozen in the spec."""
+        allowed, preferred = "(CPU_GEN:SKX|CPU_GEN:CLX)&IB:HDR", "CPU_GEN:SPR|(CPU_GEN:ICX&IB:HDR)"
+        code, out = self.submit("--constraint", allowed, "--prefer", preferred)
+        self.assertEqual((code, out["action"]), (0, "submitted"))
+        argv = self.slurm.calls("sbatch")[0]["argv"]
+        self.assertEqual(
+            [word for word in argv if word.startswith(("--constraint", "--prefer"))],
+            [f"--constraint={allowed}", f"--prefer={preferred}"],
+        )
+        self.assertEqual(argv[:-1], out["argv"][1:])
+        text = (self.shk_dir() / f"{out['name']}.{out['job_id']}.json").read_text()
+        frozen = json.loads(text)
+        self.assertEqual(frozen["argv"], out["argv"])
+        self.assertEqual(
+            (frozen["resources"]["constraint"], frozen["resources"]["prefer"]),
+            (allowed, preferred),
+        )
+        self.assertEqual((text.count(allowed), text.count(preferred)), (2, 2))
+
+
+class OutcomeCases:
+    """After dispatch only a strict job id (submit) or exit 0 (cancel) confirms a result.
+
+    Mixed into a dash flow and the bash-as-sh flow: the decision is made by submit.sh and
+    cancel.sh, so both shells must make it the same way.
+    """
+
+    def unknown(self, task, *extra, **knobs):
+        """Submit task with the fake knobs set; the reply must be the exit 5 document."""
+        with patch.dict(os.environ, knobs):
+            code, out = self.submit(*extra, task=task)
+        self.assertEqual((code, out.get("action")), (5, "unknown"), out)
+        self.assertEqual(
+            out,
+            {
+                "schema_version": 1,
+                "ok": False,
+                "action": "unknown",
+                "name": spec.job_name("demo", "default", task),
+                "detail": out["detail"],  # each caller checks the text
+                "next": f"shk --project-dir {self.tmp} --executor {self.executor} status "
+                f"--task {task} --campaign default (not before {NEXT})",
+            },
+        )
+        return out
+
+    def evidence(self, task):
+        """The only files of task: NAME.STAMP.err, .json and .sh of one unconfirmed attempt."""
+        paths = sorted(self.shk_dir(task).iterdir())
+        name = re.escape(spec.job_name("demo", "default", task))
+        self.assertEqual([path.suffix for path in paths], [".err", ".json", ".sh"])
+        for path in paths:
+            self.assertRegex(path.stem, rf"\A{name}\.{STAMP}\Z")
+        self.assertEqual(len({path.stem for path in paths}), 1)
+        self.assertEqual(paths[2].read_text(), SCRIPT)
+        self.assertEqual(json.loads(paths[1].read_text())["argv"][0:2], ["sbatch", "--parsable"])
+        return paths[0].read_text()
+
+    def test_a_refusal_is_unknown_keeps_its_evidence_reads_stale_and_submits_again(self):
+        out = self.unknown("a", FAKE_SBATCH_RC="1")
+        self.assertEqual(out["detail"], f"submit outcome not confirmed: sbatch exit 1 {REFUSAL}")
+        self.assertEqual(self.evidence("a"), REFUSAL + "\n")
+        self.assertEqual(self.slurm.state()["jobs"], [])
+        entry = self.entry("a")
+        self.assertEqual(
+            (entry["state"], entry["current"], entry["spec_files"]), ("stale", None, 1)
+        )
+        code, again = self.submit(task="a")
+        self.assertEqual((code, again["action"], again["state_before"]), (0, "submitted", "stale"))
+        self.assertEqual(self.entry("a")["state"], "live")
+
+    def test_a_job_queued_before_the_error_is_unknown_then_live_and_never_doubled(self):
+        out = self.unknown("b", FAKE_SBATCH_SUBMIT_THEN_FAIL="1")
+        self.assertIn("sbatch exit 1 sbatch: error: Socket timed out", out["detail"])
+        self.assertIn("Socket timed out", self.evidence("b"))
+        entry = self.entry("b")
+        self.assertEqual((entry["state"], entry["spec_files"]), ("live", 1))
+        code, refused = self.submit("--resubmit", "retry", task="b")
+        self.assertEqual((code, refused["error"]), (3, "live"))
+        self.assertEqual((len(self.slurm.state()["jobs"]), len(self.slurm.calls("sbatch"))), (1, 1))
+
+    def test_no_error_text_decides_the_outcome(self):
+        message = "sbatch: error: a message that no list names"
+        out = self.unknown("c", FAKE_SBATCH_RC="1", FAKE_SBATCH_ERR=message + "\n")
+        self.assertEqual(out["detail"], f"submit outcome not confirmed: sbatch exit 1 {message}")
+        self.assertEqual(self.evidence("c"), message + "\n")
+        out = self.unknown("d", FAKE_SBATCH_RC="137", FAKE_SBATCH_ERR="")
+        self.assertEqual(out["detail"], "submit outcome not confirmed: sbatch exit 137")
+        self.assertEqual(self.evidence("d"), "")
+
+    def test_a_strict_job_id_is_a_submission_whatever_sbatch_exits(self):
+        cases = (
+            ("wait", {"FAKE_SBATCH_QUEUED_RC": "7"}),
+            ("cluster", {"FAKE_SBATCH_CLUSTER": "sherlock"}),
+            ("both", {"FAKE_SBATCH_QUEUED_RC": "1", "FAKE_SBATCH_CLUSTER": "sh-03.stanford_edu"}),
+        )
+        for index, (task, knobs) in enumerate(cases):
+            with self.subTest(task=task), patch.dict(os.environ, knobs):
+                code, out = self.submit(task=task)
+                job = str(1001 + index)
+                self.assertEqual((code, out["action"], out["job_id"]), (0, "submitted", job), out)
+                staged = sorted(path.name for path in self.shk_dir(task).iterdir())
+                self.assertEqual(staged, [f"{out['name']}.{job}.json", f"{out['name']}.{job}.sh"])
+                self.assertEqual(self.entry(task)["current"]["job_id"], job)
+
+    def test_stdout_that_is_not_a_strict_job_id_is_never_a_submission(self):
+        for index, text in enumerate(NOT_A_JOB_ID):
+            for rc in ("0", "1"):
+                with self.subTest(stdout=text, rc=rc):
+                    task = f"m{index}-{rc}"
+                    out = self.unknown(
+                        task, FAKE_SBATCH_STDOUT=text + "\n", FAKE_SBATCH_QUEUED_RC=rc
+                    )
+                    self.assertEqual(
+                        out["detail"], f"submit outcome not confirmed: sbatch exit {rc}"
+                    )
+                    self.assertEqual(self.evidence(task), "")
+
+    def test_a_failed_scancel_is_unknown_and_a_later_cancel_tells_the_truth(self):
+        out = self.submit(task="k")[1]
+        with patch.dict(os.environ, FAKE_SCANCEL_RC="1"):
+            code, reply = self.shk("cancel", "--task", "k")
+        self.assertEqual(
+            (code, reply),
+            (
+                5,
+                {
+                    "schema_version": 1,
+                    "ok": False,
+                    "action": "unknown",
+                    "name": out["name"],
+                    "detail": "cancel outcome not confirmed: scancel exit 1 "
+                    "scancel: error: Kill job error on job id",
+                    "next": f"shk --project-dir {self.tmp} --executor {self.executor} status "
+                    f"--task k --campaign default (not before {NEXT})",
+                },
+            ),
+        )
+        self.assertEqual(self.entry("k")["state"], "live")
+        code, reply = self.shk("cancel", "--task", "k")
+        self.assertEqual((code, reply["action"], reply["jobs"]), (0, "cancelled", [out["job_id"]]))
+        self.assertEqual(self.shk("cancel", "--task", "k")[1]["action"], "nothing_live")
+
+
+class OutcomeFlows(OutcomeCases, Flow):
+    """The outcome cases under /bin/sh."""
 
 
 class SubmitFlows(Flow):
@@ -159,16 +324,8 @@ class SubmitFlows(Flow):
         history = entry["history"][0]
         self.assertEqual((history["job_id"], history["state"]), (job, "done"))
 
-    def test_rejections_keep_nothing_and_a_queued_failure_stays_live(self):
-        self.knobs(FAKE_SBATCH_RC="1")
-        code, out = self.submit()
-        self.assertEqual((code, out["error"]), (3, "slurm_rejected"))
-        self.assertIn("Invalid partition name", out["message"])
-        self.assertEqual(list(self.shk_dir().iterdir()), [])
-        self.knobs(FAKE_SBATCH_RC="", FAKE_SBATCH_SUBMIT_THEN_FAIL="1")
-        self.assertEqual(self.submit()[1]["error"], "slurm_rejected")
-        self.knobs(FAKE_SBATCH_SUBMIT_THEN_FAIL="")
-        self.assertEqual(self.submit("--resubmit", "retry")[1]["error"], "live")
+    def test_or_expressions_reach_sbatch_as_single_arguments(self):
+        self.or_expressions_reach_sbatch_intact()
 
     def test_failed_needs_a_resubmit_reason(self):
         self.slurm.set(int(self.submit()[1]["job_id"]), "FAILED")
@@ -480,7 +637,8 @@ class StatusCancelOccupancyFlows(Flow):
         self.assertEqual(states, {out["name"]: "CANCELLED", other["name"]: "PENDING"})
         self.assertEqual(self.shk("cancel", "--name", out["name"])[1]["action"], "nothing_live")
         self.knobs(FAKE_SCANCEL_RC="1")
-        self.assertEqual(self.shk("cancel", "--task", "keep")[1]["error"], "slurm_rejected")
+        code, unknown = self.shk("cancel", "--task", "keep")
+        self.assertEqual((code, unknown["action"]), (5, "unknown"))
         self.assertEqual(self.shk("cancel", "--name", "not-a-shk-name")[0], 1)
 
     def test_occupancy_works_without_a_config(self):
@@ -594,8 +752,12 @@ class SshFlow(Flow):
         dials = [call for call in fake.calls() if "-O" not in call]
         self.assertEqual([call[-2] for call in dials], ["sherlock-plain"] * 3)
 
+    def test_or_expressions_survive_the_ssh_command_line(self):
+        self.knobs(**install_fake_ssh(self.tmp).env())
+        self.or_expressions_reach_sbatch_intact()
 
-class BashAsShFlow(Flow):
+
+class BashAsShFlow(OutcomeCases, Flow):
     """Sherlock's sh is bash in POSIX mode: the same programs must behave the same there."""
 
     def setUp(self):

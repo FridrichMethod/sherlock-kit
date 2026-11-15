@@ -14,10 +14,13 @@ confuse the parser); --duplicates prints one row per restart (Restarts 0, 1, ...
 -t all forgets a finished job after MinJobAge; sbatch --parsable prints N or N;cluster;
 slurmdbd refuses sacct windows wider than 31 days.
 
-Knobs: FAKE_SBATCH_RC, FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued, exit
-1), FAKE_SBATCH_HANG (queued, then sleep that many seconds), FAKE_SBATCH_CLUSTER,
-FAKE_SCANCEL_RC. Every call is recorded with the SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_
-variables it saw. FakeSlurm is the test-side API.
+Knobs: FAKE_SBATCH_RC (nothing queued, exit that code; FAKE_SBATCH_ERR, when set, replaces
+its stderr text and may be empty), FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued,
+exit 1), FAKE_SBATCH_HANG (queued, then sleep that many seconds), FAKE_SBATCH_CLUSTER,
+FAKE_SBATCH_STDOUT (queued; when set, printed verbatim instead of the id),
+FAKE_SBATCH_QUEUED_RC (queued, the id or FAKE_SBATCH_STDOUT printed, exit that code: the
+sbatch --wait shape), FAKE_SCANCEL_RC. Every call is recorded with the
+SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_ variables it saw. FakeSlurm is the test-side API.
 """
 
 import fcntl
@@ -279,7 +282,7 @@ def sacct(state, options):
 def sbatch(state, options, script):
     if os.environ.get("FAKE_SBATCH_RC"):
         error = "sbatch: error: Batch job submission failed: Invalid partition name specified\n"
-        return "", error, int(os.environ["FAKE_SBATCH_RC"])
+        return "", os.environ.get("FAKE_SBATCH_ERR", error), int(os.environ["FAKE_SBATCH_RC"])
     last, _, throttle = options.get("array", "").partition("-")[2].partition("%")
     count = int(last) + 1 if last else 1
     cpus = int(options.get("cpus-per-task", "1")) * int(options.get("ntasks", "1"))
@@ -300,7 +303,9 @@ def sbatch(state, options, script):
     if os.environ.get("FAKE_SBATCH_HANG"):
         return "", "", 0
     cluster = os.environ.get("FAKE_SBATCH_CLUSTER")
-    return f"{job['id']}{';' + cluster if cluster else ''}\n", "", 0
+    out = f"{job['id']}{';' + cluster if cluster else ''}\n"
+    code = int(os.environ.get("FAKE_SBATCH_QUEUED_RC") or 0)
+    return os.environ.get("FAKE_SBATCH_STDOUT", out), "", code
 
 
 def scancel(state, options):
