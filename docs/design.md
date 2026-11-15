@@ -40,9 +40,11 @@ empty). The facts live where they already are:
 - Slurm (`squeue -t all`, `sacct`) is the only record of what was submitted.
 - The run directory on Sherlock keeps `.shk/<name>.<jobid>.sh` and `.json` (the
   script as submitted and its frozen spec) as provenance; a submission whose
-  outcome is unknown leaves its staged `.shk/<name>.<stamp>.sh`, `.json` and
-  `.err` there instead. On scratch the directory is subject to the 90-day
-  purge like everything else there.
+  `sbatch` printed no strict job id leaves its staged
+  `.shk/<name>.<stamp>.sh`, `.json` and `.err` there instead, one set per such
+  submission, and each `.json` under `.shk/`, staged or renamed, counts toward
+  the name's `spec_files` in `status`. On scratch the directory is subject to
+  the 90-day purge like everything else there.
 - `pull` keeps its stage, lock and receipt beside the project's own destination.
 - The project configuration is a project file.
 
@@ -149,8 +151,8 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    program that calls a Slurm client first unsets `SBATCH_*`, `SQUEUE_*`,
    `SACCT_*` and `SLURM_*` (except `SLURM_CONF`); `doctor.sh` and
    `manifest.sh` call none. A reply of any remote program is a sequence of
-   records separated by LF only: the `SHK_SPEC` payload, the one piece of
-   run-directory text in a reply, has its LF bytes flattened to spaces on the
+   records separated by LF only: the `SHK_SPEC` payload, the one file content
+   embedded inside a single record, has its LF bytes flattened to spaces on the
    remote side, and every local parser splits a reply on LF alone, never with
    `str.splitlines()`, so no other separator inside a field (CR, VT, FF, FS,
    GS, RS or a Unicode line separator) can start a record or forge a marker.
@@ -182,10 +184,13 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 
    - `SHK_LIVE` (token `live`) or `SHK_REFUSED <why>` (token `remote_refused`):
      a guard stopped before `sbatch` ran, so nothing was dispatched; exit 3.
-   - `SHK_SUBMITTED <jobid>` (exit 0, action `submitted`): the entire stdout of
-     `sbatch` is one line holding a strict job id, `N` or `N;CLUSTER`, where N
-     is a positive decimal integer without a leading zero and CLUSTER is a
-     non-empty run of letters, digits, underscore, dot or dash. The id reaches
+   - `SHK_SUBMITTED <jobid>` (exit 0, action `submitted`): the stdout of
+     `sbatch` is, trailing newlines aside, one line holding a strict job id,
+     `N` or `N;CLUSTER`, where N is a positive decimal integer without a
+     leading zero and CLUSTER is a non-empty run of letters, digits,
+     underscore, dot or dash. `submit.sh` sets `LC_ALL=C` once `sbatch` has
+     returned, so both are matched as ASCII bytes whatever the login locale
+     (digits or letters of another script are never an id). The id reaches
      the client only in the controller's success response, so it is positive
      evidence of acceptance whatever exit code `sbatch` returned
      (`sbatch --wait` returns the job's exit code). The staged files are
@@ -343,6 +348,9 @@ the same.
 - The remote side trusts `sh`, `sha256sum` and the Slurm clients (`squeue`,
   `sacct`, `sbatch`, `scancel`, `scontrol`) on the login shell's `PATH`.
 - Provenance lives in the run directory and is purged with scratch.
+- Reply records are separated by LF only: the `SHK_SPEC` payload is flattened
+  remotely, but an LF inside a job name or comment that `squeue`, `sacct` or
+  `scontrol` prints raw is Slurm's own output and still starts a new line.
 - `shk` bounds its children with its own timeouts and kills their process
   group on a timeout or interrupt, but it installs no handler for SIGTERM or
   SIGHUP. Do not wrap it in an outer timeout shorter than its own: if `shk`

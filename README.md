@@ -147,8 +147,9 @@ shk resources --partition P [--partition P ...]
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION [--hostlist EXPRESSION ...]]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
 shk requeue --self --expect-name NAME [--expect-token TOKEN]
-shk status (--task T [--campaign C] [--run-dir PATH] [--task T ...] | --name NAME [--name NAME ...] | --all | --job-id ID [--job-id ID ...])
+shk status (--task T [--task T ...] [--campaign C [--campaign C ...]] [--run-dir PATH [--run-dir PATH ...]] | --name NAME [--name NAME ...] | --all | --job-id ID [--job-id ID ...])
            [--since DAYS] [--details]
+           (--campaign once for every --task, or once per --task; --run-dir once per --task, or not at all)
 shk cancel (--task T [--campaign C] | --name NAME)
 shk push LOCAL REMOTE [--anywhere]
 shk pull REMOTE LOCAL [--validate NAME] [--replace]
@@ -172,10 +173,11 @@ both. These are explicit arguments, not TOML defaults; see
   directory but no Slurm rows, submitted like `new`); a live name is always
   refused, a finished one unless `--resubmit REASON`. Then one mutation call
   stages the script under `<run-dir>/.shk/` and runs `sbatch`. The submission
-  is accepted only when the entire stdout of `sbatch` is one line holding a
-  strict job id, `N` or `N;CLUSTER` with N a positive decimal integer without a
-  leading zero: exit 0 `submitted`, and the staged files are renamed to the job
-  id, whatever exit code `sbatch` returned (`sbatch --wait` returns the job's).
+  is accepted only when the stdout of `sbatch` is, trailing newlines aside, one
+  line holding a strict job id, `N` or `N;CLUSTER` with N a positive decimal
+  integer without a leading zero, matched as ASCII digits whatever the login
+  locale: exit 0 `submitted`, and the staged files are renamed to the job id,
+  whatever exit code `sbatch` returned (`sbatch --wait` returns the job's).
   Every other result once `sbatch` has started is outcome unknown, never a
   refusal: exit 5 with `action: unknown`, `detail` holding `sbatch exit RC` and
   Slurm's stderr text when there is any, the staged `NAME.STAMP.sh`, `.json`
@@ -222,9 +224,9 @@ both. These are explicit arguments, not TOML defaults; see
   preemption or restart is unexpected (exit 6) on the non-preemptible partition
   of the attempt it interrupted.
   `--details` returns the evidence contract described below. `cancel` cancels
-  the live jobs of one name; a nonzero `scancel` exit or a lost reply is exit 5
-  with `scancel exit RC` and Slurm's stderr text in `detail`, to be settled by
-  the status read that `next` names.
+  the live jobs of one name; a nonzero `scancel` exit is exit 5 with
+  `scancel exit RC` and Slurm's stderr text in `detail`, and a lost reply is
+  exit 5 too; both are settled by the status read that `next` names.
 - `resources` reads `scontrol show nodes` once; Sherlock ships only the nodes
   whose `Partitions=` list names a requested partition, each once. A node keeps
   its state, partitions, active features, configured/allocated CPU (CPUEfctv,
@@ -259,8 +261,9 @@ both. These are explicit arguments, not TOML defaults; see
   that physical job, which also names the target: an array element is requeued
   as its `ArrayJobId_ArrayTaskId`, never the bare array ID, which would requeue
   every element; inherited `SLURM_ARRAY_*` variables are not trusted. A refusal
-  is exit 3 and keeps Slurm's message when a query failed; a lost or failed
-  mutation reply is exit 5 with Slurm's message in `detail`. Slurm ownership
+  is exit 3 and keeps Slurm's message when a query failed; a nonzero `scontrol`
+  mutation is exit 5 with `scontrol ACTION exit RC` and Slurm's message in
+  `detail`, and a lost reply is exit 5 too. Slurm ownership
   checks still apply, and concurrent user changes can race the identity read.
   Checkpoint durability and retry limits belong to the caller.
 - `push` rsyncs LOCAL/ through the DTN into an absolute REMOTE under
@@ -405,7 +408,7 @@ are refused.
 | 2 | usage error |
 | 3 | refused, and nothing was submitted, cancelled, released or requeued: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, a remote guard that stopped before `sbatch` or `scancel` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock |
 | 4 | SSH transport or master check unavailable: `auth_required` (ask the user to open the master); `unavailable` with a local permission denial (check the sandbox; request per-command approval in Codex); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop) |
-| 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
+| 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, `scontrol` exited nonzero in `release` or `requeue`, or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
 | 6 | status ok, but the newest job of a requested name has an anomaly |
 
 Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.

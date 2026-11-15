@@ -146,8 +146,10 @@ suite on every GPU job's startup path.
    lane's compatible OR set, the set already narrowed by its hard
    requirements; it is not repeated per SKU. Validate a member of that set
    separately only when it carries a concrete open uncertainty that the pilot
-   did not exercise: less memory headroom than the pilot's GPU, or a different
-   CUDA architecture, kernel or dtype support. An SSH connection, accepted
+   did not exercise: less memory headroom than the pilot's GPU, or kernel,
+   dtype or CUDA-architecture support that is actually in doubt for that
+   member. A different SKU or architecture alone is no such doubt, and there
+   is no per-architecture gate. An SSH connection, accepted
    preflight, CPU import or allocation proof is not proof that the model ran
    correctly. Use the actual worker PID for allocation evidence; environment
    variables or guessed cross-container ancestry are not substitutes.
