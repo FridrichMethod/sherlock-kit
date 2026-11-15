@@ -12,16 +12,16 @@ recommended practice.
 
 The rules follow Sherlock's agent instructions, `/etc/agents/AGENTS.md` and the
 four topic files beside it, as last modified on the dates below. Both rules
-files carry `Reviewed 2026-10-21`, the date of their last comparison with those
+files carry `Reviewed 2026-11-14`, the date of their last comparison with those
 files; `tests/test_release_metadata.py` pins that date.
 
 | File | Last modified | Topics |
 |---|---|---|
-| `/etc/agents/AGENTS.md` | 2026-10-19 | conditions of use, where you are, numbered rules 1-12, support |
+| `/etc/agents/AGENTS.md` | 2026-11-13 | conditions of use, where you are, numbered rules 1-12, support |
 | `/etc/agents/policy.md` | 2026-10-13 | data risk, sanctions, prohibited mechanisms, unattended sessions, processes, agent notes |
 | `/etc/agents/slurm.md` | 2026-10-01 | login and compute nodes, discovery, requests, monitoring, arrays, Slurm outages |
-| `/etc/agents/software.md` | 2026-10-09 | modules, preference order, Python environments, compiling, licenses |
-| `/etc/agents/storage.md` | 2026-10-06 | filesystems, purge, I/O patterns, transfers, usage |
+| `/etc/agents/software.md` | 2026-11-13 | modules, preference order, Python environments, compiling, licenses |
+| `/etc/agents/storage.md` | 2026-11-12 | filesystems, purge, I/O patterns, transfers, usage |
 
 Human documentation: <https://www.sherlock.stanford.edu/docs/>.
 
@@ -106,7 +106,7 @@ the site files: Sherlock rejects them, so `shk submit` refuses them offline.
 
 By design, the rules files leave out:
 
-- recommended practice generally;
+- recommended site practice not needed by the operational summary;
 - rule 11's preference for fewer, larger files;
 - in the workstation file, rule 3's naming of filesystems by variable
   (`remote_root` takes a literal absolute path, a kit choice) and "alternate
@@ -158,3 +158,28 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.
+
+## Owner scheduling preferences
+
+The GPU scheduling sections of both delivered rules and the installed skill are
+owner defaults, not Slurm enforcement or site rules. They favor broad compatible
+GPU choices, expected completion time across authorized partitions, longer useful
+resumable bundles, parallel ready work and bounded resource-aware rebalancing.
+Actual GPU model remains provenance; it alone does not require new scientific
+cohorts or controls. Effective numerical and model protocols remain fixed, and
+explicit project requirements can narrow these defaults. No GPU/partition TOML
+keys are added. The partition table, including btrippe and possu courtesy, is unchanged.
+
+The candidate feature set comes from `sh_node_feat` and aggregate `shk resources`
+evidence checked on 2026-11-14. It includes RTX_3090 (24 GB) and TITAN_V (12 GB),
+in addition to A100, A40, H100, H200, L40S and V100 variants. The discovered
+A30_MIG-1g.6gb is an interactive dev resource. B200 was not in that snapshot;
+future compatible models should be included when discovered. This is inventory,
+not a speed benchmark or a permanent compatibility allowlist. RTX_2080Ti and
+Pascal-era P100/P40/TITAN_Xp are outside the owner's default production choices.
+
+Site rule 8 permits explicitly requested scratch environments with a purge warning;
+the cluster summary honors that choice and does not impose an additional ban.
+Site rule 10 sets a polling floor and minimum useful job duration, not a maximum
+bundle length. Longer jobs and periodic capacity checks still obey partition limits,
+borrowed courtesy, at least 60 seconds between checks and the ban on polling loops.

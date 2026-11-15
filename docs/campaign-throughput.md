@@ -12,6 +12,62 @@ compatibility or choose scientific retry policies. Existing site rules,
 partition permissions and project pins still apply. See the
 [design contract](design.md) and [allocation evidence](allocation.md).
 
+## Select compatible resources by completion time
+
+Keep partition, GPU count, CPUs, memory, walltime and constraint explicit in the
+submission. The owner defaults below are agent guidance, not additional TOML
+keys, automatic hardware selection or a new site policy.
+
+Use a broad OR constraint over compatible GPUs rather than one SKU without a
+technical reason. Discover current feature names and limits with `sh_node_feat`
+and `sh_part`; inspect the actual memory and architecture with `shk resources`.
+The candidate set includes A100_PCIE, A100_SXM4, A40, H100_SXM5, H200_SXM5,
+L40S, RTX_3090, TITAN_V, V100_PCIE, V100S_PCIE and V100_SXM2. Add compatible
+newly discovered models instead of treating that list as a permanent allowlist.
+Avoid RTX_2080Ti and Pascal-era P100/P40/TITAN_Xp by default. TITAN_V (12 GB)
+and RTX_3090 (24 GB) require sufficient workload memory headroom. Small MIG
+slices require their own capacity and partition checks; interactive dev is not a
+production batch fallback. Narrow the OR set for concrete memory, architecture,
+kernel or dtype requirements, recording why.
+
+Scientific comparison defaults treat compatible GPUs as equivalent while
+retaining the actual GPU as provenance. A different SKU alone does not require
+new controls, a separate cohort or rerunning complete results. Keep effective
+inputs, model/checkpoint, seeds, numerical settings and environment protocol
+fixed. This is a comparison convention, not a bitwise-reproducibility claim or
+proof of binary compatibility. Explicit scientific requirements can override it.
+Use representative native validation for real compatibility uncertainties; do not
+build a complete model-by-SKU qualification matrix before submitting ready work.
+
+Compare expected time to completion across authorized partitions: queue wait,
+startup/loading, useful computation and likely recovery. Department capacity,
+resumable owners and the public gpu partition are options; none has a universal
+priority. Borrowed btrippe/possu follow the existing courtesy budgets and time
+window unchanged. Prove same-command, idempotent checkpoint/resume before owners;
+Slurm requeue does not implement application recovery. Do not depend on receiving
+a usable preemption signal before saving progress.
+
+## Size bundles to amortize queues
+
+Prefer fewer, longer useful allocations when repeated queue waits and model
+startup dominate. A bundle can contain many independently checkpointed units;
+each seed or sample does not need its own job. Multi-hour jobs are appropriate
+when measured work, partition limits, courtesy and recovery support them. There
+is no general two-hour cap inherited from examples. Do not request maximum
+walltime without a workload reason: longer requests can also wait longer for
+backfill. Balance this tradeoff using observed queue delay and measured unit time,
+not a rule that shorter jobs are always better.
+
+Keep enough independent bundles queued to use authorized parallel capacity,
+while avoiding excessive fragmentation. Preserve the full per-unit scientific
+budget and export completed units without waiting for the entire bundle.
+Periodically inspect batched status and resource evidence at bounded decisions,
+respecting every next-check time and at least 60 seconds between checks, without
+polling loops. Adjust future GPU constraints, partitions, bundle sizes and
+walltime to useful capacity and measured progress. Changing ownership of already
+submitted units still requires the safe-transfer conditions below; a free-looking
+node does not authorize duplicate submissions or guarantee an earlier start.
+
 ## Before submitting: record a plan that can run
 
 Use one coordinator with a durable lock for short ledger, intent, token and epoch

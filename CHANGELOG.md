@@ -1,6 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.6.1
+
+- Deliver owner GPU/partition preferences in both rules and the installed skill:
+  broad compatible GPU choices, hardware provenance without automatic scientific
+  cohort splitting, idempotent owners recovery, parallel ready work and longer
+  useful bundles with bounded resource-aware rebalancing. Partition courtesy,
+  CLI flags and TOML keys are unchanged.
+
+- Refresh the site-policy comparison, including explicitly requested scratch
+  environments and the storage/installation guidance.
 
 - Add a parallel GPU campaign guide and self-contained skill checklist for CPU preparation, independent first pilots, bounded dispatch, explicit work-state counts and safe ownership transfer. Documentation only; no CLI or partition policy changes.
 
