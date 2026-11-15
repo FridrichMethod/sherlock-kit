@@ -108,6 +108,26 @@ class Flow(unittest.TestCase):
     def shk_dir(self, task="train-a"):
         return self.remote / "runs" / spec.job_name("demo", "default", task) / ".shk"
 
+    def or_expressions_reach_sbatch_intact(self):
+        """A feature expression is one sbatch argument, byte for byte, and frozen in the spec."""
+        allowed, preferred = "(CPU_GEN:SKX|CPU_GEN:CLX)&IB:HDR", "CPU_GEN:SPR|(CPU_GEN:ICX&IB:HDR)"
+        code, out = self.submit("--constraint", allowed, "--prefer", preferred)
+        self.assertEqual((code, out["action"]), (0, "submitted"))
+        argv = self.slurm.calls("sbatch")[0]["argv"]
+        self.assertEqual(
+            [word for word in argv if word.startswith(("--constraint", "--prefer"))],
+            [f"--constraint={allowed}", f"--prefer={preferred}"],
+        )
+        self.assertEqual(argv[:-1], out["argv"][1:])
+        text = (self.shk_dir() / f"{out['name']}.{out['job_id']}.json").read_text()
+        frozen = json.loads(text)
+        self.assertEqual(frozen["argv"], out["argv"])
+        self.assertEqual(
+            (frozen["resources"]["constraint"], frozen["resources"]["prefer"]),
+            (allowed, preferred),
+        )
+        self.assertEqual((text.count(allowed), text.count(preferred)), (2, 2))
+
 
 class OutcomeCases:
     """After dispatch only a strict job id (submit) or exit 0 (cancel) confirms a result.
@@ -303,6 +323,9 @@ class SubmitFlows(Flow):
         )
         history = entry["history"][0]
         self.assertEqual((history["job_id"], history["state"]), (job, "done"))
+
+    def test_or_expressions_reach_sbatch_as_single_arguments(self):
+        self.or_expressions_reach_sbatch_intact()
 
     def test_failed_needs_a_resubmit_reason(self):
         self.slurm.set(int(self.submit()[1]["job_id"]), "FAILED")
@@ -663,6 +686,10 @@ class SshFlow(Flow):
         self.assertEqual(self.entry()["state"], "live")
         dials = [call for call in fake.calls() if "-O" not in call]
         self.assertEqual([call[-2] for call in dials], ["sherlock-plain"] * 3)
+
+    def test_or_expressions_survive_the_ssh_command_line(self):
+        self.knobs(**install_fake_ssh(self.tmp).env())
+        self.or_expressions_reach_sbatch_intact()
 
 
 class BashAsShFlow(OutcomeCases, Flow):
