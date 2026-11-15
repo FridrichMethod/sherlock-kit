@@ -270,6 +270,18 @@ class PullTests(TransferCase):
         self.assertIn("No such file", result[1]["message"])
         self.assertNotIn("Automated tools", result[1]["message"])
 
+    @unittest.skipIf(os.geteuid() == 0, "root can list a mode-000 directory")
+    def test_an_inventory_find_cannot_finish_is_refused_before_any_transfer(self):
+        locked = self.remote / "locked"
+        self.write(locked, {"unlisted": "x\n"})  # newer than SHA256SUMS, which lists 3 files
+        locked.chmod(0o000)
+        self.addCleanup(locked.chmod, 0o700)
+        result = self.pull()
+        self.assert_refused(result, 1, "remote_failed")
+        self.assertRegex(result[1]["message"], r"exit 1\. find: .*locked.*Permission denied")
+        self.assertEqual([path.name for path in self.dest.parent.iterdir()], [".keep"])
+        self.assertFalse([call for call in self.fake.calls() if "sherlock-dtn" in call])
+
     def test_a_symlinked_manifest_is_read(self):
         sums = self.remote / "SHA256SUMS"
         sums.rename(self.root / "sums-v2.txt")
