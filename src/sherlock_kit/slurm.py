@@ -997,7 +997,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk cancel`: scancel the live jobs of one name (one mutation)."""
-    if args.task:
+    if args.task is not None:
         name = _task_name(ctx, args.campaign, args.task)
         selector = _task_selector(args.task, args.campaign)
     else:

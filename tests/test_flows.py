@@ -645,6 +645,19 @@ class StatusCancelOccupancyFlows(Flow):
         self.assertEqual((code, unknown["action"]), (5, "unknown"))
         self.assertEqual(self.shk("cancel", "--name", "not-a-shk-name")[0], 1)
 
+    def test_cancel_refuses_an_empty_task_before_any_remote_call(self):
+        fake = install_fake_ssh(self.tmp)
+        self.knobs(**fake.env())
+        for executor_kind in ("local", "ssh"):
+            with self.subTest(executor=executor_kind):
+                self.executor = executor_kind
+                code, out = self.shk("cancel", "--task", "")
+                self.assertEqual(
+                    (code, out["error"], out["message"]),
+                    (1, "spec_invalid", "--task must not be empty"),
+                )
+        self.assertEqual((fake.calls(), self.slurm.calls()), ([], []))
+
     def test_occupancy_works_without_a_config(self):
         (self.tmp / "sherlock-kit.toml").unlink()
         self.slurm.add(
