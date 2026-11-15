@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
 
 Intentional compatibility changes. Controllers that key on exit codes see more
 exit 5 and never a false exit 3 after `sbatch` or `scancel` has run:
