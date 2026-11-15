@@ -225,6 +225,32 @@ class FieldSeparators(unittest.TestCase):
         self.assert_error(caught, 1, "allocation_invalid")
 
     @in_a_field
+    def test_allocation_records_and_membership_end_at_lf_only(self, separator):
+        ctx = SimpleNamespace(executor=lambda: SimpleNamespace(command_timeout=30))
+        # Read as two records, job 44 would match alone, cut short at its comment.
+        record = f"JobId=44 UserId=demo(1000) Comment=x{separator}JobId=45 UserId=root(0)"
+        with (
+            replying(f"SHK_DATA|{record}\nSHK_RC 0\nSHK_END\n"),
+            self.assertRaises(ShkError) as caught,
+        ):
+            allocation.matching_record(allocation.Collector(ctx), "job", "44")
+        self.assert_error(caught, 1, "allocation_invalid")
+        # Read as two rows, PID 8 would be a member of step 44.0.
+        table = f"PID JOBID STEPID LOCALID GLOBALID\n7 44 0 0 0{separator}8 44 0 1 1"
+
+        def answer(ex, name, args, **options):
+            text = table if args[0] == "listpids" else "Slurm job id 44 ends at 1"
+            lines = "".join(f"SHK_DATA|{line}\n" for line in text.split("\n"))
+            return executor.Result("complete", lines + "SHK_RC 0\nSHK_END\n", "", 0)
+
+        with (
+            patch.object(executor, "run_program", side_effect=answer),
+            self.assertRaises(ShkError) as caught,
+        ):
+            allocation.membership(allocation.Collector(ctx), 8, "44", "0")
+        self.assert_error(caught, 1, "allocation_invalid")
+
+    @in_a_field
     def test_a_cut_off_doctor_reply_is_malformed(self, separator):
         ctx = SimpleNamespace(executor=lambda: SimpleNamespace(kind="local"))
         tools = "".join(f"SHK_TOOL {tool} /usr/bin/{tool}\n" for tool in doctor.REMOTE_TOOLS)
