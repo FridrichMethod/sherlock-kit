@@ -41,7 +41,12 @@ def register(subparsers: Subparsers) -> None:
     parser.add_argument("--pid", required=True)
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--step-id", help="numeric step within the selected physical job")
-    parser.add_argument("--hostlist", action="append", default=[])
+    parser.add_argument(
+        "--hostlist",
+        action="append",
+        default=[],
+        help="hostlist expression to expand and report; repeatable",
+    )
     parser.set_defaults(handler=allocation)
 
 
@@ -166,7 +171,7 @@ class Collector:
                 hint="run shk doctor",
             )
         result = executor.run_program(self.ex, "allocation", [action, target], timeout=remaining)
-        lines = executor.check(result, f"allocation {action}").stdout.splitlines()
+        lines = executor.records(executor.check(result, f"allocation {action}").stdout)
         if (
             len(lines) < 2
             or lines[-1] != "SHK_END"
@@ -192,7 +197,7 @@ class Collector:
         for known in self.hostlists:
             if known["expression"] == expression:
                 return list(known["nodes"])
-        nodes = self.query("hosts", expression).splitlines()
+        nodes = self.query("hosts", expression).split("\n")
         if any(not HOST.fullmatch(node) for node in nodes):
             raise invalid("malformed expanded hostlist")
         self.hostlists.append({"expression": expression, "nodes": nodes})
@@ -214,7 +219,7 @@ def matching_record(collector: Collector, action: str, query_id: str) -> tuple[s
     reply may hold several lines; each is parsed strictly and exactly one must match.
     """
     matches = []
-    for line in collector.query(action, query_id).splitlines():
+    for line in collector.query(action, query_id).split("\n"):
         fields = strict_fields(line)
         if query_id in IDENTITIES[action](fields):
             matches.append((line, fields))
@@ -280,7 +285,7 @@ def job_identity(job: dict[str, Any]) -> None:
 def membership(collector: Collector, pid: int, job: str, step: str | None) -> dict[str, Any]:
     """Verify actual PID-to-job and optional numeric PID-to-step associations."""
     raw = collector.query("pidinfo", str(pid))
-    lines = raw.splitlines()
+    lines = raw.split("\n")
     # Only the job id counts; a step suffix (.batch, .interactive, .0+1, ...) is not checked.
     match = re.fullmatch(r"Slurm (?:JobId=|job id )([0-9]+)(?:\.\S+)? ends at .+", lines[0])
     valid_lines = len(lines) == 1 or (
@@ -294,7 +299,7 @@ def membership(collector: Collector, pid: int, job: str, step: str | None) -> di
     evidence: dict[str, Any] = {"job": {"source": "scontrol pidinfo", **hashed(raw)}, "step": None}
     if step is not None:
         raw = collector.query("listpids", f"{job}.{step}")
-        rows = [line.split() for line in raw.splitlines()]
+        rows = [line.split() for line in raw.split("\n")]
         if not rows or rows[0] != ["PID", "JOBID", "STEPID", "LOCALID", "GLOBALID"]:
             raise invalid("unknown process membership table")
         if any(

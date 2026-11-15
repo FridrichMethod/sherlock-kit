@@ -155,7 +155,7 @@ def parse_read(stdout: str, tools: Iterable[str]) -> Read:
         "SHK_SPEC": [],
     }
     facts: dict[str, str] = {}
-    for line in stdout.splitlines():
+    for line in executors.records(stdout):
         kind, separator, rest = line.partition("|")
         if separator and kind in records:
             records[kind].append(rest)
@@ -745,7 +745,7 @@ def _mutate(
     result = executors.run_program(ctx.executor(), program, args, stdin=stdin, mutation=True)
     if result.status == "unknown":
         return Reply("unknown", "no reply", [])
-    lines = executors.check(result, program).stdout.splitlines()
+    lines = executors.records(executors.check(result, program).stdout)
     known = (*REFUSALS, *done, "SHK_UNPARSED")
     markers = [line.partition(" ") for line in lines if line.partition(" ")[0] in known]
     if len(markers) != 1:

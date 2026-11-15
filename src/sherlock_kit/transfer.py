@@ -6,7 +6,8 @@ rewriting them (and refreshing their scratch purge clock); pushed files that are
 therefore be purge-eligible on scratch soon after the push.
 
 pull: read REMOTE/SHA256SUMS through the control host (data/remote/manifest.sh); it must list every
-regular file under REMOTE except SHA256SUMS and .shk* entries. Under a flock on .NAME.shk-lock, an
+regular file under REMOTE except SHA256SUMS and .shk* entries, and a REMOTE that find cannot list
+completely (an unreadable subdirectory) is remote_failed, exit 1. Under a flock on .NAME.shk-lock, an
 existing LOCAL with a matching receipt is already_present (no DTN dial); otherwise rsync fetches
 exactly the listed files into the private stage .NAME.shk-stage. A rerun resumes the stage: what an
 earlier attempt fetched is kept, anything this manifest does not list (temp files of a killed rsync,
