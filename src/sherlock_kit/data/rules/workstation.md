@@ -28,7 +28,7 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 - SKU is provenance, not a new cohort/control by default. Keep inputs/model/seeds/numerical/environment protocol fixed; no bitwise guarantee. Check compatibility as needed, not every model/SKU pair.
 - Choose authorized partitions by queue/setup/compute/recovery time; consider departments/owners. Keep borrowed budgets. Owners needs proven same-command resume: durable checkpoints, verified completed units, attempt logs/bounded retries. Requeue restarts the script, not application state.
 - Queue ready independent work concurrently; refill; report ready/unsubmitted, queued, running and blockers. Favor longer useful resumable bundles to amortize queues/setup; honor limits/courtesy/budgets. No padding or tiny jobs.
-- Batch status/resources checks at least 60 s apart as needed; snapshots guarantee no starts. Adapt future requests to evidence. Transfer units only after terminal/nonrestartable proof or durable revocation across requeue; pending/unknown units stay owned. No duplicate queue racing.
+- Batch status/resources checks at least 60 s apart as needed; snapshots do not guarantee starts. Adapt future requests to evidence. Transfer units only after terminal/nonrestartable proof or durable revocation across requeue; pending/unknown units stay owned. No duplicate queue racing.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
