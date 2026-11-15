@@ -1,6 +1,7 @@
 # shk cancel NAME: list the live jobs of NAME, then scancel -u USER --name=NAME once.
-# Prints SHK_JOB|<id> lines and exactly one of SHK_CANCELLED, SHK_NONE, SHK_REJECTED <rc>
-# (+ SHK_ERR| lines) or SHK_REFUSED <why>; always exits 0.
+# Prints SHK_JOB|<id> lines and exactly one of SHK_CANCELLED, SHK_NONE, SHK_REFUSED <why> (nothing
+# ran) or, for a nonzero scancel that may have cancelled some of the jobs, SHK_UNPARSED scancel
+# exit <rc> (+ SHK_ERR| lines); always exits 0.
 for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
     case $v in SLURM_CONF) ;; SBATCH_* | SQUEUE_* | SACCT_* | SCANCEL_* | SLURM_*) unset "$v" ;; esac
 done
@@ -19,6 +20,6 @@ rc=$?
 if [ "$rc" -eq 0 ]; then
     printf "SHK_CANCELLED\n"
 else
-    printf "SHK_REJECTED %s\n" "$rc"
+    printf "SHK_UNPARSED scancel exit %s\n" "$rc"
     printf "%s\n" "$err" | head -c 2000 | sed "s/^/SHK_ERR|/"
 fi

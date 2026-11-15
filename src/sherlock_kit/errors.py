@@ -1,10 +1,11 @@
 """Exit codes, ShkError and Outcome: the result contract of every command (frozen 0.4.0).
 
-0 ok; 1 local error; 2 usage; 3 refused by policy or Slurm; 4 Sherlock unreachable without a
-new login; 5 outcome unknown after a dispatched mutation (shk status >= 60 s later); 6 status
-ok but the newest job of a requested name has an anomaly. A ShkError prints {"ok": false,
-"error": token, "message", "hint"}. An Outcome prints its payload as JSON ("ok" defaults to
-code in (0, 6)), or the text of Outcome.text() verbatim.
+0 ok; 1 local error; 2 usage; 3 refused by policy, by a guard before dispatch or by sbatch
+--test-only; 4 Sherlock unreachable without a new login; 5 outcome unknown after a dispatched
+mutation, a failed sbatch or scancel included (shk status >= 60 s later); 6 status ok but the
+newest job of a requested name has an anomaly. A ShkError prints {"ok": false, "error": token,
+"message", "hint"}. An Outcome prints its payload as JSON ("ok" defaults to code in (0, 6)), or
+the text of Outcome.text() verbatim.
 """
 
 from __future__ import annotations
