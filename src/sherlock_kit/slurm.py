@@ -86,7 +86,8 @@ MAX_ROWS = 50_000
 CADENCE = timedelta(seconds=60)
 SINCE_DAYS, SINCE_DAYS_ALL = 30, 7
 MAX_SINCE_DAYS = 31  # Sherlock's slurmdbd refuses wider sacct windows ("Too wide of a date range")
-BUDGET_JOBS, BUDGET_MINUTES = 2, 120  # "about 2 jobs x 2 h while others are active" (btrippe)
+# Advisory thresholds of a borrowed partition; a budget only where its courtesy text states them.
+BUDGET_JOBS, BUDGET_MINUTES = 2, 120
 
 
 @dataclass(frozen=True)
@@ -819,23 +820,49 @@ def _refuse_existing(name: str, found: dict[str, Any], reason: str | None) -> No
     raise ShkError(EXIT_REFUSED, state, message, hint)
 
 
+def _budget_terms(profile: partitions.Profile) -> str:
+    """The thresholds as the partition's budget only where its own courtesy text states them."""
+    hours = BUDGET_MINUTES // 60
+    phrase = f"about {BUDGET_JOBS} jobs x {hours} h"
+    if phrase in profile.courtesy:
+        return f"while others are active the courtesy budget is {phrase}"
+    return (
+        f"this advisory starts at {BUDGET_JOBS} jobs of yours there or more than {hours} h "
+        f"requested; the terms of {profile.name} are the courtesy text in this reply"
+    )
+
+
 def _courtesy(read: Read, built: spec.Spec) -> dict[str, Any]:
-    """Occupancy and courtesy text of a borrowed partition; the budget is only a warning."""
+    """Occupancy, request size and courtesy text of a borrowed partition; warnings never refuse."""
     partition = built.profile.name
     users, totals = occupancy_summary(read.occupancy.get(partition, []))
     mine = users.get(read.user or "", _counts())
     my_jobs = mine["running_jobs"] + mine["pending_jobs"]
     others = any(user != read.user and counts["running_jobs"] for user, counts in users.items())
-    over = my_jobs >= BUDGET_JOBS or built.document["resources"]["minutes"] > BUDGET_MINUTES
+    resources = built.document["resources"]
+    array = resources["array"] or {"count": 1, "throttle": None}
+    request = {
+        "tasks": array["count"],
+        "throttle": array["throttle"],
+        "minutes": resources["minutes"],
+    }
     warnings = []
-    if others and over:
+    if others and (my_jobs >= BUDGET_JOBS or request["minutes"] > BUDGET_MINUTES):
         warnings.append(
             f"others are running on {partition} and you have {my_jobs} jobs there; "
-            f"while others are active the courtesy budget is about {BUDGET_JOBS} jobs "
-            f"x {BUDGET_MINUTES // 60} h"
+            + _budget_terms(built.profile)
+        )
+    if others and request["tasks"] > BUDGET_JOBS:
+        throttle = request["throttle"]
+        pace = f"at most {throttle} at a time" if throttle else "no throttle"
+        warnings.append(
+            f"others are running on {partition} and this array has {request['tasks']} tasks "
+            f"({pace}), each requesting {request['minutes']} min; "
+            "weigh the whole array against the courtesy text in this reply"
         )
     return {
         "occupancy": {"users": users, "totals": totals},
+        "request": request,
         "courtesy": built.profile.courtesy,
         "warnings": warnings,
     }

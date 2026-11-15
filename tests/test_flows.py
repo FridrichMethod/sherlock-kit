@@ -311,6 +311,71 @@ class SubmitFlows(Flow):
         self.assertEqual(len(out["warnings"]), 1)
         self.assertIn("about 2 jobs x 2 h", out["warnings"][0])
 
+    def borrowed(self, *extra, partition="btrippe", mine=0, others=True, task="sweep"):
+        """One acknowledged submit to a borrowed partition from a fresh fake queue."""
+        self.slurm = FakeSlurm(self.tmp)
+        if others:
+            self.slurm.add("theirs", "RUNNING", user="alice", partition=partition)
+        for index in range(mine):
+            self.slurm.add(f"mine-{index}", "PENDING", partition=partition)
+        code, out = self.submit("--courtesy-ack", *extra, task=task, partition=partition)
+        self.assertEqual((code, out["action"]), (0, "submitted"))
+        self.assertEqual(out["courtesy"], partitions.profile(partition).courtesy)
+        return out
+
+    def test_borrowed_array_gets_a_factual_total_work_advisory(self):
+        cases = (
+            ("8", 8, None, "(no throttle)"),
+            ("100", 100, None, "(no throttle)"),
+            ("100%2", 100, 2, "(at most 2 at a time)"),
+        )
+        for array, tasks, throttle, pace in cases:
+            with self.subTest(array=array):
+                out = self.borrowed("--array", array, task=f"sweep-{tasks}-{throttle}")
+                self.assertEqual(
+                    out["request"], {"tasks": tasks, "throttle": throttle, "minutes": 20}
+                )
+                (advisory,) = out["warnings"]  # no own jobs and 20 min: the budget warning is quiet
+                for fact in ("others are running on btrippe", f"{tasks} tasks", pace, "20 min"):
+                    self.assertIn(fact, advisory)
+                self.assertNotRegex(advisory, r"(?i)\b(within|over|exceed\w*|fits?|budget)\b")
+        both = self.borrowed("--array", "100%2", mine=2, task="sweep-both")["warnings"]
+        self.assertEqual(len(both), 2)
+        self.assertIn("you have 2 jobs there", both[0])
+        self.assertIn("100 tasks (at most 2 at a time)", both[1])
+
+    def test_borrowed_request_is_always_reported_and_advisories_need_others(self):
+        one = self.borrowed(task="one")
+        self.assertEqual(
+            (one["request"], one["warnings"]), ({"tasks": 1, "throttle": None, "minutes": 20}, [])
+        )
+        pair = self.borrowed("--array", "2", task="pair")  # an array within the job threshold
+        self.assertEqual((pair["request"]["tasks"], pair["warnings"]), (2, []))
+        idle = self.borrowed("--array", "100", mine=2, others=False, task="idle")
+        self.assertEqual(
+            (idle["request"], idle["warnings"]),
+            ({"tasks": 100, "throttle": None, "minutes": 20}, []),
+        )
+        self.assertNotIn("request", self.submit(task="public")[1])
+
+    def test_budget_warning_quotes_a_budget_only_from_the_courtesy_text(self):
+        phrase = f"about {slurm.BUDGET_JOBS} jobs x {slurm.BUDGET_MINUTES // 60} h"
+        self.assertIn(phrase, partitions.profile("btrippe").courtesy)
+        self.assertNotIn(phrase, partitions.profile("possu").courtesy)
+        (quoted,) = self.borrowed(mine=2, task="quoted")["warnings"]
+        self.assertIn(f"the courtesy budget is {phrase}", quoted)
+        for extra, mine in (((), 2), (("--array", "8"), 2), (("--time", "3h"), 0)):
+            with self.subTest(extra=extra, mine=mine):
+                task = "-".join(("night", str(mine), *extra[1:]))
+                out = self.borrowed(*extra, partition="possu", mine=mine, task=task)
+                self.assertEqual(len(out["warnings"]), 2 if extra[:1] == ("--array",) else 1)
+                for warning in out["warnings"]:
+                    self.assertNotIn("budget", warning)
+                    self.assertNotIn(phrase, warning)
+                self.assertIn(f"you have {mine} jobs there", out["warnings"][0])
+                self.assertIn("2 jobs of yours there or more than 2 h", out["warnings"][0])
+                self.assertIn("the terms of possu are the courtesy text", out["warnings"][0])
+
 
 class StatusCancelOccupancyFlows(Flow):
     def test_array_status_counts_throttle_held_tasks_as_pending(self):
