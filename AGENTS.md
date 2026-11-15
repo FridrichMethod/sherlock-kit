@@ -19,6 +19,14 @@ Never submit GPU work while developing or testing this repository, operate
 historical campaigns, or infer borrowed access.
 Only the lead merges to main and tags.
 
+Keep `docs/` as maintained user/developer reference and necessary compatibility
+evidence, with an index in `docs/README.md`. Put temporary implementation plans,
+worker handoffs and check logs in ignored, durable `.state/<task>/` storage,
+not in release documentation. Before removing a completed plan, preserve any
+still-relevant decisions in the appropriate guide and check incoming links.
+Git history retains completed tracked plans; do not create a duplicate archive
+in `docs/`. Unfinished work and its handoff must remain recoverable.
+
 Write all documentation in English. Documentation may contain only printable
 ASCII characters (U+0020 through U+007E), tabs, LF and CR, with no exceptions.
 This applies to Markdown (.md, .markdown and .mdx), reStructuredText (.rst), text

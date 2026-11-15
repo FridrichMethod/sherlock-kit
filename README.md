@@ -414,10 +414,8 @@ requirements) and `SHK_TEST_WHEELHOUSE` (the prepared absolute wheelhouse path)
 enable the sdist, wheel, editable and source-launcher checks. They build committed
 `HEAD`, so commit changes before using them as release evidence. Prepare a fresh
 wheelhouse for each Python/platform and whenever dependencies change. See
-[CONTRIBUTING.md](CONTRIBUTING.md), [docs/design.md](docs/design.md),
-[docs/sherlock-policy.md](docs/sherlock-policy.md),
-[docs/cpu-threads.md](docs/cpu-threads.md),
-[observed Slurm behavior](docs/validation/observed-slurm.md) and
-[CHANGELOG.md](CHANGELOG.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and the
+[documentation index](docs/README.md) for operating guides, design contracts,
+compatibility evidence and release history.
 
 Licensed under [MIT](LICENSE).

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Remove the completed dependency-refactor implementation handoff from release
+  documentation and source distributions. Add a documentation index and task
+  document lifecycle guidance; retain the Slurm compatibility evidence.
+
 ## 0.7.0
 
 - Add `shk submit --prefer` to pass preferred node features to Slurm and record
