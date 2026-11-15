@@ -93,6 +93,25 @@ class Flow(unittest.TestCase):
 
 
 class SubmitFlows(Flow):
+    def test_gpu_preference_dry_run_keeps_fallback_and_makes_no_remote_call(self):
+        allowed = "GPU_SKU:L40S|GPU_SKU:A40|GPU_SKU:V100_PCIE"
+        preferred = "GPU_SKU:L40S|GPU_SKU:A40"
+        code, report = self.submit(
+            "--dry-run",
+            "--gpus",
+            "1",
+            "--constraint",
+            allowed,
+            "--prefer",
+            preferred,
+            partition="gpu",
+        )
+        self.assertEqual(code, 0)
+        self.assertIn(f"--constraint={allowed}", report["argv"])
+        self.assertIn(f"--prefer={preferred}", report["argv"])
+        self.assertEqual(report["spec"]["resources"]["prefer"], preferred)
+        self.assertEqual((self.slurm.calls(), self.remote.exists()), ([], False))
+
     def test_submit_stages_files_and_refuses_live_then_done(self):
         self.knobs(
             SBATCH_ACCOUNT="leaky", SLURM_MEM_PER_NODE="999", SLURM_CONF="/etc/slurm/slurm.conf"

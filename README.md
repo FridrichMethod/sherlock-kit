@@ -27,11 +27,11 @@ For multi-model or multi-stage GPU work, see [Running a parallel GPU campaign](d
 Install from a release tag, as below; `main` can be ahead of the latest release.
 Older installs should follow their own `shk <command> --help`.
 
-`shk --version` prints `sherlock-kit 0.6.1 (FORM)`, where FORM names the install:
+`shk --version` prints `sherlock-kit 0.7.0 (FORM)`, where FORM names the install:
 
 | Form | How | FORM |
 |---|---|---|
-| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.6.1'`, or a uv source with `tag = "v0.6.1"` | `git <commit>` |
+| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.7.0'`, or a uv source with `tag = "v0.7.0"` | `git <commit>` |
 | Submodule | a consumer checks out this repository as a Git submodule and invokes its stdlib-only `bin/shk` entry point | `submodule <path>` |
 | Editable | `pip install -e <path>` into an environment you choose; it follows that tree | `editable <path>` |
 
@@ -42,7 +42,7 @@ Installation and updates belong to the project; no global launcher is required.
 
 ```toml
 [tool.uv.sources]
-sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.6.1" }
+sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.7.0" }
 ```
 
 On Sherlock, create the project-pinned environment under `$GROUP_HOME`, inside a
@@ -53,7 +53,7 @@ For example, inside the allocation, using a release wheel fetched beforehand:
 
 ```sh
 python3 -m venv "$GROUP_HOME/demo/.venv-shk"
-"$GROUP_HOME/demo/.venv-shk/bin/python" -m pip install --no-index --no-deps /path/to/sherlock_kit-0.6.1-py3-none-any.whl
+"$GROUP_HOME/demo/.venv-shk/bin/python" -m pip install --no-index --no-deps /path/to/sherlock_kit-0.7.0-py3-none-any.whl
 "$GROUP_HOME/demo/.venv-shk/bin/shk" --version
 ```
 
@@ -141,7 +141,7 @@ shk rules {workstation,cluster}
 shk install-skill --project DIR [--client claude|codex|all] [--rules workstation|cluster] [--check] [--force]
 shk occupancy --partition P [--partition P ...]
 shk submit --task T [--campaign C] --script FILE --partition P --cpus N [--cpu-thread-budget [N]] --mem SIZE --time DUR
-           [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--signal S] [--requeue|--no-requeue]
+           [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--prefer X] [--signal S] [--requeue|--no-requeue]
            [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--submission-token TOKEN] [--hold] [--dry-run|--preflight]
 shk resources --partition P [--partition P ...]
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION ...]
@@ -153,6 +153,12 @@ shk push LOCAL REMOTE [--anywhere]
 shk pull REMOTE LOCAL [--validate NAME] [--replace]
 shk manifest DIR
 ```
+
+For GPU selection, use a broad compatible `--constraint` and a `--prefer` subset
+for L40/A/H and discovered compatible future B/newer GPUs. Slurm tries preference
+independently before the fallback constraint: repeat all hard requirements in
+both. These are explicit arguments, not TOML defaults; see
+[GPU scheduling and bundles](docs/campaign-throughput.md).
 
 - Operational results print one JSON document with `schema_version: 1` on stdout; `rules`, `--version`
   and help print text, and usage errors print text on stderr (exit 2).

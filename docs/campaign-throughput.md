@@ -30,6 +30,25 @@ slices require their own capacity and partition checks; interactive dev is not a
 production batch fallback. Narrow the OR set for concrete memory, architecture,
 kernel or dtype requirements, recording why.
 
+Use `shk submit --prefer` for a soft preference over the compatible, discovered
+L40, A and H families and future B or newer families. They form one preferred
+tier; OR order does not rank those families. With the candidate inventory above,
+the preferred expression is:
+
+```text
+GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S
+```
+
+Keep the broader compatible set in `--constraint` so other acceptable GPUs can
+run when the preferred set is unavailable. Slurm tries `--prefer` independently
+before `--constraint`, not as their intersection: the preferred set must be a
+subset of the allowed hardware and both expressions must include every hard
+memory, architecture or other feature requirement. Adapt both lists to the task;
+add a future SKU only after discovery, never by guessing a feature or using a
+family wildcard. This does not reserve GPUs, promise a start time or justify
+waiting indefinitely for a preferred card. See the
+[Slurm sbatch reference](https://slurm.schedmd.com/sbatch.html#OPT_prefer).
+
 Scientific comparison defaults treat compatible GPUs as equivalent while
 retaining the actual GPU as provenance. A different SKU alone does not require
 new controls, a separate cohort or rerunning complete results. Keep effective

@@ -5,7 +5,7 @@ partition or one without batch jobs (dev), GPUs or requeue its profile forbids, 
 option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
 borrowed partition without --courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad
 memory, time, array, --after-ok or --submission-token grammar, --hold without a token, an
-unreadable script or one over 1 MiB. --constraint and --signal go to sbatch unchanged (Slurm
+unreadable script or one over 1 MiB. --constraint, --prefer and --signal go to sbatch unchanged (Slurm
 checks them); each --after-ok value must be one job id, since shk joins them into its own
 --dependency string, where a ',' or '?' would add clauses.
 """
@@ -79,6 +79,7 @@ class Resources:
     constraint: str | None
     signal: str | None
     after_ok: tuple[str, ...]
+    prefer: str | None = None
 
 
 @dataclass(frozen=True)
@@ -264,6 +265,7 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
         requeue=requeue,
         array=None if args.array is None else array(args.array),
         constraint=args.constraint,
+        prefer=args.prefer,
         signal=args.signal,
         after_ok=after_ok(args.after_ok),
     )
@@ -296,6 +298,8 @@ def sbatch_argv(
         argv += ["-G", str(wanted.gpus)]
     if wanted.constraint:
         argv.append(f"--constraint={wanted.constraint}")
+    if wanted.prefer:
+        argv.append(f"--prefer={wanted.prefer}")
     if wanted.signal:
         argv.append(f"--signal={wanted.signal}")
     exported = f",SHK_SUBMISSION_TOKEN={token}" if token is not None else ""
@@ -391,6 +395,8 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
         "git": git_state(config.root),
         "created_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+    if wanted.prefer is None:
+        del document["resources"]["prefer"]
     if thread_policy is not None:
         document["cpu_thread_policy"] = thread_policy
     return Spec(name, run, argv, script, digest, profile, document)

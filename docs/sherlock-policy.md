@@ -38,19 +38,19 @@ update the table above and the sections below.
 
 | Site rule | Workstation file | Cluster file |
 |---|---|---|
-| 1 Login nodes | Connection (light, bounded calls only) | Login nodes |
+| 1 Login nodes | Connection (light, bounded calls only) | Login nodes and software |
 | 2 Job requests | Jobs | Slurm |
 | 3 Storage defaults | Data | Filesystems |
 | 4 Purge | Data | Filesystems |
 | 5 Access controls | Connection | Where you are |
 | 6 Authorized access only | Data, Jobs | Filesystems, Slurm |
 | 7 Data risk | Data | Filesystems |
-| 8 Software installs | n/a | Software |
-| 9 System configuration | n/a | Software |
+| 8 Software installs | n/a | Login nodes and software |
+| 9 System configuration | n/a | Login nodes and software |
 | 10 Scheduler etiquette | Jobs | Slurm |
 | 11 Filesystem etiquette | n/a | Filesystems |
 | 12 Read current instructions | Introduction | Introduction |
-| Support, agent notes | Connection (Codex sandbox) | Where you are, Login nodes |
+| Support, agent notes | Connection (Codex sandbox) | Where you are, Login nodes and software |
 
 How the rules files carry particular site rules:
 
@@ -163,12 +163,14 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 
 The GPU scheduling sections of both delivered rules and the installed skill are
 owner defaults, not Slurm enforcement or site rules. They favor broad compatible
-GPU choices, expected completion time across authorized partitions, longer useful
+GPU choices with a soft preference for compatible L40/A/H and future B/newer
+GPUs, expected completion time across authorized partitions, longer useful
 resumable bundles, parallel ready work and bounded resource-aware rebalancing.
 Actual GPU model remains provenance; it alone does not require new scientific
 cohorts or controls. Effective numerical and model protocols remain fixed, and
 explicit project requirements can narrow these defaults. No GPU/partition TOML
-keys are added. The partition table, including btrippe and possu courtesy, is unchanged.
+keys are added. `shk submit --prefer` forwards an optional Slurm soft constraint;
+the preference is selected explicitly by the caller, not silently injected. The partition table, including btrippe and possu courtesy, is unchanged.
 
 The candidate feature set comes from `sh_node_feat` and aggregate `shk resources`
 evidence checked on 2026-11-14. It includes RTX_3090 (24 GB) and TITAN_V (12 GB),

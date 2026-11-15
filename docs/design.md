@@ -1,4 +1,4 @@
-# Design (0.6.1)
+# Design (0.7.0)
 
 `shk` is a thin, stateless interface between an agent and Sherlock's Slurm and
 filesystems. It answers three questions with as little machinery as possible:
@@ -118,7 +118,7 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
    `--courtesy-ack`. The denylist follows sbatch's getopt parsing: abbreviated
    long options (`--part`) and short flags bundled after value-less ones
-   (`-Hp`) count. `--constraint` and `--signal` go to sbatch unchanged, which
+   (`-Hp`) count. `--constraint`, `--prefer` and `--signal` go to sbatch unchanged, which
    checks them itself; each `--after-ok` value (repeatable) must be one job id,
    `N` or `N_TASK`, because `shk` joins them into its own `--dependency`
    string, where a `,` or `?` would add clauses. Build the sbatch argv
@@ -126,7 +126,10 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs; a submission
    token adds `,SHK_SUBMISSION_TOKEN=<token>` to the export and
    `--comment=<token>`, and `--hold` is accepted only with a token) and the
-   frozen spec. `--dry-run` stops here, with no network at all.
+   frozen spec. An explicit `--prefer` is also recorded in `resources.prefer`;
+   omitting it leaves the resource document and argv unchanged. Slurm tries
+   preferred features independently before the fallback constraint; callers must
+   include every hard requirement in both. `--dry-run` stops here, with no network at all.
 2. **Read call** (`query.sh`, shared with `status`): one `squeue -t all` and one
    `sacct --duplicates` over the last 30 days for the user and name, plus the
    newest spec file; for a borrowed partition also its occupancy. Only

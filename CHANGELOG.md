@@ -1,12 +1,17 @@
 # Changelog
 
-## 0.6.1
+## 0.7.0
+
+- Add `shk submit --prefer` to pass preferred node features to Slurm and record
+  them in the frozen spec. Without it, argv and resource fields are unchanged.
+  Preferred features are tried independently before the fallback constraint;
+  include all hard requirements in both expressions.
 
 - Deliver owner GPU/partition preferences in both rules and the installed skill:
   broad compatible GPU choices, hardware provenance without automatic scientific
   cohort splitting, idempotent owners recovery, parallel ready work and longer
-  useful bundles with bounded resource-aware rebalancing. Partition courtesy,
-  CLI flags and TOML keys are unchanged.
+  useful bundles with bounded resource-aware rebalancing. Partition courtesy
+  and TOML keys are unchanged.
 
 - Refresh the site-policy comparison, including explicitly requested scratch
   environments and the storage/installation guidance.

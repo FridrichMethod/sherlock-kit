@@ -181,13 +181,19 @@ class RulesFormatTests(unittest.TestCase):
 
     def test_rules_headings(self):
         expected = {
-            "workstation.md": ["Connection", "Jobs", "Data", "Partition profiles"],
+            "workstation.md": [
+                "Connection",
+                "Jobs",
+                "Data",
+                "GPU scheduling defaults",
+                "Partition profiles",
+            ],
             "cluster.md": [
                 "Where you are",
                 "Filesystems",
-                "Login nodes",
-                "Software",
+                "Login nodes and software",
                 "Slurm",
+                "GPU scheduling defaults",
                 "Partition profiles",
             ],
         }

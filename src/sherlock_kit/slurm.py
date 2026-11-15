@@ -603,6 +603,7 @@ def _register_submit(subparsers: Subparsers) -> None:
     parser.add_argument("--tasks", type=int, default=1)
     parser.add_argument("--array", metavar="N[%M]", help="N tasks (2-1000), at most M at once")
     parser.add_argument("--constraint")
+    parser.add_argument("--prefer", help="preferred node features (Slurm soft constraint)")
     parser.add_argument("--signal", help="for example B:USR1@60")
     parser.add_argument(
         "--after-ok",

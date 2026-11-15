@@ -37,6 +37,7 @@ DEFAULTS = {
     "tasks": 1,
     "array": None,
     "constraint": None,
+    "prefer": None,
     "signal": None,
     "requeue": None,
     "after_ok": [],
@@ -222,6 +223,20 @@ class DirectiveTests(Case):
 
 
 class ProfileAndArgvTests(Case):
+    def test_preferred_features_are_separate_and_frozen_without_changing_identity(self):
+        allowed = "GPU_SKU:L40S|GPU_SKU:H100_SXM5|GPU_SKU:V100_PCIE"
+        preferred = "GPU_SKU:L40S|GPU_SKU:H100_SXM5"
+        base = self.build(partition="gpu", gpus=1, constraint=allowed)
+        chosen = self.build(partition="gpu", gpus=1, constraint=allowed, prefer=preferred)
+        self.assertEqual(chosen.name, base.name)
+        self.assertEqual(chosen.run_dir, base.run_dir)
+        self.assertIn(f"--prefer={preferred}", chosen.argv)
+        self.assertIn(f"--constraint={allowed}", chosen.argv)
+        self.assertEqual(chosen.document["resources"]["prefer"], preferred)
+        self.assertNotIn("prefer", base.document["resources"])
+        self.assertFalse(any(arg.startswith("--prefer=") for arg in base.argv))
+        self.assertIn(f"--prefer={preferred}", self.build(prefer=preferred).argv)
+
     def test_profile_gates(self):
         self.refused(3, "unknown_partition", partition="mystery")
         self.refused(3, "gpus_not_allowed", gpus=1)
@@ -351,7 +366,7 @@ class ProfileAndArgvTests(Case):
             },
         )
         self.assertEqual((doc["resubmit_reason"], doc["git"]), ("fixed the input path", None))
-        self.assertTrue(doc["shk"].startswith("sherlock-kit 0.6.1 ("))
+        self.assertTrue(doc["shk"].startswith("sherlock-kit 0.7.0 ("))
 
     def test_git_provenance_of_the_project(self):
         env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}

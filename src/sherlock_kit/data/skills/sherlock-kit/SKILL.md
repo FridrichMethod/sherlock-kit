@@ -50,7 +50,7 @@ shk submit --task train-a --script job.sh --partition normal --cpus 4 --mem 16G 
 
 ## GPU and partition preferences
 
-These owner defaults guide agents; they are not new CLI/TOML settings or site restrictions. Explicit task requirements and site policy take precedence. Discover actual features with `sh_node_feat` and partition limits with `sh_part` in a login shell. Choose by expected time to completion, including queueing, startup, computation and recovery, not peak GPU speed alone.
+These owner defaults guide agents; they do not inject CLI/TOML defaults or change site restrictions. Explicit task requirements and site policy take precedence. Discover actual features with `sh_node_feat` and partition limits with `sh_part` in a login shell. Choose by expected time to completion, including queueing, startup, computation and recovery, not peak GPU speed alone.
 
 Start with a broad compatible OR constraint. The discovered production candidates include:
 
@@ -59,6 +59,25 @@ GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_S
 ```
 
 Pass the compatible subset as `--constraint 'GPU_SKU:...|GPU_SKU:...'`, with explicit partition, GPU count, CPUs, memory and walltime. This is a starting set, not a permanent allowlist: include newly discovered compatible GPUs. Avoid RTX_2080Ti and Pascal-era P100/P40/TITAN_Xp by default. TITAN_V has only 12 GB and RTX_3090 24 GB; narrow by actual memory, CUDA architecture, kernels and dtype requirements, with a concrete reason. Small MIG slices must fit the task and their partition's rules; the 6 GB A30 slice in interactive dev is not a production batch fallback.
+
+Use `shk submit --prefer` for a soft preference over the compatible, discovered
+L40, A and H families and future B or newer families. They form one preferred
+tier; OR order does not rank those families. With the candidate inventory above,
+the preferred expression is:
+
+```text
+GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S
+```
+
+Keep the broader compatible set in `--constraint` so other acceptable GPUs can
+run when the preferred set is unavailable. Slurm tries `--prefer` independently
+before `--constraint`, not as their intersection: the preferred set must be a
+subset of the allowed hardware and both expressions must include every hard
+memory, architecture or other feature requirement. Adapt both lists to the task;
+add a future SKU only after discovery, never by guessing a feature or using a
+family wildcard. This does not reserve GPUs, promise a start time or justify
+waiting indefinitely for a preferred card. See the
+[Slurm sbatch reference](https://slurm.schedmd.com/sbatch.html#OPT_prefer).
 
 Default scientific comparisons may combine compatible GPU models; record actual hardware as provenance without adding controls, cohorts or reruns solely for the SKU. This does not promise bitwise equality or certify software compatibility. Keep effective inputs, model/checkpoint, seeds, numerical settings and environment protocol fixed. Validate a real compatibility uncertainty when needed, without requiring every model/SKU combination before independent ready work progresses.
 
