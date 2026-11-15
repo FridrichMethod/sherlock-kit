@@ -1,6 +1,7 @@
 """Offline submit checks: grammar, job name, #SBATCH denylist, profile gates, argv, frozen spec."""
 
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -8,13 +9,14 @@ import sys
 import tempfile
 import unittest
 from argparse import Namespace
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fakes import SRC
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import config, spec
+from sherlock_kit import cli, config, slurm, spec
 from sherlock_kit.errors import ShkError
 
 NOW = datetime(2026, 10, 10, 12, 0, 5, tzinfo=UTC)
@@ -119,6 +121,43 @@ class GrammarTests(Case):
         self.assertEqual(elsewhere, "/scratch/u/elsewhere")
         huge = b"#!/bin/sh\n" + b"#" * spec.SCRIPT_LIMIT
         self.assertIn("1 MiB", self.refused(1, "spec_invalid", body=huge).message)
+
+    def test_given_constraint_prefer_and_signal_must_not_be_blank(self):
+        # --constraint "$SKU" with SKU unset must not submit the job without its constraint.
+        for option in ("constraint", "prefer", "signal"):
+            for value in ("", " ", "   ", "\t", " \t\n"):
+                with self.subTest(option=option, value=value):
+                    error = self.refused(1, "spec_invalid", **{option: value})
+                    self.assertEqual(error.message, f"--{option} must not be empty")
+        given = self.build(constraint=" a|b ", prefer="a", signal="B:USR1@60").argv
+        self.assertEqual(given[-5:-2], ["--constraint= a|b ", "--prefer=a", "--signal=B:USR1@60"])
+
+    def test_omitted_options_keep_the_argv_and_frozen_spec_byte_identical(self):
+        built = self.build()
+        argv = [
+            *HEAD,
+            "--partition=normal",
+            "--cpus-per-task=2",
+            "--no-requeue",
+            *TAIL,
+            *SINGLE_LOGS,
+            EXPORT,
+            "--dependency=singleton",
+        ]
+        self.assertEqual(built.argv, argv)
+        resources = (
+            '{"after_ok":[],"array":null,"constraint":null,"cpus":2,"gpus":0,"mem_mb":4096,'
+            '"minutes":90,"partition":"normal","requeue":false,"signal":null,"tasks":1}'
+        )
+        digest = hashlib.sha256(SCRIPT).hexdigest()
+        self.assertEqual(
+            built.text,
+            f'{{"argv":{spec.canonical(argv)},"campaign":"default",'
+            f'"created_utc":"2026-10-10T12:00:05Z","git":null,"hold":false,"name":"{NAME}",'
+            f'"project":"demo","resources":{resources},"resubmit_reason":null,"run_dir":"{RUN}",'
+            f'"schema":1,"script":{{"name":"job.sh","sha256":"{digest}"}},'
+            f'"shk":{json.dumps(spec.version_line())},"submission_token":null,"task":"train-a"}}',
+        )
 
     def test_job_name_is_stable_hashed_and_bounded(self):
         self.assertEqual(spec.job_name("demo", "default", "train-a"), NAME)
@@ -379,6 +418,48 @@ class ProfileAndArgvTests(Case):
         self.assertEqual(json.loads(self.build().text)["git"], {"head": head, "dirty": False})
         (self.tmp / "job.sh").write_bytes(SCRIPT + b"echo changed\n")
         self.assertEqual(json.loads(self.build().text)["git"], {"head": head, "dirty": True})
+
+
+class CommandLineTests(Case):
+    """The real shk submit parser and handler; a refusal comes before any remote call."""
+
+    def setUp(self):
+        super().setUp()
+        self.remote = self.tmp / "remote"
+        (self.tmp / "sherlock-kit.toml").write_text(
+            f'project = "demo"\nremote_root = "{self.remote}"\n'
+        )
+
+    def submit(self, *extra):
+        ctx = cli.Context(
+            project_dir=self.tmp, executor="local", env={}, hostname="lab", clock=lambda: NOW
+        )
+        argv = ["submit", "--task", "train-a", "--script", str(self.tmp / "job.sh")]
+        argv += ["--partition", "normal", "--cpus", "2", "--mem", "4G", "--time", "90m", *extra]
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            code = cli.main(argv, modules=[slurm], context=ctx)
+        return code, json.loads(out.getvalue())
+
+    def test_blank_options_are_refused_in_every_submit_mode(self):
+        for option in ("constraint", "prefer", "signal"):
+            forms = ([f"--{option}="], [f"--{option}", ""], [f"--{option}", " \t"])
+            for form in forms:
+                for mode in ([], ["--dry-run"], ["--preflight"]):
+                    with self.subTest(form=form, mode=mode):
+                        code, report = self.submit(*form, *mode)
+                        self.assertEqual(
+                            (code, report["ok"], report["error"], report["message"]),
+                            (1, False, "spec_invalid", f"--{option} must not be empty"),
+                        )
+        self.assertFalse(self.remote.exists())
+
+    def test_dry_run_without_the_options_is_the_direct_build_byte_for_byte(self):
+        # The parser leaves an omitted option None, which is what the golden tests build from.
+        code, report = self.submit("--dry-run")
+        built = self.build(run_dir=f"{self.remote}/runs/{NAME}")
+        self.assertEqual((code, report["argv"]), (0, built.argv))
+        self.assertEqual(spec.canonical(report["spec"]), built.text)
 
 
 if __name__ == "__main__":

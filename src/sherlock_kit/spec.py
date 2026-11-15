@@ -5,9 +5,11 @@ partition or one without batch jobs (dev), GPUs or requeue its profile forbids, 
 option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
 borrowed partition without --courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad
 memory, time, array, --after-ok or --submission-token grammar, --hold without a token, an
-unreadable script or one over 1 MiB. --constraint, --prefer and --signal go to sbatch unchanged (Slurm
-checks them); each --after-ok value must be one job id, since shk joins them into its own
---dependency string, where a ',' or '?' would add clauses.
+unreadable script or one over 1 MiB, an empty --task or --campaign, or an empty or
+whitespace-only --constraint, --prefer or --signal (the usual cause is an unset shell variable).
+A given --constraint, --prefer or --signal goes to sbatch unchanged (Slurm checks it); an omitted
+one adds nothing to the argv. Each --after-ok value must be one job id, since shk joins them into
+its own --dependency string, where a ',' or '?' would add clauses.
 """
 
 from __future__ import annotations
@@ -112,6 +114,13 @@ def _invalid(message: str) -> ShkError:
 def checked_text(label: str, value: str) -> str:
     """A --task or --campaign value, which must not be empty (an unset shell variable)."""
     if not value:
+        raise _invalid(f"--{label} must not be empty")
+    return value
+
+
+def optional_text(label: str, value: str | None) -> str | None:
+    """A --constraint, --prefer or --signal value: omitted (None), or given and not blank."""
+    if value is not None and not value.strip():
         raise _invalid(f"--{label} must not be empty")
     return value
 
@@ -264,9 +273,9 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
         minutes=minutes(args.time),
         requeue=requeue,
         array=None if args.array is None else array(args.array),
-        constraint=args.constraint,
-        prefer=args.prefer,
-        signal=args.signal,
+        constraint=optional_text("constraint", args.constraint),
+        prefer=optional_text("prefer", args.prefer),
+        signal=optional_text("signal", args.signal),
         after_ok=after_ok(args.after_ok),
     )
 

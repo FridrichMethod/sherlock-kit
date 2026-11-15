@@ -30,13 +30,14 @@ fi
 [ -n "$job" ] && [ "$(printf "%s\n" "$job" | wc -l)" -eq 1 ] || refuse ambiguous
 # Slurm prints JobId, the array identity and JobName first and free text (SubmitLine, WorkDir,
 # Comment, paths) last. Pin the leading fields, then read each key at its first occurrence, so
-# a comment such as "rerun of ArrayJobId=400 ArrayTaskId=7" cannot shadow a real field.
+# a comment such as "rerun of ArrayJobId=400 ArrayTaskId=7" cannot shadow a real field. Each
+# value is one word: a throttled array prints ArrayTaskThrottle=N between ArrayTaskId and JobName.
 lead=${job%%" JobName="*}
 case $lead in
 JobId=*" ArrayJobId="*" ArrayTaskId="*)
     actual_id=${lead%%" "*} actual_id=${actual_id#JobId=}
     array_id=${lead#*" ArrayJobId="} array_id=${array_id%%" "*}
-    array_task=${lead##*" ArrayTaskId="}
+    array_task=${lead##*" ArrayTaskId="} array_task=${array_task%%" "*}
     ;;
 *) actual_id=${lead#JobId=} array_id="" array_task="" ;;
 esac

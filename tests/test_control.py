@@ -10,6 +10,7 @@ lists every ancestor of itself (bash adds a command-substitution subshell that d
 
 import json
 import os
+import shutil
 import sys
 from types import MappingProxyType
 from unittest.mock import patch
@@ -51,12 +52,15 @@ sys.exit(reply.get("rc", 0))
 """
 
 
-def job_record(job, *, array=None, task=None, partition="owners", token="tok-1", **changes):
-    """One 25.11.8 oneliner job record (synthetic values)."""
+def job_record(
+    job, *, array=None, task=None, throttle=None, partition="owners", token="tok-1", **changes
+):
+    """One 25.11.8 oneliner job record (synthetic values); a throttled array names its limit."""
     fields = {
         "JobId": job,
         "ArrayJobId": array,
         "ArrayTaskId": task,
+        "ArrayTaskThrottle": throttle,
         "JobName": NAME,
         "UserId": f"demo({os.getuid()})",
         "GroupId": "lab(1000)",
@@ -358,6 +362,150 @@ class SelfRequeue(ControlFlow):
         self.assertIn("scontrol requeue exit 1", report["detail"])
         self.assertIn("Requested operation is presently disabled for job 44", report["detail"])
         self.assertIn("status --job-id 44 --details", report["next"])
+
+
+class ThrottledArray(ControlFlow):
+    """An array with a run limit prints ArrayTaskThrottle=N between ArrayTaskId and JobName.
+
+    The field order is the one of the Slurm 25.11 scontrol formatter (src/scontrol/info_job.c);
+    it is not among the records observed on Sherlock.
+    """
+
+    def held(self, job, task, **changes):
+        fields = {"JobState": "PENDING", "Reason": "JobHeldUser", "Priority": "0", **changes}
+        return job_record(job, array="50", task=task, partition="normal", **fields) + "\n"
+
+    def release_id(self, job):
+        return self.shk(
+            "release", "--job-id", job, "--expect-name", NAME, "--expect-token", "tok-1"
+        )
+
+    def test_split_element_is_requeued_as_its_task(self):
+        self.allocation("51", "50", "0")
+        record = job_record("51", array="50", task="0", throttle="2")
+        self.assertIn(" ArrayTaskId=0 ArrayTaskThrottle=2 JobName=", record)
+        self.scontrol({
+            "listpids 51": {"out": listpids("51")},
+            "show job 51 --oneliner": {"out": record + "\n"},
+            "requeue 50_0": {},
+        })
+        code, report = self.requeue("--expect-token", "tok-1")
+        self.assertEqual(
+            (code, report.get("action"), report.get("job_id")), (0, "requeued", "50_0"), report
+        )
+        self.assertEqual(
+            self.calls(),
+            [["listpids", "51"], ["show", "job", "51", "--oneliner"], ["requeue", "50_0"]],
+        )
+
+    def test_meta_element_requeues_only_its_own_task(self):
+        self.allocation("50", "50", "1")
+        own = job_record("50", array="50", task="1", throttle="2")
+        sibling = job_record("51", array="50", task="0", throttle="2")
+        for order, records in enumerate((f"{own}\n{sibling}\n", f"{sibling}\n{own}\n")):
+            with self.subTest(order=order):
+                self.calls_file.unlink(missing_ok=True)
+                self.scontrol({
+                    "listpids 50": {"out": listpids("50")},
+                    "show job 50 --oneliner": {"out": records},
+                    "requeue 50_1": {},
+                })
+                code, report = self.requeue("--expect-token", "tok-1")
+                self.assertEqual(
+                    (code, report.get("action"), report.get("job_id")),
+                    (0, "requeued", "50_1"),
+                    report,
+                )
+                self.assertEqual(
+                    self.calls(),
+                    [["listpids", "50"], ["show", "job", "50", "--oneliner"], ["requeue", "50_1"]],
+                )
+
+    def test_held_split_element_is_released_by_its_task(self):
+        self.scontrol({
+            "show job 50_0 --oneliner": {"out": self.held("51", "0", throttle="2")},
+            "release 50_0": {},
+        })
+        code, report = self.release_id("50_0")
+        self.assertEqual(
+            (code, report.get("action"), report.get("job_id")), (0, "released", "50_0"), report
+        )
+        self.assertEqual(self.calls(), [["show", "job", "50_0", "--oneliner"], ["release", "50_0"]])
+
+    def test_unsplit_held_array_is_released_by_its_base_id_only(self):
+        # Before the elements split, one record stands for the whole array and names a task
+        # range: it answers the base id, never one element.
+        for throttle in (None, "2"):
+            with self.subTest(throttle=throttle):
+                self.calls_file.unlink(missing_ok=True)
+                record = self.held("50", "0-3", throttle=throttle)
+                self.scontrol({
+                    "show job 50 --oneliner": {"out": record},
+                    "show job 50_0 --oneliner": {"out": record},
+                    "release 50": {},
+                    "release 50_0": {},
+                })
+                code, report = self.release_id("50")
+                self.assertEqual(
+                    (code, report.get("action"), report.get("job_id")),
+                    (0, "released", "50"),
+                    report,
+                )
+                code, report = self.release_id("50_0")
+                self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED id"))
+                self.assertEqual(
+                    self.calls(),
+                    [
+                        ["show", "job", "50", "--oneliner"],
+                        ["release", "50"],
+                        ["show", "job", "50_0", "--oneliner"],
+                    ],
+                )
+
+    def test_free_text_never_shadows_the_task_of_a_throttled_element(self):
+        self.allocation("51", "50", "0")
+        comment = "rerun of ArrayJobId=70 ArrayTaskId=7 ArrayTaskThrottle=9 JobName=other"
+        record = job_record("51", array="50", task="0", throttle="2", token=comment)
+        self.scontrol({
+            "listpids 51": {"out": listpids("51")},
+            "show job 51 --oneliner": {"out": record + "\n"},
+            "requeue 50_0": {},
+        })
+        code, report = self.requeue()
+        self.assertEqual((code, report.get("job_id")), (0, "50_0"), report)
+        self.assertEqual(self.calls()[-1], ["requeue", "50_0"])
+        # Nor does a later ArrayTaskId= satisfy the id check of a release aimed at that task.
+        self.calls_file.unlink()
+        held = self.held("51", "0", throttle="2", WorkDir="/home/demo/a ArrayTaskId=7 b")
+        self.scontrol({"show job 50_7 --oneliner": {"out": held}, "release 50_7": {}})
+        code, report = self.release_id("50_7")
+        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED id"))
+        self.assertEqual(self.calls(), [["show", "job", "50_7", "--oneliner"]])
+
+    def test_a_task_range_is_never_a_requeue_target(self):
+        self.allocation("50", "50", "1")
+        record = job_record("50", array="50", task="0-3", throttle="2")
+        self.scontrol({
+            "listpids 50": {"out": listpids("50")},
+            "show job 50 --oneliner": {"out": record + "\n"},
+        })
+        code, report = self.requeue()
+        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED ambiguous"))
+        self.assertNotIn("requeue", [call[0] for call in self.calls()])
+
+
+class ThrottledArrayBashAsSh(ThrottledArray):
+    """Sherlock's sh is bash in POSIX mode: the same parse must hold there."""
+
+    def setUp(self):
+        super().setUp()
+        bash = shutil.which("bash")
+        if bash is None:
+            self.skipTest("needs bash")
+        shim = self.tmp / "bash-as-sh"
+        shim.mkdir()
+        (shim / "sh").symlink_to(bash)
+        self.knobs(PATH=f"{shim}{os.pathsep}{os.environ['PATH']}")
 
 
 class ExactRelease(ControlFlow):
