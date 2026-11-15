@@ -236,7 +236,7 @@ def _jobs(stdout: str, uid: int, report: dict[str, Any]) -> set[str]:
     }
     expected = set(bases)
     observed: set[str | None] = set()
-    for line in stdout.splitlines():
+    for line in executor.records(stdout):
         if not line.startswith("SHK_J|"):
             continue
         raw = line.removeprefix("SHK_J|")
@@ -354,7 +354,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     for item in selected:
         query.extend((item.name, item.run_dir or "-"))
     result = executor.check(executor.run_program(ctx.executor(), "details", query), "details")
-    lines = result.stdout.splitlines()
+    lines = executor.records(result.stdout)
     ended, codes = "SHK_END" in lines, _returncodes(lines)
     # Partial tool evidence stays reviewable: parse it all, then refuse to summarize below.
     read = slurm.parse_read(result.stdout + "\nSHK_END\n", ())

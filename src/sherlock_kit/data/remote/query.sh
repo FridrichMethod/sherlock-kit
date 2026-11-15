@@ -10,7 +10,7 @@ shift 3
 u=$(id -un)
 printf "SHK_USER %s\nSHK_HOST %s\n" "$u" "$(uname -n)"
 
-specs() { # NAME RUN_DIR: count the spec files, print the newest NAME.<jobid>.json
+specs() { # NAME RUN_DIR: count the spec files, print the newest NAME.<jobid>.json as one line
     n=0 best=0
     for f in "$2/.shk/$1".*.json; do
         [ -f "$f" ] || continue
@@ -19,7 +19,7 @@ specs() { # NAME RUN_DIR: count the spec files, print the newest NAME.<jobid>.js
         case $id in "" | *[!0-9]*) ;; *) [ "$id" -le "$best" ] || best=$id ;; esac
     done
     printf "SHK_S|%s|%s\n" "$1" "$n"
-    [ "$best" -eq 0 ] || printf "SHK_SPEC|%s|%s|%s\n" "$1" "$best" "$(head -c 65536 "$2/.shk/$1.$best.json")"
+    [ "$best" -eq 0 ] || printf "SHK_SPEC|%s|%s|%s\n" "$1" "$best" "$(head -c 65536 "$2/.shk/$1.$best.json" | tr "\n" " ")"
 }
 
 occupancy() { # PARTITION...: fixed-width squeue -O rows of every user

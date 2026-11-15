@@ -81,13 +81,22 @@ def _text(value: bytes | str | None) -> str:
     """Decoded output without Sherlock's login banner lines, each written once to stderr."""
     text = value.decode("utf-8", "replace") if isinstance(value, bytes) else (value or "")
     kept = []
-    for line in text.splitlines(keepends=True):
+    for line in re.split(r"(?<=\n)", text):  # LF ends a line; a VT or a NEL is ordinary text
         if not line.startswith(BANNER):
             kept.append(line)
         elif (reminder := line.rstrip("\r\n")) not in _reminded:
             _reminded.add(reminder)
             print(reminder, file=sys.stderr)
     return "".join(kept)
+
+
+def records(reply: str) -> list[str]:
+    """The records of a remote program's reply, which LF alone separates.
+
+    str.splitlines() also breaks at CR, VT, FF, FS, GS, RS, NEL, LS and PS, so a job name, a
+    comment or a spec file holding one of them could add records such as SHK_END to a reply.
+    """
+    return reply.removesuffix("\n").split("\n") if reply else []
 
 
 def _spawn(command: Sequence[str], data: bytes | None, timeout: float) -> tuple[int, bytes, bytes]:

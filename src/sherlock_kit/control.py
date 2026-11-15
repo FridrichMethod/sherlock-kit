@@ -65,7 +65,7 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
         executor.run_program(ctx.executor(), "preflight", built.argv, stdin=built.script),
         "preflight",
     )
-    lines = result.stdout.splitlines()
+    lines = executor.records(result.stdout)
     markers = [
         line.removeprefix("SHK_RC sbatch ") for line in lines if line.startswith("SHK_RC sbatch ")
     ]

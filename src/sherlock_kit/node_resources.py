@@ -118,7 +118,7 @@ def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
     wanted = {partitions.profile(name).name for name in args.partition}
     program = executor.run_program(ctx.executor(), "resources", sorted(wanted))
     result = executor.check(program, "resources")
-    lines = result.stdout.splitlines()
+    lines = executor.records(result.stdout)
     rc = next((line.split()[-1] for line in lines if line.startswith("SHK_RC scontrol ")), None)
     if "SHK_END" not in lines or rc != "0":
         raise ShkError(

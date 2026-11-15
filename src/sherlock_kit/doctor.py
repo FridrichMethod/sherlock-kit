@@ -80,7 +80,8 @@ def _remote(ctx: Context, problems: list[str], warnings: list[str]) -> tuple[dic
     if result.status != "complete":
         code = EXIT_LOCAL if result.status == "failed" else EXIT_UNREACHABLE
         return {"status": result.status, "stderr": result.stderr.strip()[-1000:]}, code
-    words = [line.split(" ", 2) for line in result.stdout.splitlines() if line.startswith("SHK_")]
+    lines = executors.records(result.stdout)
+    words = [line.split(" ", 2) for line in lines if line.startswith("SHK_")]
     facts = {w[0]: " ".join(w[1:]) for w in words if w[0] != "SHK_TOOL"}
     tools = {
         w[1]: None if w[2] == "-" else w[2] for w in words if w[0] == "SHK_TOOL" and len(w) == 3
