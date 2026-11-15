@@ -50,7 +50,7 @@ def register(subparsers: Subparsers) -> None:
     parser = subparsers.add_parser(
         "resources", help="Slurm configured minus allocated node capacity"
     )
-    parser.add_argument("--partition", action="append", required=True)
+    parser.add_argument("--partition", action="append", required=True, help="repeatable")
     parser.set_defaults(handler=resources)
 
 

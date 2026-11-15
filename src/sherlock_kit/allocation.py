@@ -41,7 +41,12 @@ def register(subparsers: Subparsers) -> None:
     parser.add_argument("--pid", required=True)
     parser.add_argument("--job-id", required=True)
     parser.add_argument("--step-id", help="numeric step within the selected physical job")
-    parser.add_argument("--hostlist", action="append", default=[])
+    parser.add_argument(
+        "--hostlist",
+        action="append",
+        default=[],
+        help="hostlist expression to expand and report; repeatable",
+    )
     parser.set_defaults(handler=allocation)
 
 
