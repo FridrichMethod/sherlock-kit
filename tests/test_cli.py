@@ -95,6 +95,8 @@ class VersionTests(TempCase):
         (self.tmp / "hop1").symlink_to(repo / "bin/shk")
         (self.tmp / "hop2").symlink_to(self.tmp / "hop1")
         env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+        # The shebang is `env python3`: resolve it to the interpreter under test.
+        env["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{env['PATH']}"
         out = subprocess.run(
             [str(self.tmp / "hop2"), "--version"],
             env=env,

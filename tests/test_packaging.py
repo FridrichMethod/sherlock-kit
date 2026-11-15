@@ -183,6 +183,7 @@ class PreparationContractTests(unittest.TestCase):
                 "            t.add(name, arcname='example-1/' + name)\n"
                 "    return 'example-1.tar.gz'\n"
             )
+            git_env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
             for args in (
                 ("init", "-q"),
                 ("add", "pyproject.toml", "backend.py"),
@@ -196,7 +197,12 @@ class PreparationContractTests(unittest.TestCase):
                     "fixture",
                 ),
             ):
-                subprocess.run(["git", "-C", str(project), *args], check=True, capture_output=True)
+                subprocess.run(
+                    ["git", "-C", str(project), *args],
+                    check=True,
+                    capture_output=True,
+                    env=git_env,
+                )
             metadata.write_text(metadata.read_text().replace("example-runtime", "uncommitted"))
             tree = tmp / "archive"
             archive_head(project, tree)
