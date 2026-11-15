@@ -41,6 +41,9 @@ NOT_A_JOB_ID = (  # sbatch stdout that is not exactly one line N or N;cluster
     "-12",
     "12;a;b",
     "12;sherlock\n13",
+    "\u0661\u0662",  # digits of another script: a UTF-8 locale must not make them a job id
+    "\uff11\uff12",
+    "12;\u0101",
 )
 REMOTE = SRC / "sherlock_kit" / "data" / "remote"
 PROGRAMS = sorted(REMOTE.glob("*.sh"))
@@ -768,7 +771,8 @@ class BashAsShFlow(OutcomeCases, Flow):
         shim = self.tmp / "bash-as-sh"
         shim.mkdir()
         (shim / "sh").symlink_to(bash)
-        self.knobs(PATH=f"{shim}{os.pathsep}{os.environ['PATH']}")
+        # A UTF-8 language locale, where bash ranges are not byte ranges (C when not installed).
+        self.knobs(PATH=f"{shim}{os.pathsep}{os.environ['PATH']}", LC_ALL="en_US.UTF-8")
 
     def test_array_submit_refusal_status_and_cancel(self):
         self.assertEqual(Path(shutil.which("sh")).resolve(), Path(shutil.which("bash")).resolve())

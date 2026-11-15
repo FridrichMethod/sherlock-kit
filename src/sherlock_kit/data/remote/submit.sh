@@ -30,6 +30,7 @@ got=$(sha256sum <"$base.sh") || refuse digest
 printf "%s\n" "$spec" >"$base.json" || refuse write
 out=$("$@" "$base.sh" 2>"$base.err" </dev/null)
 rc=$?
+LC_ALL=C # the patterns below match bytes, whatever locale the login shell has
 job=${out%%;*} cluster=${out#"$job"}
 case $job in "" | 0* | *[!0-9]*) job="" ;; esac
 case $cluster in ";" | ";"*[!A-Za-z0-9_.-]*) job="" ;; esac

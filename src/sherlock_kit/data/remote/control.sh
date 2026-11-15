@@ -37,7 +37,7 @@ case $lead in
 JobId=*" ArrayJobId="*" ArrayTaskId="*)
     actual_id=${lead%%" "*} actual_id=${actual_id#JobId=}
     array_id=${lead#*" ArrayJobId="} array_id=${array_id%%" "*}
-    array_task=${lead##*" ArrayTaskId="} array_task=${array_task%%" "*}
+    array_task=${lead#*" ArrayTaskId="} array_task=${array_task%%" "*}
     ;;
 *) actual_id=${lead#JobId=} array_id="" array_task="" ;;
 esac
