@@ -21,10 +21,15 @@ Only the lead merges to main and tags.
 
 Keep `docs/` as maintained user/developer reference and necessary compatibility
 evidence, with an index in `docs/README.md`. Put temporary implementation plans,
-worker handoffs and check logs in ignored, durable `.state/<task>/` storage,
-not in release documentation. Before removing a completed plan, preserve any
-still-relevant decisions in the appropriate guide and check incoming links.
-Git history retains completed tracked plans; do not create a duplicate archive
+worker handoffs and check logs in the canonical (main) checkout's ignored
+`.state/<task>/`, the durable task storage, not in release documentation and
+not only inside a worktree: `git worktree remove` deletes a worktree's ignored
+files, so copy evidence out to that directory before removing the worktree.
+The test wheelhouse that CONTRIBUTING.md prepares under `.state/` is a
+disposable build input, not task storage. Before removing a completed plan,
+preserve any still-relevant decisions in the appropriate guide and check
+incoming links. Git history keeps only what was committed: a plan that was
+never tracked exists only in task storage. Do not create a duplicate archive
 in `docs/`. Unfinished work and its handoff must remain recoverable.
 
 Write all documentation in English. Documentation may contain only printable

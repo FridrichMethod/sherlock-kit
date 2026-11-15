@@ -22,6 +22,6 @@ current cluster inventory or a guarantee that the current release was tested
 live. Current resources and site policy must be discovered as the operating
 guides require.
 
-Implementation plans and worker handoffs belong in task storage as described in
-[the repository instructions](../AGENTS.md). Completed implementation history
-is available in Git; maintained conclusions belong in the relevant guide.
+Implementation plans, worker handoffs and check logs are not part of these
+guides; [the repository instructions](../AGENTS.md) say where they are kept.
+Maintained conclusions belong in the relevant guide.
