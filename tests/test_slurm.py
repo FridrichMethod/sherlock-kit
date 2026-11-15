@@ -193,6 +193,55 @@ class ResolveTests(unittest.TestCase):
         self.assertEqual(squeue_wins["tasks"]["running"], 1)
         self.assertEqual(current(acct=[a("100"), a("100")])["cost"]["cpu_seconds"], 120)
 
+    def test_every_slurm_state_resolves_from_a_single_row(self):
+        table = {  # (name state, task kind): Slurm states
+            ("done", "completed"): ("COMPLETED",),
+            ("failed", "failed"): (
+                "FAILED",
+                "CANCELLED",
+                "TIMEOUT",
+                "NODE_FAIL",
+                "OUT_OF_MEMORY",
+                "BOOT_FAIL",
+                "DEADLINE",
+                "PREEMPTED",
+                "REVOKED",
+            ),
+            ("live", "running"): (
+                "RUNNING",
+                "COMPLETING",
+                "SUSPENDED",
+                "CONFIGURING",
+                "STAGE_OUT",
+                "SIGNALING",
+                "RESIZING",
+                "STOPPED",
+            ),
+            # Pending, requeued and unknown states are not running yet: the name stays owned.
+            ("live", "pending"): (
+                "PENDING",
+                "REQUEUED",
+                "REQUEUE_HOLD",
+                "REQUEUE_FED",
+                "SPECIAL_EXIT",
+                "RESV_DEL_HOLD",
+                "NOT_A_SLURM_STATE",
+            ),
+        }
+        for (expected, kind), states in table.items():
+            for state in states:
+                for source, rows in (
+                    ("squeue", {"queue": [q("100", state)]}),
+                    ("sacct", {"acct": [a("100", state)]}),
+                ):
+                    with self.subTest(state=state, source=source):
+                        result = resolve(**rows)
+                        tasks = result["current"]["tasks"]
+                        self.assertEqual(
+                            (result["state"], tasks[kind], tasks["by_state"]),
+                            (expected, 1, {state: 1}),
+                        )
+
     def test_newest_job_is_current_and_older_jobs_are_history(self):
         result = resolve(acct=[a("100", "FAILED", exit_code="1:0"), a("200")])
         self.assertEqual((result["state"], result["current"]["job_id"]), ("done", "200"))
