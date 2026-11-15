@@ -294,4 +294,32 @@ live with the 0.5.0 fix tree).
 
 Lost ssh replies, duplicate submissions racing each other, natural preemption
 by a node owner, an unexpected preemption on a non-preemptible partition, and
-jobs on `possu`. Those rest on offline tests with fake `ssh` and Slurm binaries.
+jobs on `possu`. Also not observed: `sbatch --prefer` (`shk submit --prefer`),
+OR feature expressions in `--constraint` or `--prefer`, and the `env`-prefixed
+`sbatch` of the CPU thread budget (`shk submit --cpu-thread-budget`). Those
+rest on offline tests with fake `ssh` and Slurm binaries.
+
+The following are confirmed in the official Slurm source at tag
+`slurm-25-11-9-1` and are likewise not observed live:
+
+- `scontrol show job` prints `ArrayTaskThrottle=N` directly after a numeric
+  `ArrayTaskId` when the array has a run limit
+  ([`src/scontrol/info_job.c`, lines 186-192](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L186)).
+  `shk requeue --self` and `shk release` therefore read `ArrayTaskId` as the
+  first word after the key. Whether a split element on Sherlock carries the
+  limit has not been seen.
+- A batch job can survive a failed submission reply. The client returns an
+  error when the controller send or receive fails
+  ([`src/api/submit.c`, lines 81-84](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/submit.c#L81)),
+  `sbatch` turns an unhandled submission error into a nonzero exit
+  ([`src/sbatch/sbatch.c`, lines 313-315](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sbatch/sbatch.c#L313)),
+  and the controller sends the success response of a batch submission,
+  discards that send's result and has no rollback on that path
+  ([`src/slurmctld/proc_req.c`, lines 3451-3464](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/proc_req.c#L3451)).
+  `shk submit` therefore reports a `sbatch` that ran without printing a strict
+  job id as outcome unknown (exit 5), never as a refusal.
+- `sbatch --wait` returns the submitted job's exit code after printing the job
+  id ([`src/sbatch/sbatch.c`, lines 355-356](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sbatch/sbatch.c#L355);
+  [sbatch reference](https://slurm.schedmd.com/sbatch.html#OPT_wait)). A
+  script may carry `#SBATCH --wait`, so `shk submit` reads a strict job id on
+  stdout as an accepted submission whatever the exit code.

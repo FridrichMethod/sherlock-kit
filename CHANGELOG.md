@@ -2,9 +2,98 @@
 
 ## Unreleased
 
+Intentional compatibility changes. Controllers that key on exit codes see more
+exit 5 and never a false exit 3 after `sbatch` or `scancel` has run:
+
+- `shk submit` no longer reports exit 3 `slurm_rejected`. Any result after
+  `sbatch` was started other than a strict job id is exit 5 `action: unknown`,
+  with `sbatch exit RC` and Slurm's stderr text in `detail` and the staged
+  `NAME.STAMP.sh`, `.json` and `.err` kept under `<run-dir>/.shk/`. The remote
+  marker `SHK_REJECTED` and the error token `slurm_rejected` are gone. A
+  nonzero `sbatch` can follow an accepted submission, so no error text is
+  treated as a definitive refusal; `shk submit --preflight` still gives a
+  definitive Slurm verdict (exit 3) without creating a job. A name whose
+  submission never landed reads `stale` and submits like `new`.
+- A nonzero `sbatch` whose entire stdout is one strict job id line (`N` or
+  `N;CLUSTER`, a positive decimal integer without a leading zero) is exit 0
+  `submitted`, with the staged files renamed to the job id; `sbatch --wait`
+  returns the job's exit code. Before, it was exit 3 with the staged
+  provenance deleted.
+- A nonzero `scancel` in `shk cancel` is exit 5 `action: unknown` with
+  `scancel exit RC` and the stderr text in `detail`, instead of exit 3.
+- An empty or whitespace-only `--constraint`, `--prefer` or `--signal` is
+  refused offline, exit 1 `spec_invalid`, instead of being dropped silently
+  from the request. Omitted options leave the frozen spec and argv
+  byte-identical.
+- `shk pull` exits 1 `remote_failed` with `find`'s message when the remote
+  enumeration of REMOTE fails (an unreadable subdirectory, for example), and
+  promotes nothing. Before, the inventory check could pass with files it had
+  not listed.
+
+Fixes:
+
+- `shk requeue --self` and `shk release --job-id A_k` work for an element of a
+  throttled array: `ArrayTaskId` is read as the first word after the key, so a
+  following `ArrayTaskThrottle=N` field no longer makes the identity check
+  refuse.
+- Replies of the remote programs are records separated by LF only. The
+  `SHK_SPEC` payload has its LF bytes flattened to spaces remotely and every
+  local parser splits on LF alone, so run-directory text or a job name
+  containing another line separator cannot add a record or a completion
+  marker.
+- On a borrowed partition the submit reply adds
+  `request: {tasks, throttle, minutes}` and, when others are running and the
+  request has more than 2 tasks, one factual total-work advisory in `warnings`
+  (array tasks, throttle or none, minutes). The budget warning keeps its
+  trigger and quotes "about 2 jobs x 2 h" as the courtesy budget only for a
+  partition whose courtesy text contains it. Nothing is refused; partition
+  profiles and courtesy texts are unchanged.
+- `allocation --hostlist` and `resources --partition` say `repeatable` in
+  their help.
+- Tests: a state matrix covers the pending fallback and the terminal Slurm
+  states of name resolution; the packaging fixture ignores the global Git
+  configuration (commit signing, for example); the two-hop `bin/shk` check
+  runs under the interpreter being tested; an OR expression in `--constraint`
+  and `--prefer` is followed through the real submit program.
+
+Documentation:
+
 - Remove the completed dependency-refactor implementation handoff from release
   documentation and source distributions. Add a documentation index and task
   document lifecycle guidance; retain the Slurm compatibility evidence.
+- Name the main checkout's ignored `.state/<task>/` as the durable task
+  storage: `git worktree remove` deletes a worktree's ignored files, so
+  evidence is copied out first.
+- Record limits of the current behavior: do not wrap `shk` in an outer timeout
+  shorter than its own (if `shk` itself is killed, a mutation in flight is
+  outcome unknown and a transfer may still be running); a failed or timed-out
+  push can leave a truncated file under its final name; `already_present`
+  means that the receipt beside LOCAL names the manifest, and LOCAL is not
+  verified again.
+- GPU campaign guidance: a passed pilot admits its configuration over the
+  compatible OR set already narrowed by hard requirements; separate validation
+  is for a member with a concrete open uncertainty. Borrowed partitions:
+  `btrippe` has no blanket daytime prohibition, `possu` keeps its 00:00-07:00
+  Pacific window.
+- CPU thread budgets: a script that sets only `OMP_NUM_THREADS` stays capped
+  by `OMP_THREAD_LIMIT` and the library-specific variables, and a submission
+  made from inside a budgeted job inherits its variables, so a nested
+  submission passes its own `--cpu-thread-budget N`.
+- Write repeatable flags in the repeated form in the command reference, add
+  `cpu_threads.py` to the design guide, align the policy provenance with the
+  wording of the rules files, correct "snapshots do not guarantee starts" in
+  both rules files, and list `--prefer`, OR feature expressions, the
+  thread-budget `env` prefix and three source-confirmed Slurm behaviors as not
+  observed live.
+- Development and packaging changes that shipped between 0.6.0 and 0.7.0
+  without an entry: `build` and `hypothesis` joined the `dev` extra;
+  `tests/prepare_wheelhouse.py` prepares a per-Python wheelhouse and
+  `SHK_TEST_WHEELHOUSE` became required, beside `SHK_BUILD_PYTHON`, for the
+  sdist, wheel, editable and source-launcher checks; CI prepares its
+  environments and wheelhouse online and then runs the suite offline; bounded
+  Hypothesis property tests cover the pure parsers and reducers. A bounded
+  Pydantic validation pilot was evaluated and not adopted: the runtime keeps
+  no dependencies.
 
 ## 0.7.0
 

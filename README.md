@@ -144,10 +144,11 @@ shk submit --task T [--campaign C] --script FILE --partition P --cpus N [--cpu-t
            [--gpus N] [--tasks N] [--array N[%M]] [--constraint X] [--prefer X] [--signal S] [--requeue|--no-requeue]
            [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--submission-token TOKEN] [--hold] [--dry-run|--preflight]
 shk resources --partition P [--partition P ...]
-shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION ...]
+shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION [--hostlist EXPRESSION ...]]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
 shk requeue --self --expect-name NAME [--expect-token TOKEN]
-shk status (--task T [--campaign C] [--run-dir PATH] ... | --name NAME ... | --all | --job-id ID ...) [--since DAYS] [--details]
+shk status (--task T [--campaign C] [--run-dir PATH] [--task T ...] | --name NAME [--name NAME ...] | --all | --job-id ID [--job-id ID ...])
+           [--since DAYS] [--details]
 shk cancel (--task T [--campaign C] | --name NAME)
 shk push LOCAL REMOTE [--anywhere]
 shk pull REMOTE LOCAL [--validate NAME] [--replace]
@@ -170,18 +171,31 @@ both. These are explicit arguments, not TOML defaults; see
   decides `new`, `live`, `done`, `failed` or `stale` (spec files in the run
   directory but no Slurm rows, submitted like `new`); a live name is always
   refused, a finished one unless `--resubmit REASON`. Then one mutation call
-  stages the script under `<run-dir>/.shk/` and runs `sbatch`; a lost reply is
-  exit 5, and the reply's `next` names the `shk status` command and when to run
-  it. Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`,
+  stages the script under `<run-dir>/.shk/` and runs `sbatch`. The submission
+  is accepted only when the entire stdout of `sbatch` is one line holding a
+  strict job id, `N` or `N;CLUSTER` with N a positive decimal integer without a
+  leading zero: exit 0 `submitted`, and the staged files are renamed to the job
+  id, whatever exit code `sbatch` returned (`sbatch --wait` returns the job's).
+  Every other result once `sbatch` has started is outcome unknown, never a
+  refusal: exit 5 with `action: unknown`, `detail` holding `sbatch exit RC` and
+  Slurm's stderr text when there is any, the staged `NAME.STAMP.sh`, `.json`
+  and `.err` kept under `<run-dir>/.shk/`, and `next` naming the `shk status`
+  command and when to run it. A lost reply is exit 5 too. A name whose
+  submission never landed then reads `stale` and submits like `new`.
+  Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`,
   `--array N[%M]` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
   several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
   writes the `--dependency` string itself, so a `,` or `?` list is refused.
+  `--constraint`, `--prefer` and `--signal` reach `sbatch` unchanged; one that
+  is given but empty or whitespace-only (an unset shell variable, for example)
+  is refused offline, exit 1 `spec_invalid`.
   `dev` is refused offline (exit 3 `batch_not_allowed`): Sherlock rejects every
   batch job there and keeps it for interactive `sh_dev` or `salloc` sessions;
   `occupancy` and `resources` still read it. `--dry-run` is offline. `--preflight` is mutually exclusive and sends the
   same script/resources to `sbatch --test-only` as a read: no job, run directory
   or provenance is created. Its `preflight` object retains returncode, stdout
-  and stderr; rejection is exit 3, read failure is never unknown.
+  and stderr; rejection is exit 3, read failure is never unknown. It is the way
+  to get a definitive Slurm verdict on a request without creating a job.
   `--submission-token` accepts 1-128 public characters `[A-Za-z0-9_.:-]` (first
   alphanumeric), freezes it in the spec, sets Slurm Comment and exports it to
   the job as `SHK_SUBMISSION_TOKEN`. `--hold` freezes a user hold and needs a
@@ -208,7 +222,9 @@ both. These are explicit arguments, not TOML defaults; see
   preemption or restart is unexpected (exit 6) on the non-preemptible partition
   of the attempt it interrupted.
   `--details` returns the evidence contract described below. `cancel` cancels
-  the live jobs of one name.
+  the live jobs of one name; a nonzero `scancel` exit or a lost reply is exit 5
+  with `scancel exit RC` and Slurm's stderr text in `detail`, to be settled by
+  the status read that `next` names.
 - `resources` reads `scontrol show nodes` once; Sherlock ships only the nodes
   whose `Partitions=` list names a requested partition, each once. A node keeps
   its state, partitions, active features, configured/allocated CPU (CPUEfctv,
@@ -255,7 +271,9 @@ both. These are explicit arguments, not TOML defaults; see
   REMOTE's parent must already exist. For a new remote root, push a staging
   directory containing `inputs/` to the root itself, for example
   `shk push staging/ /scratch/users/USER/demo` when `/scratch/users/USER` exists.
-  Check for exit 0 before submitting a job that needs those inputs.
+  Check for exit 0 before submitting a job that needs those inputs: a failed or
+  timed-out push can leave a truncated file under its final name, also where a
+  complete older copy was, so rerun it to exit 0 before any job reads REMOTE.
 - `pull` copies exactly the files in `REMOTE/SHA256SUMS` into a private stage
   beside LOCAL, verifies them, runs the optional validator and renames the stage
   onto LOCAL. With NAME the last component of LOCAL, the stage is
@@ -265,12 +283,25 @@ both. These are explicit arguments, not TOML defaults; see
   validator runs from the project root (the directory of the configuration file)
   with the stage directory as its last argument, passes with exit 0 and must
   treat the stage as read-only: whatever it writes is promoted with the data.
+  An error while the remote side enumerates REMOTE (an unreadable subdirectory,
+  for example) is exit 1 `remote_failed` with `find`'s message, and nothing is
+  promoted. `already_present` means that the receipt beside LOCAL names this
+  manifest; LOCAL itself is not verified again.
 - `occupancy` lists current use of partitions. Borrowed partitions (`btrippe`,
   `possu`) need it and `--courtesy-ack` before a submission, and such a
-  submission reports their occupancy and courtesy text, with a warning when
-  others are running there and you already have 2 jobs there or ask for more
-  than 2 h. Releasing a job held there counts as submitting it: `release`
-  checks neither occupancy nor the clock, so check both first.
+  submission reports `occupancy`, the partition's `courtesy` text,
+  `request = {tasks, throttle, minutes}` and `warnings`. `tasks` is 1 for a
+  single job and the array count otherwise, `throttle` is the `%M` limit or
+  null, and `minutes` is the requested walltime. Two advisories can appear in
+  `warnings`, and neither refuses anything: the budget warning, when others
+  are running there and you already have 2 jobs there or ask for more than
+  2 h; and a total-work advisory, when others are running there and `tasks` is
+  greater than 2, which states the number of array tasks, the throttle (or
+  that there is none) and the minutes without calling the request within or
+  over any budget. The courtesy terms are the profile texts alone: `btrippe`
+  has no blanket daytime prohibition, and `possu` keeps its 00:00-07:00 Pacific
+  window. Releasing a job held there counts as submitting it: `release` checks
+  neither occupancy nor the clock, so check both first.
 - `install-skill` copies the agent skill into a project (`.claude/skills/` and
   `.agents/skills/`) and, with `--rules`, the rules into `.claude/rules/` (Codex
   gets a hint instead); `--check` exits 1 when a copy is missing or stale.
@@ -370,14 +401,18 @@ are refused.
 | Code | Meaning |
 |---|---|
 | 0 | ok |
-| 1 | local error: configuration, spec, verification, validator, malformed reply |
+| 1 | local error: configuration, spec, verification, validator, malformed reply, failed remote read |
 | 2 | usage error |
-| 3 | refused by policy or Slurm: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, Slurm rejected the job, push or pull on Sherlock |
+| 3 | refused, and nothing was submitted, cancelled, released or requeued: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, a remote guard that stopped before `sbatch` or `scancel` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock |
 | 4 | SSH transport or master check unavailable: `auth_required` (ask the user to open the master); `unavailable` with a local permission denial (check the sandbox; request per-command approval in Codex); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop) |
-| 5 | outcome unknown after a dispatched mutation: run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
+| 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
 | 6 | status ok, but the newest job of a requested name has an anomaly |
 
 Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
+
+Do not wrap `shk` in an outer timeout shorter than its own (`command_timeout`,
+`transfer_timeout`): if `shk` itself is killed, a mutation in flight is outcome
+unknown without an exit 5 reply, and a transfer may still be running.
 
 ## Agents
 

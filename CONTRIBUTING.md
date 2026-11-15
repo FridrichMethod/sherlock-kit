@@ -15,6 +15,13 @@ Concurrent writers each use their own branch and Git worktree (for example
 `.worktrees/<name>`, ignored by Git); reviewers are read-only. Only the lead
 merges to `main` and tags releases.
 
+Task plans, worker handoffs and check logs live in the main checkout's ignored
+`.state/<task>/`, which is the durable task storage. `git worktree remove`
+deletes the ignored files inside a worktree, a `.state/` of its own included,
+so copy evidence to the main checkout before removing a worktree. The
+wheelhouse destination under `.state/` in the commands below is a disposable
+build input, not task storage.
+
 ## Checks
 
 Write documentation in English using printable ASCII, tabs and newlines only,
@@ -91,14 +98,20 @@ git diff --check
 
 - Python runs on 3.11 to 3.14 (no newer syntax or APIs). Prefer standard-library
   mechanisms where sufficient; dependencies need a concrete maintenance benefit
-  and supported installation checks. Keep it lean and readable: small functions, external input validated
-  once at the boundary, and no defensive code against situations that cannot
-  realistically happen. Lean is not a line count; do not compress code to save
+  and supported installation checks. A bounded Pydantic validation pilot for
+  configuration and receipt input was evaluated and not adopted, so the
+  runtime has no dependencies; `build` and `hypothesis` are development
+  requirements only. Keep it lean and readable: small functions, external
+  input validated once at the boundary, and no defensive code against
+  situations that cannot realistically happen. Lean is not a line count; do not compress code to save
   lines.
 - Remote programs under `src/sherlock_kit/data/remote/` are fixed POSIX `sh`,
   passed literally, linted with `shellcheck -s sh` and formatted with
   `shfmt -ln posix -i 4` (both in pre-commit); they print only `SHK_`
-  lines and sanitize `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*`.
+  lines, and every program that calls a Slurm client first unsets `SBATCH_*`,
+  `SQUEUE_*`, `SACCT_*` and `SLURM_*` (except `SLURM_CONF`). A reply is a
+  sequence of records separated by LF only: parse it by splitting on LF, never
+  with `str.splitlines()`.
 - Contract paths: `src/sherlock_kit/data/rules/workstation.md`,
   `src/sherlock_kit/data/rules/cluster.md`,
   `src/sherlock_kit/data/skills/sherlock-kit/SKILL.md` and `bin/shk` (mode
@@ -116,6 +129,9 @@ git diff --check
   "Reviewed" date and [docs/sherlock-policy.md](docs/sherlock-policy.md).
 - Never commit runtime state, private configuration, credentials, research code
   or data. Public examples use synthetic paths and names.
+- `docs/` and `tests/` ship in the sdist, so task files never go there, and
+  release artifacts are built from a clean committed export (`git archive`),
+  not from a working tree.
 - Live work on Sherlock needs explicit authorization, a named workload and CPU
   only: never submit GPU work while developing or testing this repository.
 
