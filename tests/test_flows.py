@@ -41,10 +41,8 @@ NOT_A_JOB_ID = (  # sbatch stdout that is not exactly one line N or N;cluster
     "-12",
     "12;a;b",
     "12;sherlock\n13",
-    "\u0661\u0662",  # digits of another script: a UTF-8 locale must not make them a job id
-    "\uff11\uff12",
-    "12;\u0101",
 )
+NOT_ASCII = ("\u0661\u0662", "\uff11\uff12", "12;\u0101")  # digits and a letter outside ASCII
 REMOTE = SRC / "sherlock_kit" / "data" / "remote"
 PROGRAMS = sorted(REMOTE.glob("*.sh"))
 
@@ -519,6 +517,10 @@ class SubmitFlows(Flow):
         )
         self.assertNotIn("request", self.submit(task="public")[1])
 
+    def test_budget_warning_needs_more_than_two_hours_requested(self):
+        out = self.borrowed("--time", "2h", task="two-hours")  # others running, no own jobs
+        self.assertEqual((out["request"]["minutes"], out["warnings"]), (120, []))
+
     def test_budget_warning_quotes_a_budget_only_from_the_courtesy_text(self):
         phrase = f"about {slurm.BUDGET_JOBS} jobs x {slurm.BUDGET_MINUTES // 60} h"
         self.assertIn(phrase, partitions.profile("btrippe").courtesy)
@@ -785,8 +787,7 @@ class BashAsShFlow(OutcomeCases, Flow):
         shim = self.tmp / "bash-as-sh"
         shim.mkdir()
         (shim / "sh").symlink_to(bash)
-        # A UTF-8 language locale, where bash ranges are not byte ranges (C when not installed).
-        self.knobs(PATH=f"{shim}{os.pathsep}{os.environ['PATH']}", LC_ALL="en_US.UTF-8")
+        self.knobs(PATH=f"{shim}{os.pathsep}{os.environ['PATH']}")
 
     def test_array_submit_refusal_status_and_cancel(self):
         self.assertEqual(Path(shutil.which("sh")).resolve(), Path(shutil.which("bash")).resolve())
@@ -800,6 +801,32 @@ class BashAsShFlow(OutcomeCases, Flow):
         tasks = self.entry()["current"]["tasks"]
         self.assertEqual([tasks[key] for key in ("completed", "running", "pending")], [1, 1, 2])
         self.assertEqual(self.shk("cancel", "--task", "train-a")[1]["action"], "cancelled")
+
+    def test_job_id_digits_are_ascii_bytes_in_a_utf8_locale(self):
+        """In en_US.UTF-8 a bash range is not a byte range; submit.sh must still match bytes."""
+        utf8 = {"LC_ALL": "en_US.UTF-8"}
+        probe = subprocess.run(
+            ["bash", "-c", "case $1 in [0-9]) echo digit ;; esac", "probe", "\u0661".encode()],
+            env={**os.environ, **utf8},
+            capture_output=True,
+            check=False,
+        )
+        if probe.stdout != b"digit\n":  # the locale is not installed: bash fell back to C
+            self.skipTest("needs the en_US.UTF-8 locale")
+        self.knobs(**utf8)
+        for index, text in enumerate(NOT_ASCII):
+            for rc in ("0", "1"):
+                with self.subTest(stdout=ascii(text), rc=rc):
+                    task = f"u{index}-{rc}"
+                    out = self.unknown(
+                        task,
+                        FAKE_SBATCH_STDOUT_HEX=(text + "\n").encode().hex(),
+                        FAKE_SBATCH_QUEUED_RC=rc,
+                    )
+                    self.assertEqual(
+                        out["detail"], f"submit outcome not confirmed: sbatch exit {rc}"
+                    )
+                    self.assertEqual(self.evidence(task), "")
 
 
 class RemoteProgramTests(unittest.TestCase):

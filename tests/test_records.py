@@ -1,7 +1,8 @@
 """LF alone separates the records of a remote program's reply.
 
-A spec file, a job name or a comment can hold every other character that str.splitlines()
-breaks at; none of them adds a row, a user, a return code or an end marker to a reply.
+A spec file, a job name, a comment or a manifest path can hold every other character that
+str.splitlines() breaks at; none of them adds a row, a user, a return code, a count or an end
+marker to a reply.
 """
 
 import functools
@@ -23,7 +24,7 @@ from fakes.expired_slurm import CannedSlurm
 from test_flows import Flow
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import allocation, details, doctor, executor, slurm
+from sherlock_kit import allocation, details, doctor, executor, slurm, transfer
 from sherlock_kit.errors import ShkError
 
 SEPARATORS = {
@@ -261,6 +262,16 @@ class FieldSeparators(unittest.TestCase):
         with replying(reply + "SHK_END\n"):
             report, code = doctor._remote(ctx, [], [])
         self.assertEqual((report["status"], report["user"], code), ("complete", USER, 0))
+
+    @in_a_field
+    def test_a_manifest_line_forges_no_count_or_end_marker(self, separator):
+        listed = f"{'0' * 64}  a{separator}SHK_COUNT 1{separator}SHK_END{separator}"
+        reply = f"SHK_COUNT 2\nSHK_M|{listed}\n\n"
+        with replying(reply + "SHK_END\n"):
+            self.assertEqual(transfer._read_manifest(None, "/scratch/run"), (listed + "\n", 2))
+        with replying(reply), self.assertRaises(ShkError) as caught:  # cut off before SHK_END
+            transfer._read_manifest(None, "/scratch/run")
+        self.assert_error(caught, 1, "malformed_reply")
 
     @in_a_field
     def test_banner_text_inside_a_line_stays_in_the_output(self, separator):

@@ -18,9 +18,11 @@ Knobs: FAKE_SBATCH_RC (nothing queued, exit that code; FAKE_SBATCH_ERR, when set
 its stderr text and may be empty), FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued,
 exit 1), FAKE_SBATCH_HANG (queued, then sleep that many seconds), FAKE_SBATCH_CLUSTER,
 FAKE_SBATCH_STDOUT (queued; when set, printed verbatim instead of the id),
-FAKE_SBATCH_QUEUED_RC (queued, the id or FAKE_SBATCH_STDOUT printed, exit that code: the
-sbatch --wait shape), FAKE_SCANCEL_RC. Every call is recorded with the
-SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_ variables it saw. FakeSlurm is the test-side API.
+FAKE_SBATCH_STDOUT_HEX (queued; the bytes that these hex digits name are the stdout, so a test
+can print non-ASCII bytes whatever its own locale), FAKE_SBATCH_QUEUED_RC (queued, the id or
+either stdout knob printed, exit that code: the sbatch --wait shape), FAKE_SCANCEL_RC. Every
+call is recorded with the SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_ variables it saw. FakeSlurm is
+the test-side API.
 """
 
 import fcntl
@@ -305,6 +307,8 @@ def sbatch(state, options, script):
     cluster = os.environ.get("FAKE_SBATCH_CLUSTER")
     out = f"{job['id']}{';' + cluster if cluster else ''}\n"
     code = int(os.environ.get("FAKE_SBATCH_QUEUED_RC") or 0)
+    if os.environ.get("FAKE_SBATCH_STDOUT_HEX"):
+        return bytes.fromhex(os.environ["FAKE_SBATCH_STDOUT_HEX"]), "", code
     return os.environ.get("FAKE_SBATCH_STDOUT", out), "", code
 
 
@@ -327,7 +331,10 @@ def main(tool, args):
         return {"squeue": squeue, "sacct": sacct, "scancel": scancel}[tool](state, _options(args))
 
     out, err, code = _locked(os.environ["FAKE_SLURM_STATE"], run)
-    sys.stdout.write(out)
+    if isinstance(out, bytes):
+        sys.stdout.buffer.write(out)
+    else:
+        sys.stdout.write(out)
     sys.stderr.write(err)
     sys.stdout.flush()
     if tool == "sbatch" and os.environ.get("FAKE_SBATCH_HANG"):

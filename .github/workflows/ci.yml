@@ -38,10 +38,11 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install rsync and dash
+      - name: Install rsync, dash and the en_US.UTF-8 locale
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends rsync dash
+          sudo apt-get install --yes --no-install-recommends rsync dash locales
+          sudo locale-gen en_US.UTF-8
       - name: Prepare suite and build environments (online)
         run: |
           python -m venv .venv
