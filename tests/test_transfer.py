@@ -5,6 +5,7 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -270,8 +271,7 @@ class PullTests(TransferCase):
         self.assertIn("No such file", result[1]["message"])
         self.assertNotIn("Automated tools", result[1]["message"])
 
-    @unittest.skipIf(os.geteuid() == 0, "root can list a mode-000 directory")
-    def test_an_inventory_find_cannot_finish_is_refused_before_any_transfer(self):
+    def refuse_an_unlistable_directory(self):
         locked = self.remote / "locked"
         self.write(locked, {"unlisted": "x\n"})  # newer than SHA256SUMS, which lists 3 files
         locked.chmod(0o000)
@@ -281,6 +281,23 @@ class PullTests(TransferCase):
         self.assertRegex(result[1]["message"], r"exit 1\. find: .*locked.*Permission denied")
         self.assertEqual([path.name for path in self.dest.parent.iterdir()], [".keep"])
         self.assertFalse([call for call in self.fake.calls() if "sherlock-dtn" in call])
+
+    @unittest.skipIf(os.geteuid() == 0, "root can list a mode-000 directory")
+    def test_an_inventory_find_cannot_finish_is_refused_before_any_transfer(self):
+        self.refuse_an_unlistable_directory()
+
+    @unittest.skipIf(os.geteuid() == 0, "root can list a mode-000 directory")
+    @unittest.skipUnless(shutil.which("bash"), "needs bash")
+    def test_bash_as_sh_counts_and_refuses_alike(self):
+        shim = self.tmp / "bash-as-sh"
+        shim.mkdir()
+        (shim / "sh").symlink_to(shutil.which("bash"))
+        os.environ["PATH"] = f"{shim}{os.pathsep}{os.environ['PATH']}"  # setUp's patch restores it
+        self.refuse_an_unlistable_directory()
+        (self.remote / "locked").chmod(0o700)
+        self.sums()  # now listable and listed: 4 files
+        code, body = self.pull()
+        self.assertEqual((code, body["action"], body["files"]), (0, "pulled", 4), body)
 
     def test_a_symlinked_manifest_is_read(self):
         sums = self.remote / "SHA256SUMS"
