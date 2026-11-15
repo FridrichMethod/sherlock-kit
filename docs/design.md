@@ -212,9 +212,14 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    reply's `next` names the `shk status` command and the time before which not
    to run it (60 s later); settle the outcome with that status read before
    considering another submit. A name whose submission never landed then reads
-   `stale` (spec files, no Slurm rows), which submits like `new`. A deliberate
-   rerun must follow the duplicate and resubmission guards above; the
-   check-then-submit race described below prevents an exactly-once guarantee.
+   `stale` (spec files, no Slurm rows), which submits like `new`, when it has
+   no earlier job in the status window. When it has one, status still reads
+   that job's `done` or `failed` state and `current.job_id`, with `spec_files`
+   one higher, and the name still needs `--resubmit`. The attempt landed only
+   if `current.job_id` is newer than the one seen before the submit. A
+   deliberate rerun must follow the duplicate and resubmission guards above;
+   the check-then-submit race described below prevents an exactly-once
+   guarantee.
 
 ## Status, cancel and occupancy
 

@@ -13,7 +13,11 @@ exit 5 and never a false exit 3 after `sbatch` or `scancel` has run:
   nonzero `sbatch` can follow an accepted submission, so no error text is
   treated as a definitive refusal; `shk submit --preflight` still gives a
   definitive Slurm verdict (exit 3) without creating a job. A name whose
-  submission never landed reads `stale` and submits like `new`.
+  submission never landed reads `stale` and submits like `new` when it has no
+  earlier job in the status window; when it has one, it keeps that job's
+  `done` or `failed` state and `current.job_id` and still needs `--resubmit`.
+  The attempt landed only if `current.job_id` is newer than the one seen
+  before the submit.
 - A nonzero `sbatch` whose stdout is, trailing newlines aside, one strict job
   id line (`N` or `N;CLUSTER`, a positive decimal integer without a leading
   zero) is exit 0 `submitted`, with the staged files renamed to the job id;
@@ -22,6 +26,11 @@ exit 5 and never a false exit 3 after `sbatch` or `scancel` has run:
   locale, so only ASCII digits form one.
 - A nonzero `scancel` in `shk cancel` is exit 5 `action: unknown` with
   `scancel exit RC` and the stderr text in `detail`, instead of exit 3.
+- When the Slurm client's result is not confirmed, the `detail` of the exit 5
+  reply begins `<program> outcome not confirmed` instead of
+  `unparsed <program> reply`, where `<program>` is the remote program:
+  `submit`, `cancel`, or `control` for `shk release` and `shk requeue`;
+  `detail` is evidence text, not a token to match.
 - An empty or whitespace-only `--constraint`, `--prefer` or `--signal` is
   refused offline, exit 1 `spec_invalid`. Before, an empty value was dropped
   silently from the `sbatch` request and a whitespace-only one was passed to
@@ -33,6 +42,9 @@ exit 5 and never a false exit 3 after `sbatch` or `scancel` has run:
 
 Fixes:
 
+- `shk cancel --task ""` (an unset shell variable, for example) is refused
+  offline, exit 1 `spec_invalid`, like `submit` and `status`. Before, it ended
+  as `internal_error`.
 - `shk requeue --self` and `shk release --job-id A_k` work for an element of a
   throttled array: `ArrayTaskId` is read as the first word after the key, so a
   following `ArrayTaskThrottle=N` field no longer makes the identity check

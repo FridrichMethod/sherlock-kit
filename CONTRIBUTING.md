@@ -41,8 +41,9 @@ blocks the call (exit 97, a message on stderr) and logs it. `tests/run_suite.py`
 which CI and the checks below use, fails a run in which any test reached a stub;
 under `unittest discover` only the test's own assertions decide the result. A
 `TMPDIR` that cannot execute files (the tests write their fakes there) is
-refused. Install `rsync` and `dash`, then set up a development environment once
-(`.venv*/` is ignored by Git):
+refused. Install `rsync`, `dash` and the `en_US.UTF-8` locale (the bash test of
+the byte-wise job id match needs a UTF-8 locale and is skipped without it), then
+set up a development environment once (`.venv*/` is ignored by Git):
 
 ```sh
 python3 -m venv .venv
@@ -98,11 +99,11 @@ git diff --check
 
 - Python runs on 3.11 to 3.14 (no newer syntax or APIs). Prefer standard-library
   mechanisms where sufficient; dependencies need a concrete maintenance benefit
-  and supported installation checks. A bounded Pydantic validation pilot for
-  configuration and receipt input was evaluated and not adopted, so the
-  runtime has no dependencies; `build` and `hypothesis` are development
-  requirements only. Keep it lean and readable: small functions, external
-  input validated once at the boundary, and no defensive code against
+  and supported installation checks. The runtime has no dependencies:
+  configuration and receipt input is validated by hand-written checks, and a
+  validation library is not a dependency; `build` and `hypothesis` are
+  development requirements only. Keep it lean and readable: small functions,
+  external input validated once at the boundary, and no defensive code against
   situations that cannot realistically happen. Lean is not a line count; do not compress code to save
   lines.
 - Remote programs under `src/sherlock_kit/data/remote/` are fixed POSIX `sh`,

@@ -183,7 +183,11 @@ both. These are explicit arguments, not TOML defaults; see
   Slurm's stderr text when there is any, the staged `NAME.STAMP.sh`, `.json`
   and `.err` kept under `<run-dir>/.shk/`, and `next` naming the `shk status`
   command and when to run it. A lost reply is exit 5 too. A name whose
-  submission never landed then reads `stale` and submits like `new`.
+  submission never landed then reads `stale` and submits like `new` when it
+  has no earlier job in that 30-day window; when it has one, it keeps that
+  job's `done` or `failed` state and `current.job_id` and still needs
+  `--resubmit`. The attempt landed only if `current.job_id` is newer than the
+  one seen before the submit.
   Defaults: `--campaign default`, `--run-dir <remote_root>/runs/<name>`,
   `--array N[%M]` with 2 to 1000 tasks. `--after-ok` is repeatable and takes
   several job ids (`--after-ok 111 222`), each a single `N` or `N_TASK`: `shk`
@@ -446,7 +450,8 @@ SHK_REQUIRE_ALL=1 .venv/bin/python -B tests/run_suite.py
 ```
 
 The suite is offline: fake `ssh` and Slurm binaries, real local `rsync`, `sh` and
-`dash`. A skipped test fails the run when `CI` or `SHK_REQUIRE_ALL` is set.
+`dash`, and the `en_US.UTF-8` locale for one bash test. A skipped test fails the
+run when `CI` or `SHK_REQUIRE_ALL` is set.
 `SHK_BUILD_PYTHON` (an absolute interpreter path with `build` and the backend
 requirements) and `SHK_TEST_WHEELHOUSE` (the prepared absolute wheelhouse path)
 enable the sdist, wheel, editable and source-launcher checks. They build committed
