@@ -14,7 +14,7 @@ exit 5 and never a false exit 3 after `sbatch` or `scancel` has run:
   treated as a definitive refusal; `shk submit --preflight` still gives a
   definitive Slurm verdict (exit 3) without creating a job. A name whose
   submission never landed reads `stale` and submits like `new` when it has no
-  earlier job in the status window; when it has one, it keeps that job's
+  earlier job in the 30-day window that submit reads; when it has one, it keeps that job's
   `done` or `failed` state and `current.job_id` and still needs `--resubmit`.
   The attempt landed only if `current.job_id` is newer than the one seen
   before the submit.

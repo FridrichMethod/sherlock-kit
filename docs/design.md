@@ -213,7 +213,7 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    to run it (60 s later); settle the outcome with that status read before
    considering another submit. A name whose submission never landed then reads
    `stale` (spec files, no Slurm rows), which submits like `new`, when it has
-   no earlier job in the status window. When it has one, status still reads
+   no earlier job in the 30-day window that submit reads. When it has one, status still reads
    that job's `done` or `failed` state and `current.job_id`, with `spec_files`
    one higher, and the name still needs `--resubmit`. The attempt landed only
    if `current.job_id` is newer than the one seen before the submit. A
