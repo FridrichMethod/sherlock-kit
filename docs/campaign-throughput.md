@@ -142,16 +142,22 @@ suite on every GPU job's startup path.
    ingestion. Record resolved runtime settings, actual GPU feature, source and
    checkpoint identity, output count and hashes, elapsed time and peak memory.
    An exact, valid production unit can count once toward the planned campaign.
-4. Admit scaling only for the demonstrated configuration and hardware. An SSH
-   connection, accepted preflight, CPU import or allocation proof is not proof
-   that the model ran correctly. Use the actual worker PID for allocation
-   evidence; environment variables or guessed cross-container ancestry are not
-   substitutes.
+4. A passed pilot admits scaling of its demonstrated configuration over the
+   lane's compatible OR set, the set already narrowed by its hard
+   requirements; it is not repeated per SKU. Validate a member of that set
+   separately only when it carries a concrete open uncertainty that the pilot
+   did not exercise: less memory headroom than the pilot's GPU, or a different
+   CUDA architecture, kernel or dtype support. An SSH connection, accepted
+   preflight, CPU import or allocation proof is not proof that the model ran
+   correctly. Use the actual worker PID for allocation evidence; environment
+   variables or guessed cross-container ancestry are not substitutes.
 5. Keep one active first pilot per unadmitted lane. Different tokens, bundle
    names or incidental fingerprint differences must not bypass that lease.
-   Validate additional hardware only when needed for ready work; do not build a
-   model-by-GPU compatibility matrix before making progress. A pilot on one GPU
-   does not admit every feature in a broad request's OR constraint.
+   Validate additional hardware only when ready work needs it and such an
+   uncertainty is open; do not build a model-by-GPU compatibility matrix before
+   making progress. A pass on one GPU does not prove memory headroom on a
+   smaller member of the OR set: encode that hard requirement in the
+   constraint, or validate that member, before relying on it.
 
 For example, suppose three independent lanes have work. Two have passed CPU
 checks and the third has a broken input. Queue one full-budget pilot for each of

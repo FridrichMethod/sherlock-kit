@@ -2,7 +2,7 @@
 
 ```sh
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK \
-  [--step-id NUMERIC_STEP] [--hostlist EXPRESSION ...]
+  [--step-id NUMERIC_STEP] [--hostlist EXPRESSION [--hostlist EXPRESSION ...]]
 ```
 
 The caller supplies the worker PID, not the toolkit subprocess or its query
@@ -33,7 +33,8 @@ Environment variables alone never prove allocation membership. Scheduler and
 caller hostlists are expanded through `scontrol show hostnames` exactly as
 Slurm prints them, so overlapping caller expressions repeat hosts; each
 distinct expression is expanded once. Caller hostlists are only reported, never
-compared with the allocation.
+compared with the allocation. `--hostlist` is repeatable and takes one
+expression each time.
 
 A `pidinfo` reply has exactly one job identity line,
 `Slurm JobId=N ends at TIME`; only N is compared, and a step suffix after it

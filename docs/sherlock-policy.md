@@ -77,11 +77,14 @@ How the rules files carry particular site rules:
   compaction, and the relevant topic files before continuing; memory, summaries
   and an earlier session's read are no substitute, handoff summaries keep the
   requirement, and instruction reminders are never filtered out. Both files
-  carry it in their introductions. `shk` removes the login banner from the
-  output it parses but writes each banner line once per process to stderr, so
-  the reminder still reaches the agent.
+  carry it in their introductions in compressed form: read at session start
+  and after compaction, keep the requirement in handoffs, memory is no
+  substitute, and reminders are not filtered. `shk` removes the login banner
+  from the output it parses but writes each banner line once per process to
+  stderr, so the reminder still reaches the agent.
 - The site sanctions purge evasion with account termination on the first
-  occurrence. Both files forbid helping to extend scratch lifetime; the site
+  occurrence. Both files forbid extending scratch lifetime by touch, rewrite,
+  copy-over or refresh helpers, even once, and name that sanction; the site
   also forbids recommending it.
 - On login nodes the cluster file allows listeners only for the user's own
   interactive tools and forbids model, web or API serving, as the site does.
@@ -93,8 +96,9 @@ How the rules files carry particular site rules:
 - The site's Codex note requires per-command approval when the Codex sandbox
   cannot start, never disabling it. Both files carry it, and the workstation
   file tells local access denials apart from absent SSH masters.
-- Both files take limits and features from `sh_part` and `sh_node_feat` in a
-  login shell; a non-login ssh command does not find them.
+- Both files say to discover limits and features and name no command for it.
+  The skill names `sh_part` and `sh_node_feat`, which exist in a login shell
+  only; a non-login ssh command does not find them.
 - No agent module is named: the site files name none, and agents find modules
   with `ml spider`.
 

@@ -10,6 +10,12 @@ Without either setting, `shk` sets no thread variables and the budget leaves no
 trace in the frozen argv or spec: the argv starts with `sbatch`, with no `env`
 prefix, and the spec has no `cpu_thread_policy`.
 
+A submission made from inside a budgeted job, such as a controller that calls
+`shk --executor local submit`, inherits that job's thread variables: its
+`--export=ALL` passes the submitting environment on, while its own argv and
+spec record no thread policy. A nested submission therefore passes its own
+`--cpu-thread-budget N`.
+
 The policy is intentionally explicit: enabling it replaces inherited numerical
 thread settings, including conflicting container-prefixed values. If a scientific
 runtime requires a different numerical thread budget, freeze that explicit CLI
@@ -46,9 +52,12 @@ installation or model qualification.
 ## Honest limits
 
 This is a launch-environment guard, **not a hard OS-thread limit** or a proof of
-CPU cpuset enforcement. A user script can override the variables; an application
-may ignore them or use additional runtime setters. PyTorch intra-op/inter-op
-settings, DataLoader/preprocessing worker counts and numerical library settings
+CPU cpuset enforcement. A user script can override the variables, but it has
+to override all that apply: one that sets only `OMP_NUM_THREADS` stays capped
+by `OMP_THREAD_LIMIT` and by the library-specific variables, so the lever for
+more numerical threads is a larger `--cpu-thread-budget N`. An application
+may ignore the variables or use additional runtime setters. PyTorch
+intra-op/inter-op settings, DataLoader/preprocessing worker counts and numerical library settings
 after import remain application responsibilities. CUDA, I/O, container and FUSE
 helper threads may legitimately exist even when numerical computation uses 1 CPU.
 A 52-thread process is not proof of 52 CPUs executing.

@@ -16,7 +16,7 @@ script does) stays with the user, the site rules and the project.
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
 | `partitions.py` | the packaged partition table and the generated rules block |
 | `doctor.py` | read-only checks |
-| `spec.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv; `submit`, `status`, `cancel`, `occupancy`, `resources`, `release`, `requeue` |
+| `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv and its optional thread-budget `env` prefix; `submit`, `status`, `cancel`, `occupancy`, `resources`, `release`, `requeue` |
 | `allocation.py` | local worker PID and allocation/step evidence, strict field parsing and actual resources |
 | `transfer.py` | `push`, `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
@@ -39,8 +39,10 @@ empty). The facts live where they already are:
 
 - Slurm (`squeue -t all`, `sacct`) is the only record of what was submitted.
 - The run directory on Sherlock keeps `.shk/<name>.<jobid>.sh` and `.json` (the
-  script as submitted and its frozen spec) as provenance; on scratch it is
-  subject to the 90-day purge like everything else there.
+  script as submitted and its frozen spec) as provenance; a submission whose
+  outcome is unknown leaves its staged `.shk/<name>.<stamp>.sh`, `.json` and
+  `.err` there instead. On scratch the directory is subject to the 90-day
+  purge like everything else there.
 - `pull` keeps its stage, lock and receipt beside the project's own destination.
 - The project configuration is a project file.
 
@@ -118,9 +120,12 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    start a heterogeneous job (`hetjob`, `packjob`); a borrowed partition needs
    `--courtesy-ack`. The denylist follows sbatch's getopt parsing: abbreviated
    long options (`--part`) and short flags bundled after value-less ones
-   (`-Hp`) count. `--constraint`, `--prefer` and `--signal` go to sbatch unchanged, which
-   checks them itself; each `--after-ok` value (repeatable) must be one job id,
-   `N` or `N_TASK`, because `shk` joins them into its own `--dependency`
+   (`-Hp`) count. `--constraint`, `--prefer` and `--signal` go to sbatch
+   unchanged, which checks them itself; one that is given but empty or
+   whitespace-only is refused here (exit 1 `spec_invalid`, for example
+   `--constraint must not be empty`), while an omitted one leaves the frozen
+   spec and argv as they are. Each `--after-ok` value (repeatable) must be one
+   job id, `N` or `N_TASK`, because `shk` joins them into its own `--dependency`
    string, where a `,` or `?` would add clauses. Build the sbatch argv
    (explicit name, partition, CPUs, memory, minutes, run directory, log paths,
    `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs; a submission
@@ -129,33 +134,82 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    frozen spec. An explicit `--prefer` is also recorded in `resources.prefer`;
    omitting it leaves the resource document and argv unchanged. Slurm tries
    preferred features independently before the fallback constraint; callers must
-   include every hard requirement in both. `--dry-run` stops here, with no network at all.
+   include every hard requirement in both. With `--cpu-thread-budget` or the
+   project's `cpu_thread_budget`, `cpu_threads.py` puts an
+   `env NAME=VALUE ...` prefix in front of the sbatch argv and records
+   `cpu_thread_policy` in the spec; without either, both are unchanged (see
+   [CPU thread budgets](cpu-threads.md)). `--dry-run` stops here, with no
+   network at all.
+
 2. **Read call** (`query.sh`, shared with `status`): one `squeue -t all` and one
    `sacct --duplicates` over the last 30 days for the user and name, plus the
    newest spec file; for a borrowed partition also its occupancy. Only
    `SHK_`-prefixed lines count, and the read is complete only with `SHK_END`
    and every tool returning 0 (else exit 1 `malformed_read`). Every remote
-   program first unsets `SBATCH_*`, `SQUEUE_*`, `SACCT_*` and `SLURM_*` (except
-   `SLURM_CONF`).
+   program that calls a Slurm client first unsets `SBATCH_*`, `SQUEUE_*`,
+   `SACCT_*` and `SLURM_*` (except `SLURM_CONF`); `doctor.sh` and
+   `manifest.sh` call none. A reply of any remote program is a sequence of
+   records separated by LF only: the `SHK_SPEC` payload, the one piece of
+   run-directory text in a reply, has its LF bytes flattened to spaces on the
+   remote side, and every local parser splits a reply on LF alone, never with
+   `str.splitlines()`, so no other separator inside a field (CR, VT, FF, FS,
+   GS, RS or a Unicode line separator) can start a record or forge a marker.
+
 3. **Local decision** (pure): `new` (no rows) submits; `live` (any task pending,
    running, suspended or completing, including throttle-held array tasks that
    `squeue` reports only as an aggregate) is refused even with `--resubmit`;
    `done` and `failed` are refused unless `--resubmit REASON`; `stale` (spec files
    but no Slurm rows) is informational and treated as `new`. On a borrowed
-   partition (`btrippe`, `possu`) the reply carries the occupancy and the
-   courtesy text, and a warning when others are running there and you already
-   have 2 jobs there or ask for more than 2 h; it never refuses.
+   partition (`btrippe`, `possu`) the reply carries `occupancy`, the
+   partition's `courtesy` text, `request = {tasks, throttle, minutes}` (`tasks`
+   is 1 for a single job and the array count otherwise, `throttle` is the `%M`
+   limit or null) and `warnings`. The budget warning appears when others are
+   running there and you already have 2 jobs there or ask for more than 2 h.
+   It quotes "about 2 jobs x 2 h" as the courtesy budget only when the
+   partition's own courtesy text contains that phrase; otherwise it names the
+   advisory threshold and points at the `courtesy` text in the same reply. A
+   total-work advisory appears when others are running there and `tasks` is
+   greater than 2: it states the number of array tasks, the throttle (or that
+   there is none) and the minutes, and does not call the request within or
+   over any budget. Both are advisory and nothing is refused. The courtesy
+   terms are the profile texts alone: `btrippe` has no blanket daytime
+   prohibition, and `possu` keeps its 00:00-07:00 Pacific window.
+
 4. **Mutation call** (`submit.sh`, the script on stdin): a live guard, staging of
-   the script and spec under `<run-dir>/.shk/`, a digest check, `sbatch` on the
-   staged script, then exactly one terminal marker: `SHK_SUBMITTED <jobid>`
-   (exit 0), `SHK_LIVE`, `SHK_REJECTED <rc>` with stderr or `SHK_REFUSED <why>`
-   (nothing ran; exit 3), or `SHK_UNPARSED` (exit 5). A transport failure after
-   dispatch or a missing or
-   duplicate marker is exit 5: the reply's `next` names the `shk status` command
-   and the time before which not to run it. Reconcile with that status read
-   before considering another submit. A deliberate rerun must follow the
-   duplicate and resubmission guards above; the check-then-submit race described
-   below prevents an exactly-once guarantee.
+   the script and spec as `<run-dir>/.shk/NAME.STAMP.sh` and `.json`, a digest
+   check, `sbatch` on the staged script with its stderr in `NAME.STAMP.err`,
+   then exactly one terminal marker:
+
+   - `SHK_LIVE` (token `live`) or `SHK_REFUSED <why>` (token `remote_refused`):
+     a guard stopped before `sbatch` ran, so nothing was dispatched; exit 3.
+   - `SHK_SUBMITTED <jobid>` (exit 0, action `submitted`): the entire stdout of
+     `sbatch` is one line holding a strict job id, `N` or `N;CLUSTER`, where N
+     is a positive decimal integer without a leading zero and CLUSTER is a
+     non-empty run of letters, digits, underscore, dot or dash. The id reaches
+     the client only in the controller's success response, so it is positive
+     evidence of acceptance whatever exit code `sbatch` returned
+     (`sbatch --wait` returns the job's exit code). The staged files are
+     renamed to the job id. Nothing else is ever read as a job id.
+   - `SHK_UNPARSED`, with the `sbatch` exit code and Slurm's stderr as
+     evidence: every other result once `sbatch` has started, whether it exited
+     0 or not. The outcome is unknown, exit 5, with the reply
+     `{ok: false, action: unknown, name, detail, next}`; `detail` holds
+     `sbatch exit RC` followed by the stderr text when there is any, and the
+     staged `.sh`, `.json` and `.err` are all kept as evidence.
+
+   No stderr text is classified as a definitive refusal: a nonzero `sbatch`
+   can follow an accepted submission
+   ([source-confirmed](validation/observed-slurm.md#not-observed-live)), so a
+   remembered error string proves nothing. `shk submit --preflight`
+   (`sbatch --test-only`) is the way to get a definitive Slurm verdict
+   (exit 3) without creating a job. A transport failure after dispatch or a
+   missing or duplicate marker is exit 5 as well. In every exit 5 case the
+   reply's `next` names the `shk status` command and the time before which not
+   to run it (60 s later); settle the outcome with that status read before
+   considering another submit. A name whose submission never landed then reads
+   `stale` (spec files, no Slurm rows), which submits like `new`. A deliberate
+   rerun must follow the duplicate and resubmission guards above; the
+   check-then-submit race described below prevents an exactly-once guarantee.
 
 ## Status, cancel and occupancy
 
@@ -171,9 +225,11 @@ and `--job-id` entries are per base job. Nothing is acknowledged or stored,
 so nothing needs closing: a deliberate `--resubmit` makes a new current job.
 
 `cancel` resolves one name and cancels only its live jobs (`scancel` scoped by
-user and name), reporting the job ids and `next_check_after`; a lost reply is
-exit 5 with a `next` like submit's. `occupancy` reads the partition's current use
-with the fixed-width `squeue -O` layout
+user and name), reporting the job ids and `next_check_after`. A guard that
+stops before `scancel` runs is exit 3; any nonzero `scancel` exit is outcome
+unknown, exit 5 with `scancel exit RC` and the stderr text in `detail`, and so
+is a lost reply, each with a `next` like submit's. `occupancy` reads the
+partition's current use with the fixed-width `squeue -O` layout
 ([verified live with 0.2.0](validation/observed-slurm.md#occupancy)).
 
 ## Controller primitives
@@ -215,12 +271,19 @@ deletes. `-t` keeps the local modification times: a re-push compares size and
 time and skips unchanged files, where rewriting them would refresh their purge
 clock on scratch, which looks like purge evasion. The cost is stated plainly:
 pushed files keep their local modification times, so inputs that are old
-locally can be purge-eligible soon after a push.
+locally can be purge-eligible soon after a push. With plain `--partial`, a
+push that fails or times out can leave a truncated file under its final name,
+also where a complete older copy was: rerun the push to exit 0 before any job
+reads REMOTE.
 
 `pull` reads `REMOTE/SHA256SUMS` (GNU `sha256sum` format) through the control
 host and needs it to list every regular file under REMOTE except `SHA256SUMS`
 and `.shk*` entries, so the job writes it over its own output subdirectory, not
-the run directory with its `.shk/` and logs. It refuses unsafe entries
+the run directory with its `.shk/` and logs. `manifest.sh` counts those files
+with one `find` and keeps its exit status: an enumeration error (an unreadable
+subdirectory, for example) makes the program exit 1, which `pull` reports as
+exit 1 `remote_failed` with `find`'s message, and nothing is promoted. `pull`
+refuses unsafe manifest entries
 (absolute paths, empty, `.` or `..` components, `.shk` components, duplicates).
 With NAME the last component of LOCAL, it takes a lock on `.NAME.shk-lock`,
 rsyncs exactly the listed files into the private stage `.NAME.shk-stage`
@@ -245,8 +308,9 @@ promoted. Validators are commands, so they run only from a configuration file th
 current user owns (otherwise exit 3 `validator_untrusted`); discovery itself walks up
 freely so group-owned project trees on Sherlock keep working. Then it renames the stage onto LOCAL and writes
 `.NAME.shk-receipt.json`. An existing LOCAL with a receipt for the same manifest
-is `already_present`; any other existing LOCAL is kept unless `--replace`,
-which renames it to `.NAME.shk-old-<UTC>` (never deletes). `manifest DIR`
+is `already_present`: the receipt beside LOCAL names this manifest, and LOCAL
+itself is not verified again. Any other existing LOCAL is kept unless
+`--replace`, which renames it to `.NAME.shk-old-<UTC>` (never deletes). `manifest DIR`
 writes `DIR/SHA256SUMS` inside jobs; the skill's `sha256sum` one-liner writes
 the same.
 
@@ -279,6 +343,13 @@ the same.
 - The remote side trusts `sh`, `sha256sum` and the Slurm clients (`squeue`,
   `sacct`, `sbatch`, `scancel`, `scontrol`) on the login shell's `PATH`.
 - Provenance lives in the run directory and is purged with scratch.
+- `shk` bounds its children with its own timeouts and kills their process
+  group on a timeout or interrupt, but it installs no handler for SIGTERM or
+  SIGHUP. Do not wrap it in an outer timeout shorter than its own: if `shk`
+  itself is killed, a mutation in flight is outcome unknown without an exit 5
+  reply, and a transfer may still be running.
+- `already_present` trusts the pull receipt, and a failed push can leave a
+  truncated remote file (see Transfer).
 
 ## Rules, skill and delivery
 
