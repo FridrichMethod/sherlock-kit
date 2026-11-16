@@ -1,5 +1,6 @@
 """`shk resources --summary` through the real resources.sh against a fake `scontrol show nodes`."""
 
+import argparse
 import sys
 from unittest.mock import patch
 
@@ -590,7 +591,12 @@ class SummaryFlows(Flow):
     def breakdown_read(self):
         self.scontrol(
             gpu_node(
-                "cn01", "MIXED", "gpu", "GPU_SKU:A100_SXM4,CLASS:SH3_G4FP64,GPU_GEN:AMP", used=1
+                "cn01",
+                "MIXED",
+                "gpu",
+                # A prefix counts only at the start of a feature.
+                "GPU_SKU:A100_SXM4,CLASS:SH3_G4FP64,GPU_GEN:AMP,NO_GPU_SKU:X,XCLASS:Y",
+                used=1,
             ),
             gpu_node("cn02", "IDLE", "gpu", "CLASS:SH3_G4FP64,GPU_SKU:V100S_PCIE"),
             gpu_node(
@@ -644,6 +650,18 @@ class SummaryFlows(Flow):
         self.assertEqual(entries[3]["gpus"], {"configured": 8, "allocated": 2, "free": 6})
         self.assert_split(union, entries, "class")
 
+    def test_by_and_shape_say_repeatable_in_their_help(self):
+        subparsers = argparse.ArgumentParser().add_subparsers()
+        node_resources.register(subparsers)
+        actions = {
+            option: action
+            for action in subparsers.choices["resources"]._actions
+            for option in action.option_strings
+        }
+        for option in ("--by", "--shape"):
+            with self.subTest(option=option):
+                self.assertIn("repeatable", actions[option].help)
+
     def test_by_keeps_the_order_given_without_repeats_and_follows_the_group_fields(self):
         self.breakdown_read()
         summary = self.summary("gpu", extra=("--by", "class", "--by", "sku", "--by", "class"))
@@ -651,6 +669,10 @@ class SummaryFlows(Flow):
         self.assertEqual(summary["by"], ["class", "sku"])
         for group in (summary["union"], summary["partitions"]["gpu"]):
             self.assertEqual(list(group), [*GROUP_KEYS, "by_class", "by_sku"])
+        # The opposite order: the order given is kept, not an alphabetical one.
+        summary = self.summary("gpu", extra=("--by", "sku", "--by", "class"))["summary"]
+        self.assertEqual(summary["by"], ["sku", "class"])
+        self.assertEqual(list(summary["union"]), [*GROUP_KEYS, "by_sku", "by_class"])
         summary = self.summary("gpu", extra=("--by", "sku"))["summary"]
         self.assertEqual((summary["by"], list(summary["union"])[-1]), (["sku"], "by_sku"))
         summary = self.summary("gpu")["summary"]

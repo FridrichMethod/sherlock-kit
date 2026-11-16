@@ -191,7 +191,7 @@ def _selected(state, options):
         job
         for job in state["jobs"]
         if options.get("u") in (None, job["user"])
-        and options.get("p") in (None, job["partition"])
+        and options.get("p") in (None, *job["partition"].split(","))  # -p matches any member
         and (names is None or job["name"] in names)
     ]
 
