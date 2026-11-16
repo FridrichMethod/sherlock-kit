@@ -586,7 +586,12 @@ def _register_submit(subparsers: Subparsers) -> None:
     parser.add_argument("--task", required=True)
     parser.add_argument("--campaign", default="default")
     parser.add_argument("--script", required=True, help="job script, at most 1 MiB")
-    parser.add_argument("--partition", required=True)
+    parser.add_argument(
+        "--partition",
+        required=True,
+        help="one partition, or compatible partitions as one value P,P; "
+        "a repeated flag is not a list (the last one wins)",
+    )
     parser.add_argument("--cpus", type=int, required=True, help="CPUs per task")
     parser.add_argument(
         "--cpu-thread-budget",
