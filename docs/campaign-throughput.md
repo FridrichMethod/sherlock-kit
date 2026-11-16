@@ -102,7 +102,8 @@ chooses a request, lowers a floor or ranks GPU models:
   printed, in the local time of the `sbatch` process (`start_zone` is
   `sbatch-local`). For a partition list Slurm names the first partition, in its
   own priority order, that can run the job and estimates its start there: it is
-  not the earliest start over the set. Comparing partitions takes one preflight
+  not the earliest start over the set (source-confirmed, not observed live).
+  Comparing partitions takes one preflight
   per partition, for a bounded set of requests and without a polling loop.
 - The resources summary.
   `shk resources --partition P [--partition P ...] --summary` reads one snapshot

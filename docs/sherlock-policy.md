@@ -137,10 +137,11 @@ stated elsewhere:
   queue, setup, compute and recovery time and the pointer to department and
   `owners` partitions, which the skill and the
   [campaign guide](campaign-throughput.md) carry beside the earliest-start
-  priority. That section also does not repeat two statements that each file
-  makes elsewhere: the borrowed budgets, which the partition profiles give, and
-  the ban on padding, which the workstation file's Jobs and the cluster file's
-  Slurm section give;
+  priority. That section also does not repeat three statements that each file
+  makes elsewhere: the borrowed budgets, which the partition profiles give; the
+  ban on padding and on jobs of less than 10 useful minutes, and the discovery
+  of partition limits and features, which the workstation file's Jobs and the
+  cluster file's Slurm section give;
 - the `submit --preflight` estimate and the `resources --summary` mode, and in
   the cluster file the compatible partition list of `submit`, which the skill
   describes.
