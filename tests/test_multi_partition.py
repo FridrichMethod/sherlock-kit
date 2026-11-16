@@ -66,6 +66,7 @@ class SetChecks(Case):
                     {**single.document["resources"], "partition": GPU_SET},
                 )
                 self.assertFalse(built.profile.borrowed)
+                self.assertEqual(built.profile.courtesy, "")
         gpu_argv = [
             *HEAD,
             f"--partition={GPU_SET}",

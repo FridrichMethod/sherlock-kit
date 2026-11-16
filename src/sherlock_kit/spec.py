@@ -288,7 +288,7 @@ def partition_request(
     this order: every member listed (the empty one included), none repeated, each accepting
     batch jobs, then compatible: no borrowed member and one common preemptible and requeue
     value. Its combined profile is named by the value as given, has those common values,
-    gpus_allowed only when every member allows GPUs, and every member's courtesy text.
+    gpus_allowed only when every member allows GPUs, and no courtesy text.
     """
     if "," not in value:
         return _batch(partitions.profile(value)), None
@@ -319,9 +319,7 @@ def partition_request(
         borrowed=False,
         gpus_allowed=all(member.gpus_allowed for member in members),
         batch=True,
-        courtesy=" ".join(
-            f"{member.name}: {member.courtesy}" for member in members if member.courtesy
-        ),
+        courtesy="",
     )
     return combined, members
 
