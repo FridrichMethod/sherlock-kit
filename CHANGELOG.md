@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0
 
 Additions. Without the new options, replies, frozen specs and `sbatch` argv
 are byte-identical to 0.7.1 apart from the version text and the compatibility
@@ -44,7 +44,7 @@ notes below.
   it with `start_zone: "sbatch-local"`, the node list and partition as printed,
   the line it was read from, and `observed_at`. Nothing is converted or
   guessed, and no key holds the temporary job id. The estimate is advisory;
-  for a partition list Slurm names the first member, in its own priority
+  for a partition list Slurm names the first partition, in its own priority
   order, that can run the job, not the earliest start over the set. The
   `preflight` object, the exit codes and `preflight.sh` are unchanged.
 - `shk allocation` adds `gpu_sku_candidates` after `membership_evidence`: per
@@ -98,9 +98,10 @@ Guidance:
   and both files stay within the 7168-byte cap. The comparison of authorized
   partitions by queue, setup, compute and recovery time and the pointer to
   department and `owners` partitions leave that section; the skill and the
-  campaign guide carry them. The section leaves the ban on padding and the
-  discovery of limits and features to the Jobs and Slurm sections of the
-  files, which state them. `workstation.md` adds one sentence on compatible
+  campaign guide carry them. The section leaves the borrowed budgets to the
+  partition profiles, and the ban on padding and the discovery of limits and
+  features to the Jobs section of `workstation.md` and the Slurm section of
+  `cluster.md`, which state them. `workstation.md` adds one sentence on compatible
   partition lists under Jobs. `cluster.md` drops the sentence that `shk push`
   and `pull` refuse there, which `shk` still enforces (exit 3) and the skill
   states, and its Slurm section writes the command list as
