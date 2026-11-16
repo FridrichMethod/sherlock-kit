@@ -130,7 +130,21 @@ stated elsewhere:
   the "UID/name-scoped" qualifier for `shk cancel`, which has no other scope;
 - any note on SIGTERM handling: live requeues gave no usable SIGTERM window
   ([observed live](validation/observed-slurm.md#requeue-and-preemption)), and
-  the `owners` profile requires scripts to checkpoint and resume instead.
+  the `owners` profile requires scripts to checkpoint and resume instead;
+- in the cluster file, that `shk push` and `shk pull` refuse to run on
+  Sherlock, which `shk` enforces (exit 3) and the skill states;
+- in the GPU scheduling defaults, the comparison of authorized partitions by
+  queue, setup, compute and recovery time and the pointer to department and
+  `owners` partitions, which the skill and the
+  [campaign guide](campaign-throughput.md) carry beside the earliest-start
+  priority. That section also does not repeat three statements that each file
+  makes elsewhere: the borrowed budgets, which the partition profiles give; the
+  ban on padding and on jobs of less than 10 useful minutes, and the discovery
+  of partition limits and features, which the workstation file's Jobs and the
+  cluster file's Slurm section give;
+- the `submit --preflight` estimate and the `resources --summary` mode, and in
+  the cluster file the compatible partition list of `submit`, which the skill
+  describes.
 
 ## Toolkit choices stricter than the site
 
@@ -147,6 +161,15 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   itself checks neither occupancy nor the clock.
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
+- Only `submit` takes a partition list, one comma-separated value such as
+  `--partition gpu,bioe,stat`, and only for a compatible set, derived from the
+  profile fields: every member is listed and takes batch jobs, none is
+  borrowed, all share one `requeue` and one `preemptible` value, and every
+  member allows GPUs when GPUs are requested. So `gpu`, `bioe` and `stat`
+  combine, and `owners`, `btrippe` and `possu` stay alone. By the same profile
+  fields `normal`, `bigmem` and `service` are in the class too: a set states
+  that the job may run on any member, and every member's courtesy text applies
+  wherever it starts.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,
   partition, array, dependency, begin, job name, hold, and comment when a
   submission token sets it) or start a heterogeneous job.
@@ -166,15 +189,26 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 ## Owner scheduling preferences
 
 The GPU scheduling sections of both delivered rules and the installed skill are
-owner defaults, not Slurm enforcement or site rules. They favor broad compatible
-GPU choices with a soft preference for compatible L40/A/H and future B/newer
-GPUs, expected completion time across authorized partitions, longer useful
-resumable bundles, parallel ready work and bounded resource-aware rebalancing.
-Actual GPU model remains provenance; it alone does not require new scientific
-cohorts or controls. Effective numerical and model protocols remain fixed, and
-explicit project requirements can narrow these defaults. No GPU/partition TOML
-keys are added. `shk submit --prefer` forwards an optional Slurm soft constraint;
-the preference is selected explicitly by the caller, not silently injected. The partition table, including btrippe and possu courtesy, is unchanged.
+owner defaults, not Slurm enforcement or site rules. They favor the earliest
+start, broad compatible GPU choices with a soft preference for compatible
+L40/A/H and future B/newer GPUs, expected completion time across authorized
+partitions (in the skill and the campaign guide), longer useful resumable
+bundles, parallel ready work and bounded resource-aware rebalancing. Oversized
+CPU requests are reduced. Only the memory, kernel and dtype requirements that
+have real evidence are kept, beside the site rules; RTX_2080Ti and Pascal-era
+GPUs are avoided by default, and real architecture needs still narrow the
+choice.
+
+GPU models are scientifically equivalent: they may be mixed, and a job may get
+another model after a requeue. The model alone is no reason for new controls,
+cohorts, reruns or per-model qualification. Actual GPU model remains
+provenance; it alone does not require new scientific cohorts or controls.
+Effective numerical and model protocols remain fixed, and explicit project
+requirements can narrow these defaults. No GPU/partition TOML keys are added.
+`shk submit --prefer` forwards an optional Slurm soft constraint; the preference
+is selected explicitly by the caller, not silently injected. Its tier is purely
+a compute-capability ordering, so it applies across projects. `--prefer` is
+soft: Slurm tries it first, then the fallback `--constraint`. The partition table, including btrippe and possu courtesy, is unchanged.
 
 The candidate feature set comes from `sh_node_feat` and aggregate `shk resources`
 evidence checked on 2026-11-14. It includes RTX_3090 (24 GB) and TITAN_V (12 GB),
