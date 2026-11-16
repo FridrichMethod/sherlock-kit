@@ -374,11 +374,16 @@ class SummaryFlows(Flow):
             stateless(node("cn04", "IDLE", "owners"), "IDLE"),
             node("cn05", "DOWN+NOT_RESPONDING", "owners", cpus=NO_ALLOCATION),
             node("cn06", "ALLOCATED", "owners"),
+            node("cn07", "IDLE", "owners", cfg="cpu=20,billing=51"),  # configured memory
+            node("cn08", "MIXED", "owners", alloc="cpu=4"),  # allocated memory
+            node("cn09", "IDLE", "owners", cpus="CPUAlloc=0"),  # configured CPUs
+            node("cn10", "IDLE", "owners").replace("NodeName=cn10 ", ""),  # name
         )
         group = self.summary("owners")["summary"]["union"]
         self.assertEqual(
             [group[count] for count in COUNTS],
-            [6, 3, 2, 1, 3],  # schedulable: cn01 and cn06 countable, cn03 unknown
+            # schedulable: cn01 and cn06 countable, cn03 and cn07 to cn10 unknown
+            [10, 7, 2, 1, 7],
         )
         self.assertEqual(group["nodes"], sum(group[count] for count in COUNTS[2:]))
 
