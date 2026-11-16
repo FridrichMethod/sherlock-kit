@@ -227,11 +227,12 @@ repeat all hard requirements in both. These are explicit arguments, not TOML def
   as given. So `gpu,bioe,stat` combines, while `owners`, `btrippe` and `possu`
   stay alone; by the same profile fields `normal`, `bigmem` and `service` are
   in the class too. A set states that the job may run on any member, and every
-  member's courtesy text applies wherever it starts. Sherlock's acceptance of
-  a partition list, and what `squeue` and `sacct` print for one, are
+  member's courtesy text applies wherever it starts. What Slurm does with a
+  partition list, and what `squeue` and `sacct` print for one, is
   source-confirmed and
-  [not observed live](docs/validation/observed-slurm.md#not-observed-live):
-  try the list with `--preflight` first. The argv holds
+  [not observed live](docs/validation/observed-slurm.md#not-observed-live);
+  whether Sherlock accepts a list depends on site settings that the source
+  does not determine: try the list with `--preflight` first. The argv holds
   `--partition=<value as given>` in the usual position and is otherwise that
   of a single partition: the job name does not depend on the partition, and the read, the
   live and duplicate guards, `singleton`, the staging and the exit 5 handling

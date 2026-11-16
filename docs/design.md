@@ -516,10 +516,11 @@ The pull contract is payload-only:
   before accounting recorded its start reads `[]` on that read, with
   `cost.final` false: a finished queue row alone cannot be told from one
   cancelled while pending.
-- Sherlock's acceptance of a partition list, and what `squeue` and `sacct`
-  print for one, are source-confirmed and
-  [not observed live](validation/observed-slurm.md#not-observed-live); a
-  `--preflight` of the list is the first check.
+- What Slurm does with a partition list, and what `squeue` and `sacct` print
+  for one, is source-confirmed and
+  [not observed live](validation/observed-slurm.md#not-observed-live); whether
+  Sherlock accepts a list depends on site settings that the source does not
+  determine, and a `--preflight` of the list is the first check.
 - A job submitted with a partition list must be read with a kit version that
   knows lists: an older one reports `unknown_partition` (exit 6) while Slurm
   prints the list.
