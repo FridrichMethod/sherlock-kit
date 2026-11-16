@@ -73,6 +73,7 @@ PID is outside the job.
 | `node_records` | one local allocated node record containing `node`, `fields`, `raw`, `sha256` |
 | `hostlists` | records containing `expression` and expanded `nodes` |
 | `membership_evidence` | `job` and optional `step` records containing `source`, `raw`, `sha256` |
+| `gpu_sku_candidates` | `queried_at`, `meaning` and `nodes`: one record per `node_records` entry, in the same order, containing `node`, `candidates`, `ambiguous` and `source` (`ActiveFeatures`, `Gres`, `CfgTRES`) |
 
 IDs are strings; absent array IDs are null. Counts, PID, UID, start ticks and
 CPU indices are integers; missing numeric facts remain null. Step membership
@@ -104,3 +105,43 @@ node topology. It does not compare affinity cardinality to an allocation CPU
 count, enforce a project partition/resource profile, infer GPU device
 visibility, meter costs or certify scientific results. Those decisions belong
 to the caller.
+
+## GPU SKU candidates
+
+`gpu_sku_candidates` is the last key of the reply, after
+`membership_evidence`. It is read from the node records the command already
+holds, with no extra Slurm call, and `node_records` entries keep their shape.
+Its `queried_at` equals the reply's. Each entry of `nodes` belongs to the
+`node_records` entry at the same position (today the local node):
+
+- `node` is the `NodeName` of that record.
+- `candidates` are the sorted distinct values after the prefix `GPU_SKU:`
+  among the comma-separated `ActiveFeatures` of that node record, `[]` when
+  there is none; a CPU-only job on a node without GPUs still gets an entry.
+- `ambiguous` is true when there are several candidates, when the node's
+  `Gres` and `CfgTRES` together name more than one GPU type, or when a
+  candidate or a GPU type carries a MIG marker; false otherwise. GPU types are
+  the TYPE of every match of `(?:^|,)gpu:(?P<type>[^:,()]+):[0-9]` searched
+  over the whole `Gres` value, without splitting it on commas (a socket suffix
+  such as `(S:0,2)` may hold one; an untyped `gpu:4` and another GRES such as
+  `vgpu` give none), and the TYPE of every `CfgTRES` entry `gres/gpu:TYPE=N`;
+  names compare case-insensitively. A MIG marker is the letters `mig` in any
+  case, or a slice profile `[0-9]+g\.[0-9]+gb`, inside a candidate or a GPU
+  type (`A30_MIG-1g.6gb`, `a100_3g.20gb`).
+- `source` holds `ActiveFeatures`, `Gres` and `CfgTRES` as the node record
+  prints them, each null when absent.
+
+`meaning` is a fixed text: "GPU_SKU features of the allocated node as Slurm
+lists them: candidates for the GPU model, not the device allocated to this
+job. A node label does not identify the device on a mixed or MIG node, and
+never replaces the job's own device UUID record."
+
+`ambiguous: false` is no proof of a single whole-device model: a node record
+has no MIG field, a site may leave MIG devices untyped, and `CfgTRES` lists
+only the typed GPU TRES the site tracks. Node features are administrator
+labels with no tie to GRES types in Slurm, and a job record without details
+carries no per-node GPU split, device index or UUID
+([source-confirmed](validation/observed-slurm.md#node-records-and-gpu-models)).
+No key is named after an allocated SKU, and the command never states which
+device a job got; a project that needs that records the job's own device
+UUIDs.
