@@ -299,6 +299,45 @@ OR feature expressions in `--constraint` or `--prefer`, and the `env`-prefixed
 `sbatch` of the CPU thread budget (`shk submit --cpu-thread-budget`). Those
 rest on offline tests with fake `ssh` and Slurm binaries.
 
+Also not observed live, and resting on the Slurm source below and on offline
+tests:
+
+- the will-run test (`shk submit --preflight`) of a comma-separated partition
+  list on Sherlock;
+- a real `sbatch` with a partition list, and the usability of each member;
+- what `squeue` and `sacct` print as the partition of a multi-partition job
+  while pending, running, finished, requeued and cancelled while pending,
+  their row order for an array whose tasks run in different partitions and
+  for the attempts of a requeued job, and AllocCPUS 0 before a start;
+- the estimate line for a partition list or with a cluster clause;
+- an accepted `--test-only` without an estimate;
+- `shk resources --summary` on live node records, and the `CLASS:` feature
+  prefix;
+- GPU types and MIG types in the `Gres` and `CfgTRES` of a live GPU node.
+
+Sherlock's `EnforcePartLimits` and `AccountingStorageEnforce` values, its
+job_submit plugin, its partition priority tiers and its associations are not
+determinable from the source. The will-run test of a partition list is
+therefore an attended, read-only check:
+
+```sh
+shk submit --task multi-partition-probe --script job.sh --partition gpu,bioe,stat --cpus 1 --mem 2G --time 20m --gpus 1 --preflight
+```
+
+It runs `sbatch --test-only`: no job, no run directory, no GPU work. Exit 0
+means that the request passed Slurm's creation-time checks with the list and
+that at least one member, the one named in `estimate.partition`, can run it;
+exit 3 keeps Slurm's reason in `preflight.stderr`. Exit 0 does not show that a
+real multi-partition `sbatch` is accepted, nor that each member is usable: the
+will-run branch returns before the per-partition node-selection test of a real
+submission
+([`src/slurmctld/job_mgr.c`, lines 4298-4306](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4298)
+and
+[lines 4389-4391](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4389)),
+so both stay unverified-live after this check. A real submission that Slurm
+rejects is exit 5 (outcome unknown) in `shk submit`, as for any `sbatch`
+error.
+
 The following are confirmed in the official Slurm source at tag
 `slurm-25-11-9-1` and are likewise not observed live:
 
@@ -323,3 +362,201 @@ The following are confirmed in the official Slurm source at tag
   [sbatch reference](https://slurm.schedmd.com/sbatch.html#OPT_wait)). A
   script may carry `#SBATCH --wait`, so `shk submit` reads a strict job id on
   stdout as an accepted submission whatever the exit code.
+
+### Test-only estimates
+
+`shk submit --preflight` reads its `estimate` from the line that
+`sbatch --test-only` prints. Confirmed in the source at the same tag, not
+observed live apart from the one line recorded under
+[Submission](#submission):
+
+- One `info()` call prints it, with the format
+  `"Job %u to start at %s%s%s a using %u processors on nodes %s in partition %s"`
+  and the arguments job id, time text, `" on cluster "` or `""`, the cluster
+  name or `""`, processor count, node list and partition name
+  ([`src/api/allocate.c`, lines 641-647](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L641)).
+  The `a` before `using` is a literal of the format string from 25.05.0 on;
+  24.11 and older print the same line without it and without the cluster
+  clause
+  ([`src/api/allocate.c` at `slurm-24-11-0-1`, line 568](https://github.com/SchedMD/slurm/blob/slurm-24-11-0-1/src/api/allocate.c#L568)).
+  The cluster clause appears only with `--clusters`, `SBATCH_CLUSTERS`,
+  `SLURM_CLUSTERS` or a federation
+  ([lines 632-639](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L632)).
+- The line goes to stderr only, as `sbatch: <text>`
+  ([`src/common/log.c`, lines 1413-1428](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/log.c#L1413));
+  `sbatch` writes nothing to stdout with `--test-only`
+  ([`src/sbatch/sbatch.c`, lines 282-293](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sbatch/sbatch.c#L282)).
+  `--quiet` on the command line suppresses it
+  ([lines 125-131](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sbatch/sbatch.c#L125)).
+- The time text comes from `slurm_make_time_str`: `localtime_r` in the
+  `sbatch` process and the format `%FT%T`, with no zone
+  ([`src/common/parse_time.c`, lines 657-672 and 713-717](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/parse_time.c#L657)).
+  It is the local time of the process that ran `sbatch`, the login node; the
+  controller sends a raw time value. Other texts are `Unknown` (time 0 or
+  infinite), `None` and a run of `#`
+  ([lines 666-669 and 690-697](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/parse_time.c#L666)),
+  and whatever `SLURM_TIME_FORMAT` selects in the environment of `sbatch`
+  ([lines 674-688](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/parse_time.c#L674)).
+  `preflight.sh` unsets `SLURM_*`, so the default applies, and `#SBATCH`
+  lines cannot set it; `preflight.sh` pins no `TZ`, so the zone is that of
+  the session.
+- The node list is a ranged hostlist built by the controller, without spaces
+  ([`src/slurmctld/job_scheduler.c`, line 4595](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4595)),
+  and it can be empty
+  ([`src/common/node_conf.c`, lines 219-232](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/node_conf.c#L219)).
+- The partition field is always one name, the partition under test
+  ([`src/slurmctld/job_scheduler.c`, line 4596](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4596)).
+  With several partitions the controller walks them in priority-tier order and
+  stops at the first one for which the test succeeds
+  ([lines 4613-4616](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4613)
+  and
+  [4645-4657](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4645));
+  the list is sorted by PriorityTier, with ties in an order the source does
+  not specify
+  ([`src/slurmctld/partition_mgr.c`, lines 736-741](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/partition_mgr.c#L736)).
+  The estimate is that partition's, not the earliest start over the set. A
+  drained or inactive listed partition can be replaced by its Alternate
+  ([`src/slurmctld/job_mgr.c`, lines 6661-6691](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6661)),
+  so the name can be one the caller did not list.
+- The start is the select plugin's estimate from running jobs plus a rough
+  queue-delay term for pending jobs of no lower priority in the same
+  partition, never earlier than the controller's current time
+  ([`src/slurmctld/job_scheduler.c`, lines 4537-4541](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4537)
+  and
+  [4590-4593](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4590)).
+  It is not the backfill plan.
+- The job id in the line belongs to a temporary record that the controller
+  creates and purges
+  ([`src/slurmctld/job_mgr.c`, lines 4202-4205](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4202)
+  and
+  [4301-4304](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4301)):
+  it is not a submitted job.
+- A rejected or failed request prints `allocation failure: <text>` and exits 1
+  ([`src/sbatch/sbatch.c`, lines 288-291](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sbatch/sbatch.c#L288)),
+  after any `sbatch: error: <message>` lines from the controller's reply
+  ([`src/slurmctld/proc_req.c`, lines 2516-2521](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/proc_req.c#L2516)).
+- An exit 0 without an estimate line is possible in the client code
+  ([`src/api/allocate.c`, line 631](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L631);
+  [`src/slurmctld/proc_req.c`, lines 2528-2532](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/proc_req.c#L2528)),
+  though the 25.11 controller does not appear to produce it for an ordinary
+  single job
+  ([`src/slurmctld/job_mgr.c`, lines 4298-4306](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4298)).
+- Look-alikes: debug lines `JobId=N to start at ... on cluster ... using ...`
+  with the prefix `sbatch: debug:`, printed only at `-vv`
+  ([`src/api/allocate.c`, lines 294-297 and 317-323](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L294));
+  a following `Preempts: 1,2` line, indented by two spaces
+  ([lines 648-662](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L648));
+  job_submit plugin messages, free text with the same `sbatch: ` prefix,
+  printed before the estimate
+  ([lines 626-629](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L626));
+  and the heterogeneous form `Job N to start at TIME using N processors on NODES`
+  ([lines 740-749](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L740)),
+  which `shk` never meets, because it refuses heterogeneous jobs.
+
+### Jobs submitted to several partitions
+
+`shk submit --partition P,P...` and the partition rules of `shk status`
+depend on these. Confirmed in the source at the same tag, not observed live:
+
+- `sbatch` documents a comma-separated partition list: the job starts in the
+  partition offering the earliest initiation
+  ([`doc/man/man1/sbatch.1`, lines 2111-2119](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/man/man1/sbatch.1#L2111)).
+- The controller keeps the list for the life of the job and writes the run
+  partition first in its own record
+  ([`src/slurmctld/job_scheduler.c`, lines 5682-5708](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L5682)).
+  What clients get is different: the job record sent to `squeue` and
+  `scontrol` holds the single partition the job runs in for every job that is
+  not pending, and the list only for a pending job
+  ([`src/slurmctld/job_mgr.c`, lines 10611-10614](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L10611)).
+  So `squeue %P`
+  ([`src/squeue/print.c`, lines 125-134](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/squeue/print.c#L125))
+  and `scontrol show job`
+  ([`src/scontrol/info_job.c`, lines 406-407](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L406))
+  print the list while pending and one partition once started.
+- The order of a pending job's list is not the typed order: the parsed list
+  is sorted by priority tier
+  ([`src/slurmctld/partition_mgr.c`, lines 728-742](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/partition_mgr.c#L728)),
+  and the string is often rebuilt in that order at submission
+  ([`src/slurmctld/job_mgr.c`, lines 4460-4464](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4460))
+  and again on later events.
+- Accounting: the start message carries the list while the job is pending and
+  the run partition once it is not
+  ([`src/plugins/accounting_storage/slurmdbd/accounting_storage_slurmdbd.c`, lines 2663-2666](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/accounting_storage/slurmdbd/accounting_storage_slurmdbd.c#L2663)).
+  The row is overwritten at start
+  ([`src/plugins/accounting_storage/mysql/as_mysql_job.c`, lines 738-740 and 809-811](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/accounting_storage/mysql/as_mysql_job.c#L738);
+  sent from
+  [`src/slurmctld/node_scheduler.c`, lines 3037-3043](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/node_scheduler.c#L3037)),
+  asynchronously, and `sacct` prints the stored value
+  ([`src/sacct/print.c`, lines 1554-1558](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sacct/print.c#L1554)).
+  After a requeue the new row holds the list again, and the row of the
+  earlier run keeps its run partition
+  ([`src/slurmctld/job_mgr.c`, lines 16916-16921](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L16916)).
+- A job that leaves pending without ever running (cancelled while pending)
+  shows one partition name in `squeue` and `scontrol`, whichever the
+  controller's pointer last named, not where anything ran (the same lines
+  10611-10614 of `job_mgr.c`), while its accounting row keeps the list: the
+  completion message sends no partition
+  ([`accounting_storage_slurmdbd.c`, from line 2763](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/accounting_storage/slurmdbd/accounting_storage_slurmdbd.c#L2763)).
+- Array tasks are independent records, and different tasks of one array can
+  start in different partitions
+  ([`src/slurmctld/job_mgr.c`, lines 3596-3597](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L3596);
+  [`src/slurmctld/job_scheduler.c`, lines 1561-1575](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L1561)).
+  The pending remainder keeps the list.
+- `--dependency=singleton` compares user id and job name only
+  ([`src/slurmctld/job_scheduler.c`, lines 258-279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L258)).
+  Requeue, job name and array handling have no partition-list rule.
+- Submission checks: one nonexistent name rejects the whole submission
+  (`Invalid partition name specified`,
+  [`src/slurmctld/job_mgr.c`, lines 6611-6626](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6611)).
+  A listed partition that takes no submissions is dropped from the list or
+  replaced by its Alternate
+  ([lines 6661-6691](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6661)).
+  Limits of one listed partition (MaxTime, node counts, memory, AllowGroups,
+  AllowAccounts, AllowQos) reject the whole submission under
+  `EnforcePartLimits=ALL` and only exclude that partition under `ANY` or `NO`
+  ([lines 6740-6814](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6740)
+  and
+  [3868-3902](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L3868);
+  [`doc/man/man5/slurm.conf.5`, lines 1443-1462](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/man/man5/slurm.conf.5#L1443));
+  the AllowAccounts test at submission also needs enforced associations.
+  Partition-specific associations that differ between the listed partitions
+  reject it
+  ([`src/slurmctld/job_mgr.c`, lines 1198-1213](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L1198)),
+  and association or QOS limits of any listed partition can reject it
+  ([`src/slurmctld/acct_policy.c`, lines 3664-3665](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L3664)).
+
+### Node records and GPU models
+
+`shk resources --summary` reads the `GPU_SKU:` and `CLASS:` features of node
+records, and `shk allocation` reports `gpu_sku_candidates` from them. Confirmed
+in the source at the same tag, not observed live:
+
+- `scontrol show node NAME --oneliner` prints, in this order,
+  `AvailableFeatures`, `ActiveFeatures`, `Gres`, later `CfgTRES` and
+  `AllocTRES`
+  ([`src/api/node_info.c`, lines 236-258 and 404-410](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/node_info.c#L236));
+  `GresUsed` only with details. With glibc an unset string among the first
+  four prints as `(null)`, an inference from the C library rather than from
+  Slurm's source.
+- `Gres` is one comma-separated element per GPU type, `gpu:TYPE:COUNT` with an
+  optional `(S:...)` socket suffix, or `gpu:COUNT` when untyped
+  ([`src/interfaces/gres.c`, lines 4825-4960](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/interfaces/gres.c#L4825)).
+  `CfgTRES` has `gres/gpu=N` for all GPUs and `gres/gpu:TYPE=N` only for the
+  typed TRES the site tracks
+  ([`src/slurmctld/controller.c`, lines 3198-3223](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/controller.c#L3198)),
+  so it need not list every type.
+- Node features are free administrator strings with no link to GRES types in
+  the source
+  ([`doc/man/man5/slurm.conf.5`, lines 7118-7130](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/man/man5/slurm.conf.5#L7118)).
+  `GPU_SKU:<model>` and `CLASS:<class>` are Sherlock conventions.
+- A MIG device is an ordinary `gpu` GRES whose type is optional and
+  site-chosen; the documented example type is `a100_3g.20gb`
+  ([`doc/html/gres.shtml`, lines 654-669](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/gres.shtml#L654)).
+  The node record has no MIG field. Sherlock's feature inventory in
+  [the policy guide](../sherlock-policy.md) lists a MIG slice as
+  `A30_MIG-1g.6gb`.
+- A job record without details has `NodeList` and a job-wide `AllocTRES`
+  only: no per-node GPU split, no device index and no UUID
+  ([`src/scontrol/info_job.c`, lines 508-515 and 556-561](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L508)).
+  The index printed with details is a position in a bitmap, not a device
+  UUID.
