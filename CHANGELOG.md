@@ -94,6 +94,19 @@ Guidance:
   applies across projects, and it is soft (Slurm tries it first, then the
   fallback `--constraint`). Nothing is tightened. Site-rule text and
   `Reviewed 2026-11-14` are unchanged.
+- In both rules files the `### GPU scheduling defaults` section is rewritten,
+  and both files stay within the 7168-byte cap. The comparison of authorized
+  partitions by queue, setup, compute and recovery time and the pointer to
+  department and `owners` partitions leave that section; the skill and the
+  campaign guide carry them. The section leaves the ban on padding and the
+  discovery of limits and features to the Jobs and Slurm sections of the
+  files, which state them. `workstation.md` adds one sentence on compatible
+  partition lists under Jobs. `cluster.md` drops the sentence that `shk push`
+  and `pull` refuse there, which `shk` still enforces (exit 3) and the skill
+  states, and its Slurm section writes the command list as
+  `shk submit`/`status`/`cancel`. The skill, the campaign guide and the policy
+  guide describe the new mechanisms, and the policy guide lists what the rules
+  files leave out.
 - The rules files and the skill changed, so `shk install-skill --check`
   reports installed copies as stale; run `shk install-skill` again, with the
   same `--rules`, to refresh them.
