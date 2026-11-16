@@ -608,9 +608,22 @@ class Resolution(unittest.TestCase):
         self.assertEqual(
             self.current(rows, newest=slurm.SpecFile(300, 1, tuple(MEMBERS)))["ran_on"], ["bioe"]
         )
-        for newest in (None, slurm.SpecFile(300, 1), slurm.SpecFile(299, 1, ("gpu", "bioe"))):
+        for newest in (
+            None,
+            slurm.SpecFile(300, 1),
+            slurm.SpecFile(300, 1, ("gpu",)),
+            slurm.SpecFile(299, 1, ("gpu", "bioe")),
+        ):
             with self.subTest(newest=newest):
                 self.assertNotIn("ran_on", self.current(rows, newest=newest))
+
+    def test_a_started_row_that_still_shows_the_list_adds_no_ran_on_partition(self):
+        current = self.current(
+            [q("300", "RUNNING", "gpu,bioe")],
+            [a("300", "RUNNING", partition="gpu,bioe")],
+            slurm.SpecFile(300, 1, ("gpu", "bioe")),
+        )
+        self.assertEqual(current["ran_on"], [])
 
 
 if __name__ == "__main__":
