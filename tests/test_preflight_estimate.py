@@ -135,6 +135,7 @@ class ParseEstimate(unittest.TestCase):
             LIVE.replace(stamp, "####################"),
             LIVE.replace(stamp, "2026-10-22T13:24"),  # a custom format without seconds
             LIVE.replace(stamp, "22.10.2026-13:24:32"),
+            LIVE.replace(stamp, f"{stamp}-0700"),  # a custom format that extends the ISO shape
             LIVE.replace(stamp, "Tomorr 13:24"),  # a relative time holds a space
             LIVE.replace("sh02-01n56", ""),  # an empty node list
             HETEROGENEOUS,
