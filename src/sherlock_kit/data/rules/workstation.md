@@ -25,10 +25,10 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 ### GPU scheduling defaults
 - Site/task rules take precedence. Use broad OR `--constraint` of discovered compatible GPUs, new ones too; avoid RTX_2080Ti/Pascal; narrow for architecture needs and only evidenced memory/kernel/dtype needs; obey MIG slice/partition rules.
 - Soft `--prefer`: one tier of compatible discovered L40/A/H and future B/newer GPUs, purely by compute capability, so cross-project; Slurm tries it independently, then the fallback constraint: both must encode every hard requirement. OR is not ordered.
-- GPU models are scientifically equivalent, may mix or change on requeue; SKU is provenance, by default no reason for new controls/cohorts/reruns/per-model qualification. Fix inputs/model/seeds/numerical/environment protocol; no bitwise guarantee; check compatibility as needed.
+- GPU models are scientifically equivalent, may mix or change on requeue; SKU is provenance, by default no reason for new controls/cohorts/reruns/per-model qualification. Pin inputs/model/seeds/numerical/environment protocol; no bitwise guarantee; check compatibility as needed.
 - Prioritize the earliest start; reduce oversized CPU requests. Owners needs proven same-command resume: durable checkpoints, verified completed units, attempt logs/bounded retries; requeue restarts the script, not app state.
 - Queue/refill ready independent work concurrently; report ready/unsubmitted/queued/running/blocked. Favor longer useful resumable bundles over tiny jobs to amortize queues/setup, within limits/courtesy/budgets.
-- Batch status/resources checks as needed, at least 60 s apart; snapshots guarantee no start; adapt future requests to evidence. Move units only on terminal/nonrestartable proof or durable revocation across requeue; pending/unknown ones stay owned; no duplicate queue racing.
+- Batch status/resources checks as needed, at least 60 s apart; snapshots do not guarantee starts; adapt future requests to evidence. Move units only on terminal/nonrestartable proof or durable revocation across requeue; pending/unknown stay owned; no duplicate queue racing.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
