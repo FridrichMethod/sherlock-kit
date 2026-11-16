@@ -622,10 +622,10 @@ class AllocationCLI(unittest.TestCase):
             AllocTRES="cpu=20,mem=81248M,gres/gpu=2",
         )
 
-    def sku_entry(self, node, *extra):
+    def sku_entry(self, node):
         """The one gpu_sku_candidates entry for this local node; no key in it contains alloc."""
         self.data["node"][self.host] = node
-        code, report = self.run_cli(*extra)
+        code, report = self.run_cli()
         self.assertEqual(code, 0, report)
         found = report["gpu_sku_candidates"]
         self.assertEqual([key for key in keys(found) if "alloc" in key.lower()], [])
@@ -708,6 +708,8 @@ class AllocationCLI(unittest.TestCase):
                 True,
             ),
             (["GPU_SKU:A30"], "gpu:4", "gres/gpu=4,gres/gpu:a30_Mig=4", ["A30"], True),
+            # A MIG type that only Gres names: the site tracks no typed GPU TRES.
+            (["GPU_SKU:A100_SXM4"], "gpu:a100_3g.20gb:2", "gres/gpu=2", ["A100_SXM4"], True),
         ])
 
     def test_two_gpu_types_across_gres_and_cfgtres_are_ambiguous(self):
@@ -716,6 +718,14 @@ class AllocationCLI(unittest.TestCase):
                 ["GPU_SKU:A100_PCIE"],
                 "gpu:a100:2(S:0,2),gpu:v100:2(S:1,3)",
                 "gres/gpu=4,gres/gpu:a100=2,gres/gpu:v100=2",
+                ["A100_PCIE"],
+                True,
+            ),
+            # The same Gres with an untyped CfgTRES: only the Gres parser can see both types.
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:a100:2(S:0,2),gpu:v100:2(S:1,3)",
+                "gres/gpu=4",
                 ["A100_PCIE"],
                 True,
             ),
@@ -747,6 +757,14 @@ class AllocationCLI(unittest.TestCase):
     def test_untyped_other_and_null_gres_name_no_gpu_type(self):
         self.assertCandidates([
             (["GPU_SKU:V100_PCIE"], "gpu:4", "gres/gpu=4,gres/gpu:v100=4", ["V100_PCIE"], False),
+            # An untyped Gres with a socket suffix: the count and suffix name no type.
+            (
+                ["GPU_SKU:V100_PCIE"],
+                "gpu:4(S:0-1)",
+                "gres/gpu=4,gres/gpu:v100=4",
+                ["V100_PCIE"],
+                False,
+            ),
             (
                 ["GPU_SKU:V100_PCIE"],
                 "vgpu:t4:8,gpu:4",
