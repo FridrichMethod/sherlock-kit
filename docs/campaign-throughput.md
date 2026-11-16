@@ -18,6 +18,10 @@ Keep partition, GPU count, CPUs, memory, walltime and constraint explicit in the
 submission. The owner defaults below are agent guidance, not additional TOML
 keys, automatic hardware selection or a new site policy.
 
+Prioritize the earliest start. Reduce oversized CPU requests. Keep only the
+memory, kernel and dtype requirements that have real evidence, and the site
+rules.
+
 Use a broad OR constraint over compatible GPUs rather than one SKU without a
 technical reason. Discover current feature names and limits with `sh_node_feat`
 and `sh_part`; inspect the actual memory and architecture with `shk resources`.
@@ -32,8 +36,10 @@ kernel or dtype requirements, recording why.
 
 Use `shk submit --prefer` for a soft preference over the compatible, discovered
 L40, A and H families and future B or newer families. They form one preferred
-tier; OR order does not rank those families. With the candidate inventory above,
-the preferred expression is:
+tier; OR order does not rank those families. The tier is purely a
+compute-capability ordering, so it applies across projects. `--prefer` is soft:
+Slurm tries it first, then the fallback `--constraint`. With the candidate
+inventory above, the preferred expression is:
 
 ```text
 GPU_SKU:A100_PCIE|GPU_SKU:A100_SXM4|GPU_SKU:A40|GPU_SKU:H100_SXM5|GPU_SKU:H200_SXM5|GPU_SKU:L40S
@@ -49,22 +55,66 @@ family wildcard. This does not reserve GPUs, promise a start time or justify
 waiting indefinitely for a preferred card. See the
 [Slurm sbatch reference](https://slurm.schedmd.com/sbatch.html#OPT_prefer).
 
-Scientific comparison defaults treat compatible GPUs as equivalent while
-retaining the actual GPU as provenance. A different SKU alone does not require
-new controls, a separate cohort or rerunning complete results. Keep effective
-inputs, model/checkpoint, seeds, numerical settings and environment protocol
-fixed. This is a comparison convention, not a bitwise-reproducibility claim or
-proof of binary compatibility. Explicit scientific requirements can override it.
-Use representative native validation for real compatibility uncertainties; do not
+GPU models are scientifically equivalent: they may be mixed, and a job may get
+another model after a requeue. The model alone is no reason for new controls,
+cohorts, reruns or per-model qualification. Scientific comparison defaults treat
+compatible GPUs as equivalent while retaining the actual GPU as provenance. A
+different SKU alone does not require new controls, a separate cohort or
+rerunning complete results. Keep effective inputs, model/checkpoint, seeds,
+numerical settings and environment protocol fixed. This is a comparison
+convention, not a bitwise-reproducibility claim or proof of binary
+compatibility. Explicit scientific requirements can override it. Use
+representative native validation for real compatibility uncertainties; do not
 build a complete model-by-SKU qualification matrix before submitting ready work.
 
-Compare expected time to completion across authorized partitions: queue wait,
-startup/loading, useful computation and likely recovery. Department capacity,
-resumable owners and the public gpu partition are options; none has a universal
-priority. Borrowed btrippe/possu follow the existing courtesy budgets and time
-window unchanged. Prove same-command, idempotent checkpoint/resume before owners;
-Slurm requeue does not implement application recovery. Do not depend on receiving
-a usable preemption signal before saving progress.
+Prioritize the earliest start, and compare expected time to completion across
+authorized partitions: queue wait, startup/loading, useful computation and likely
+recovery. Department capacity, resumable owners and the public gpu partition are
+options; none has a universal priority. Borrowed btrippe/possu follow the
+existing courtesy budgets and time window unchanged. Prove same-command,
+idempotent checkpoint/resume before owners; Slurm requeue does not implement
+application recovery. Do not depend on receiving a usable preemption signal
+before saving progress.
+
+Three kit mechanisms help find the earliest start. Each has limits, and none
+chooses a request, lowers a floor or ranks GPU models:
+
+- A compatible partition set. `shk submit --partition gpu,bioe,stat` passes one
+  comma-separated value to Slurm, which starts the job in whichever member can
+  start it first. Only compatible sets are accepted: every member is listed and
+  takes batch jobs, none is borrowed, all share one `requeue` and one
+  `preemptible` value, and with `--gpus` above 0 every member allows GPUs.
+  `owners`, `btrippe` and `possu` stay alone; submit incompatible partitions
+  separately. A repeated `--partition` flag is not a list: the last one wins.
+  `shk status --task` adds `current.ran_on` for such a job, the sorted
+  partitions in which a task or attempt started. Without a spec (`--all`,
+  `--name`, `--job-id`) there is no `ran_on`: `current.partition` is the first
+  row's text, which for an array whose tasks started on different members names
+  only one of them or the pending list. The per-row partition of
+  `status --details`, or `--task`, tells where each ran. Sherlock's acceptance of
+  a list in a real submission is not observed live.
+- The preflight estimate. `shk submit --preflight` adds `estimate` beside the raw
+  `preflight` reply: a `parsed`, `absent` or `unparsed` status, Slurm's start
+  time, nodes and partition, the line it was read from and `observed_at`. It is
+  advisory, not a reservation and not a promise, and an accepted request can
+  carry no estimate (`absent`, all values null). The start is the text Slurm
+  printed, in the local time of the `sbatch` process (`start_zone` is
+  `sbatch-local`). For a partition list Slurm names the first partition, in its
+  own priority order, that can run the job and estimates its start there: it is
+  not the earliest start over the set. Comparing partitions takes one preflight
+  per partition, for a bounded set of requests and without a polling loop.
+- The resources summary.
+  `shk resources --partition P [--partition P ...] --summary` reads one snapshot
+  and reports per requested partition, and once over all of them, the node
+  counts by class and the configured, allocated and free CPUs, memory and GPUs.
+  `--by sku` and `--by class` add breakdowns by the exact set of a node's
+  `GPU_SKU:` or `CLASS:` features, and each `--shape NAME:cpus=N,mem=SIZE[,gpus=N]`
+  adds the slots of that request shape that fit on countable nodes. It is a
+  snapshot heuristic: it does not model fairshare, QOS or partition limits,
+  reservations, preemption or pending work, reserves nothing and predicts no
+  start. Unknown capacity stays null, never 0, numbers beside unknown nodes are
+  lower bounds, and overlapping partition groups or breakdowns must not be added
+  together. A summary of live node records is not observed live.
 
 ## Size bundles to amortize queues
 
