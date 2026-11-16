@@ -120,6 +120,43 @@ class ParsingTests(unittest.TestCase):
                 slurm.parse_read(text, tools)
             self.assertEqual((caught.exception.code, caught.exception.token), (1, "malformed_read"))
 
+    def test_spec_file_keeps_the_partitions_of_a_set_only(self):
+        specs = {
+            "set": '{"resources":{"array":null,"partitions":["gpu","bioe"]}}',
+            "single": '{"resources":{"array":null,"partition":"gpu"}}',
+            "text": '{"resources":{"array":null,"partitions":"gpu,bioe"}}',
+            "numbers": '{"resources":{"array":null,"partitions":[1,2]}}',
+            "broken": '{"resources":{"partitions":["gpu",',
+        }
+        lines = [f"SHK_SPEC|{name}|7|{text}" for name, text in specs.items()]
+        read = slurm.parse_read("\n".join([*lines, "SHK_END"]) + "\n", ())
+        self.assertEqual(
+            read.specs,
+            {
+                "set": slurm.SpecFile(7, 1, ("gpu", "bioe")),
+                "single": slurm.SpecFile(7, 1),
+                "text": slurm.SpecFile(7, 1),
+                "numbers": slurm.SpecFile(7, 1),
+                "broken": slurm.SpecFile(7, None),
+            },
+        )
+        self.assertEqual(slurm.SpecFile(7, 1).partitions, ())
+
+    def test_a_row_shows_a_start_by_alloc_cpus_or_a_running_queue_state(self):
+        def ran(queue=(), acct=()):
+            rows = slurm.parse_rows(list(queue), list(acct), lambda _name: True)
+            return [row.ran for row in rows.by_name[N]]
+
+        self.assertEqual(
+            ran(acct=[a("1", cpus=2), a("2", "PENDING", elapsed=0, cpus=0)]), [True, False]
+        )
+        self.assertEqual(ran(acct=[a("3_[0-1]", "RUNNING", cpus=2)]), [False])  # an aggregate
+        states = ("RUNNING", "COMPLETING", "PENDING", "COMPLETED", "CANCELLED")
+        self.assertEqual(
+            ran([q("4", state) for state in states]), [True, True, False, False, False]
+        )
+        self.assertEqual(ran([q("5_[1-2]", "RUNNING")]), [False])
+
     def test_rows_attribution_filter_and_truncation(self):
         rows = slurm.parse_rows(
             [q("5", name="odd|name"), "short"],
