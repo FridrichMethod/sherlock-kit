@@ -19,6 +19,14 @@ TRANSIENT = re.compile(
     r"Unable to contact slurm controller|Socket timed out on send/recv operation"
     r"|Zero Bytes were transmitted or received"
 )
+# The will-run line of sbatch --test-only, matched against a whole line (Slurm 25.11
+# src/api/allocate.c; 24.11 and older print no " a" and no cluster clause).
+ESTIMATE = re.compile(
+    r"(?:sbatch: )?Job [0-9]+ to start at (?P<start>\S+)(?: on cluster \S+)?(?: a)?"
+    r" using [0-9]+ processors on nodes (?P<nodes>\S+) in partition (?P<partition>\S+)"
+)
+# The one start text that is read: Slurm's default %FT%T, local time without a zone.
+ESTIMATE_START = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 
 
 def transient(action: str, stderr: str) -> ShkError | None:
@@ -57,8 +65,44 @@ def register(subparsers: Subparsers) -> None:
         parser.set_defaults(handler=handler)
 
 
+def parse_estimate(stderr: str, stdout: str) -> dict[str, str | None]:
+    """Slurm's start estimate in a --test-only reply, read from one whole estimate line only.
+
+    The lines are stderr's, then stdout's, each split on LF. Exactly one estimate line with an
+    ISO start is parsed. Without any line holding " to start at " the estimate is absent.
+    Anything else is unparsed: it names the first estimate line, else the first line holding
+    those words, and takes no field from it. The start stays the text Slurm printed, in the
+    local zone of the sbatch process; the job id in the line names a temporary record and
+    fills no field.
+    """
+    lines = executor.records(stderr) + executor.records(stdout)
+    matches = [found for text in lines if (found := ESTIMATE.fullmatch(text))]
+    mentions = [text for text in lines if " to start at " in text]  # every estimate line too
+    fields: tuple[str | None, ...] = (None, None, None)
+    line: str | None = None
+    if len(matches) == 1 and ESTIMATE_START.fullmatch(matches[0]["start"]):
+        status, line = "parsed", matches[0].string
+        fields = matches[0].group("start", "nodes", "partition")
+    elif mentions:
+        status, line = "unparsed", matches[0].string if matches else mentions[0]
+    else:
+        status = "absent"
+    start, nodes, partition = fields
+    return {
+        "status": status,
+        "start": start,
+        "start_zone": "sbatch-local",
+        "nodes": nodes,
+        "partition": partition,
+        "line": line,
+    }
+
+
 def preflight(built: spec.Spec, ctx: Context) -> Outcome:
-    """Use sbatch --test-only as a read: a Slurm refusal is exit 3, a controller failure exit 1."""
+    """Use sbatch --test-only as a read: a Slurm refusal is exit 3, a controller failure exit 1.
+
+    The estimate beside the raw evidence is advisory: no reservation, no promise, no conversion.
+    """
     from sherlock_kit.slurm import _cadence
 
     result = executor.check(
@@ -83,6 +127,7 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
             ) from None
     if code and (failure := transient("preflight", evidence["stderr"])):
         raise failure
+    cadence = _cadence(ctx)
     return Outcome(
         {
             "ok": code == 0,
@@ -94,8 +139,12 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
             "script_sha256": built.sha256,
             "spec": built.document,
             "preflight": evidence,
+            "estimate": {
+                **parse_estimate(evidence["stderr"], evidence["stdout"]),
+                "observed_at": cadence["queried_at"],
+            },
             "executor": ctx.executor().kind,
-            **_cadence(ctx),
+            **cadence,
         },
         EXIT_REFUSED if code else 0,
     )
