@@ -268,3 +268,18 @@ class EstimateFlow(test_control.ControlFlow):
             {**estimate("unparsed", UNKNOWN), "observed_at": report["queried_at"]},
         )
         self.assertEqual(report["preflight"]["stderr"], f"{UNKNOWN}\n")
+
+    def test_stdout_lines_follow_stderr_lines_through_the_real_preflight_program(self):
+        # sbatch --test-only prints nothing on stdout; its lines are still read, after stderr's.
+        self.sbatch(f"{OTHER}\n", 0)
+        tool = self.tools / "sbatch"
+        tool.write_text(tool.read_text().replace("exit 0\n", f"echo '{LIVE}'\nexit 0\n"))
+        code, report = self.submit("--preflight")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            report["preflight"], {"returncode": 0, "stdout": f"{LIVE}\n", "stderr": f"{OTHER}\n"}
+        )
+        self.assertEqual(
+            report["estimate"],
+            {**estimate("unparsed", OTHER), "observed_at": report["queried_at"]},
+        )
