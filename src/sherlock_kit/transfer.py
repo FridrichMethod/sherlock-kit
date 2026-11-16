@@ -18,8 +18,9 @@ and no empty directory, since a manifest lists files), re-read the manifest, run
 re-verifies it after them, so whatever they write is promoted with it), rename the stage onto LOCAL
 (--replace keeps the old copy as .NAME.shk-old-<UTC>) and write .NAME.shk-receipt.json with the
 sha256 of the SHA256SUMS text it read. The pulled and already_present replies end with
-PAYLOAD_CONTRACT, which states this; already_present reads nothing again and rests on the receipt
-of the earlier pull.
+PAYLOAD_CONTRACT, which states this. already_present fetches and verifies nothing again: it compares
+the digest of the SHA256SUMS it just read with the receipt, reads no file of LOCAL and runs no
+validator, and so rests on the receipt of the earlier pull.
 
 manifest: write DIR/SHA256SUMS locally (inside jobs, no network), sha256sum-compatible and sorted.
 
