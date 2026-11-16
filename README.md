@@ -363,8 +363,9 @@ repeat all hard requirements in both. These are explicit arguments, not TOML def
   complete older copy was, so rerun it to exit 0 before any job reads REMOTE.
 - `pull` is payload-only: the stage, and so LOCAL, holds exactly the regular
   files that `REMOTE/SHA256SUMS` lists, and the directories they imply.
-  `SHA256SUMS` itself is not staged and not promoted; the receipt keeps its
-  sha256. A manifest lists files only, so an empty remote directory is not
+  `SHA256SUMS` itself is not staged and not promoted; the receipt keeps the
+  sha256 of the `SHA256SUMS` text that pull read (`manifest_sha256`). A
+  manifest lists files only, so an empty remote directory is not
   created locally: a validator must not require one, and must not create one.
   `pull` copies exactly the listed files into a private stage
   beside LOCAL, verifies them, runs the optional validator and renames the stage
@@ -384,8 +385,10 @@ repeat all hard requirements in both. These are explicit arguments, not TOML def
   `already_present` replies end with the constant `payload_contract`:
   `{"name": "payload-only", "version": 1, "verified_against": "SHA256SUMS", "manifest_in_payload": false, "empty_directories_preserved": false, "validator_must_not_write_stage": true}`.
   It describes what a pull promotes, and `validator_must_not_write_stage`
-  states the validator's obligation. On `already_present` nothing is read
-  again: that reply rests on the receipt of the earlier pull.
+  states the validator's obligation. On `already_present` LOCAL is not
+  verified again: the pull reads `SHA256SUMS` once more, compares its digest
+  with the receipt, reads no file of LOCAL and runs no validator, so that
+  reply rests on the receipt of the earlier pull.
 - `occupancy` lists current use of partitions. Borrowed partitions (`btrippe`,
   `possu`) need it and `--courtesy-ack` before a submission, and such a
   submission reports `occupancy`, the partition's `courtesy` text,

@@ -432,7 +432,8 @@ The pull contract is payload-only:
 
 - The stage, and so LOCAL, holds exactly the regular files that
   `REMOTE/SHA256SUMS` lists, and the directories they imply. `SHA256SUMS`
-  itself is not staged and not promoted; the receipt keeps its sha256.
+  itself is not staged and not promoted; the receipt keeps the sha256 of the
+  `SHA256SUMS` text that pull read (`manifest_sha256`).
 - A manifest lists files only, so an empty remote directory is not created
   locally. A validator must not require one, and must not create one.
 - The validator gets the stage as its last argument and treats it as
@@ -442,8 +443,10 @@ The pull contract is payload-only:
   `payload_contract`:
   `{"name": "payload-only", "version": 1, "verified_against": "SHA256SUMS", "manifest_in_payload": false, "empty_directories_preserved": false, "validator_must_not_write_stage": true}`.
   It describes what a pull promotes; `validator_must_not_write_stage` states
-  the validator's obligation. On `already_present` nothing is read again: that
-  reply rests on the receipt of the earlier pull.
+  the validator's obligation. On `already_present` LOCAL is not verified
+  again: the pull reads `SHA256SUMS` once more, compares its digest with the
+  receipt, reads no file of LOCAL and runs no validator, so that reply rests on
+  the receipt of the earlier pull.
 
 ## Weaker guarantees, accepted
 
