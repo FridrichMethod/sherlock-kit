@@ -505,7 +505,9 @@ def _ran_on(rows: list[Row]) -> list[str]:
     Only a started row whose partition text is one name counts: Slurm prints the partition a
     job runs in once it started, and a list (or one arbitrary member) while it has not.
     """
-    return sorted({row.partition for row in rows if row.ran and "," not in row.partition})
+    return sorted({
+        row.partition for row in rows if row.ran and row.partition and "," not in row.partition
+    })
 
 
 def _non_preemptible(text: str, profiles: Mapping[str, partitions.Profile]) -> bool:

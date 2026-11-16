@@ -636,6 +636,14 @@ class Resolution(unittest.TestCase):
         )
         self.assertEqual(current["ran_on"], [])
 
+    def test_a_started_row_without_a_partition_text_adds_no_ran_on_name(self):
+        current = self.current(
+            [q("300", "RUNNING", "")],
+            [a("300", "RUNNING", partition="")],
+            slurm.SpecFile(300, 1, ("gpu", "bioe")),
+        )
+        self.assertEqual(current["ran_on"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -127,6 +127,7 @@ class ParsingTests(unittest.TestCase):
             "text": '{"resources":{"array":null,"partitions":"gpu,bioe"}}',
             "numbers": '{"resources":{"array":null,"partitions":[1,2]}}',
             "broken": '{"resources":{"partitions":["gpu",',
+            "foreign": '{"resources":[]}',
         }
         lines = [f"SHK_SPEC|{name}|7|{text}" for name, text in specs.items()]
         read = slurm.parse_read("\n".join([*lines, "SHK_END"]) + "\n", ())
@@ -138,6 +139,7 @@ class ParsingTests(unittest.TestCase):
                 "text": slurm.SpecFile(7, 1),
                 "numbers": slurm.SpecFile(7, 1),
                 "broken": slurm.SpecFile(7, None),
+                "foreign": slurm.SpecFile(7, None),
             },
         )
         self.assertEqual(slurm.SpecFile(7, 1).partitions, ())
