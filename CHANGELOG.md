@@ -1,5 +1,114 @@
 # Changelog
 
+## Unreleased
+
+Additions. Without the new options, replies, frozen specs and `sbatch` argv
+are byte-identical to 0.7.1 apart from the version text and the compatibility
+notes below.
+
+- `shk submit --partition P,P...` takes compatible partitions as one
+  comma-separated value, Slurm's own syntax (`--partition gpu,bioe,stat`).
+  Every member must be listed and take batch jobs; the set is compatible when
+  no member is borrowed and all members share one `requeue` and one
+  `preemptible` value, and `--gpus` above 0 needs every member to allow GPUs.
+  This is derived from the existing profile fields alone: `partitions.json`,
+  the profiles and the courtesy texts are unchanged. So `gpu,bioe,stat`
+  combines, `owners`, `btrippe` and `possu` stay alone, and `normal`, `bigmem`
+  and `service` are in the class too; every member's courtesy text applies
+  wherever the job starts. An incompatible set is exit 3
+  `partitions_incompatible`, whose message names the borrowed members or
+  lists every member with both values. The argv holds the value as given in
+  the usual position, the job name does not depend on the partition, and the
+  frozen spec adds `resources.partitions` only for more than one member. Only
+  `submit` takes a list; `resources` and `occupancy` keep one name per
+  `--partition` flag.
+- `shk status --task` reports `current.ran_on`, directly after
+  `current.partition`, for a job whose frozen spec lists several partitions:
+  the sorted distinct partitions in which a task or attempt started, `[]`
+  until one has. `current.partition` stays Slurm's text of the job's first
+  row. `unknown_partition` and `unexpected_preemption` judge the members of a
+  comma list; `--all`, `--name` and `--job-id` read no spec and print no
+  `ran_on`.
+- `shk resources --summary` reports the same single read as counts instead of
+  per-node records: countable, unschedulable and unknown nodes and their
+  configured, allocated and free CPUs, memory and GPUs, for the union of the
+  shipped nodes and for each requested partition. `--by sku` and `--by class`
+  add breakdowns by the `GPU_SKU:` and `CLASS:` features, and
+  `--shape NAME:cpus=N,mem=SIZE[,gpus=N]` adds slot counts. A value with
+  nothing known behind it is null, never 0; the reply carries its rules as
+  four fixed texts and ranks nothing. `--by` and `--shape` without `--summary`
+  are exit 1 `spec_invalid`, offline. Without `--summary` the reply is
+  unchanged.
+- `shk submit --preflight` adds `estimate` directly after `preflight`: a
+  `status` of `parsed`, `absent` or `unparsed`, the start time as Slurm printed
+  it with `start_zone: "sbatch-local"`, the node list and partition as printed,
+  the line it was read from, and `observed_at`. Nothing is converted or
+  guessed, and no key holds the temporary job id. The estimate is advisory;
+  for a partition list Slurm names the first member, in its own priority
+  order, that can run the job, not the earliest start over the set. The
+  `preflight` object, the exit codes and `preflight.sh` are unchanged.
+- `shk allocation` adds `gpu_sku_candidates` after `membership_evidence`: per
+  node record, the `GPU_SKU:` features as candidates for the GPU model,
+  `ambiguous` for several candidates, several GPU types in `Gres` and
+  `CfgTRES` or a MIG marker, and the three source fields, with a fixed
+  `meaning` text. It reads no more from Slurm and never states which device
+  the job got.
+- `shk pull` states its payload-only contract: LOCAL holds exactly the regular
+  files that `SHA256SUMS` lists and the directories they imply, without
+  `SHA256SUMS` itself and without empty remote directories, and a validator
+  must treat the stage as read-only, which the kit does not enforce. The
+  `pulled` and `already_present` replies end with the constant
+  `payload_contract` object that names it. Pull behavior and the receipt are
+  unchanged.
+
+Compatibility notes:
+
+- Three replies gain one additive key each: `submit --preflight`
+  (`estimate`), `allocation` (`gpu_sku_candidates`) and `pull`
+  (`payload_contract`, in `pulled` and `already_present`).
+- Two status verdicts change for rows that hold a comma-separated partition
+  list, which shk 0.7.1 could not submit: an shk-named job on a list of listed
+  partitions no longer gets `unknown_partition` (exit 6 in 0.7.1), and an
+  interrupted attempt whose partition text is a list of listed,
+  non-preemptible partitions gets `unexpected_preemption` (0.7.1 skipped a
+  list). `unknown_partition` looks at every row of the job, not only the
+  first, which differs only when the rows of one shk-named job differ.
+- A `submit --partition` value with a repeated member (`gpu,gpu`) is exit 1
+  `spec_invalid`; in 0.7.1 every value with a comma was exit 3
+  `unknown_partition`. A repeated `--partition` flag keeps the 0.7.1 behavior:
+  the last one wins.
+- A job submitted with a partition list must be read with 0.8.0 or newer:
+  older versions report `unknown_partition` (exit 6) while Slurm prints the
+  list.
+
+Guidance:
+
+- The rules files, the skill and the guides add the owner's latest GPU
+  guidance beside the accepted preferences, which all stay: GPU models are
+  scientifically equivalent, so they may be mixed and a job may get another
+  model after a requeue, and the model alone is no reason for new controls,
+  cohorts, reruns or per-model qualification. Prioritize the earliest start,
+  reduce oversized CPU requests, and keep only the memory, kernel and dtype
+  requirements that have real evidence, and the site rules. The optional
+  `--prefer` tier stays: it is purely a compute-capability ordering, so it
+  applies across projects, and it is soft (Slurm tries it first, then the
+  fallback `--constraint`). Nothing is tightened. Site-rule text and
+  `Reviewed 2026-11-14` are unchanged.
+- The rules files and the skill changed, so `shk install-skill --check`
+  reports installed copies as stale; run `shk install-skill` again, with the
+  same `--rules`, to refresh them.
+
+Documentation:
+
+- The README, the design guide and the allocation contract describe partition
+  lists, `ran_on`, the resource summary, the preflight estimate, the GPU SKU
+  candidates and the payload-only pull. The Slurm compatibility evidence adds
+  the source-confirmed facts these rest on, with links to the
+  `slurm-25-11-9-1` tag, the attended read-only `--preflight` check of a
+  partition list and what its exit 0 does not show, and lists the
+  multi-partition, estimate, summary and GPU-type behavior as not observed
+  live.
+
 ## 0.7.1
 
 Intentional compatibility changes. Controllers that key on exit codes see more
