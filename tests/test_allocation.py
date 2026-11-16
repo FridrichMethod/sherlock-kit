@@ -607,6 +607,7 @@ class AllocationCLI(unittest.TestCase):
             "CPU_MNF:AMD",
             "GPU_BRD:TESLA",
             *skus,
+            "NO_GPU_SKU:OTHER",  # the prefix counts only at the start of a feature
             "GPU_MEM:40GB",
             "CLASS:SH3_G4TF64",
         ])
@@ -710,6 +711,8 @@ class AllocationCLI(unittest.TestCase):
             (["GPU_SKU:A30"], "gpu:4", "gres/gpu=4,gres/gpu:a30_Mig=4", ["A30"], True),
             # A MIG type that only Gres names: the site tracks no typed GPU TRES.
             (["GPU_SKU:A100_SXM4"], "gpu:a100_3g.20gb:2", "gres/gpu=2", ["A100_SXM4"], True),
+            # A slice profile is a MIG marker in any letter case.
+            (["GPU_SKU:A100_SXM4"], "gpu:4G.5GB:1", "gres/gpu=1", ["A100_SXM4"], True),
         ])
 
     def test_two_gpu_types_across_gres_and_cfgtres_are_ambiguous(self):
@@ -730,6 +733,14 @@ class AllocationCLI(unittest.TestCase):
                 True,
             ),
             (["GPU_SKU:A100_PCIE"], "gpu:a100:2,gpu:v100:2", "gres/gpu=4", ["A100_PCIE"], True),
+            # A typed element may carry no_consume before its count.
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:a100:no_consume:2,gpu:v100:2",
+                "gres/gpu=4",
+                ["A100_PCIE"],
+                True,
+            ),
             (
                 ["GPU_SKU:A100_PCIE"],
                 "gpu:a100:4(S:0,1)",
@@ -768,6 +779,14 @@ class AllocationCLI(unittest.TestCase):
             (
                 ["GPU_SKU:V100_PCIE"],
                 "vgpu:t4:8,gpu:4",
+                "gres/gpu=4,gres/gpu:v100=4",
+                ["V100_PCIE"],
+                False,
+            ),
+            # no_consume on an untyped element is no type either.
+            (
+                ["GPU_SKU:V100_PCIE"],
+                "gpu:no_consume:4",
                 "gres/gpu=4,gres/gpu:v100=4",
                 ["V100_PCIE"],
                 False,

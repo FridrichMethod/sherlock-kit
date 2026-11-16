@@ -29,11 +29,12 @@ IDENTITIES: dict[str, Callable[[dict[str, str]], tuple[str | None, ...]]] = {
     "node": lambda f: (f.get("NodeName"),),
 }
 GPU_SKU = "GPU_SKU:"
-# A Gres element is gpu:TYPE:COUNT or untyped gpu:COUNT, with an optional (S:...) socket suffix
-# that may hold a comma; CfgTRES names a typed GPU TRES as gres/gpu:TYPE=N.
-GRES_GPU_TYPE = re.compile(r"(?:^|,)gpu:([^:,()]+):[0-9]")
+# A Gres element is gpu:TYPE:COUNT or untyped gpu:COUNT, each with an optional no_consume word
+# before the count and an optional (S:...) socket suffix that may hold a comma; CfgTRES names a
+# typed GPU TRES as gres/gpu:TYPE=N.
+GRES_GPU_TYPE = re.compile(r"(?:^|,)gpu:(?!no_consume:)([^:,()]+):(?:no_consume:)?[0-9]")
 TRES_GPU_TYPE = re.compile(r"(?:^|,)gres/gpu:([^=,]+)=[0-9]")
-MIG = re.compile(r"(?i:mig)|[0-9]+g\.[0-9]+gb")
+MIG = re.compile(r"mig|[0-9]+g\.[0-9]+gb", re.IGNORECASE)
 SKU_MEANING = (
     "GPU_SKU features of the allocated node as Slurm lists them: candidates for the GPU model,"
     " not the device allocated to this job. A node label does not identify the device on a"

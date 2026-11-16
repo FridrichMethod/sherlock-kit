@@ -150,6 +150,17 @@ class ParsingTests(unittest.TestCase):
         self.assertEqual(
             ran(acct=[a("1", cpus=2), a("2", "PENDING", elapsed=0, cpus=0)]), [True, False]
         )
+        # AllocCPUS decides, not the elapsed time; a pending row never shows a start.
+        self.assertEqual(
+            ran(
+                acct=[
+                    a("6", "RUNNING", elapsed=0, cpus=2),
+                    a("7", "CANCELLED", elapsed=60, cpus=0),
+                    a("8", "PENDING", elapsed=0, cpus=2),
+                ]
+            ),
+            [True, False, False],
+        )
         self.assertEqual(ran(acct=[a("3_[0-1]", "RUNNING", cpus=2)]), [False])  # an aggregate
         states = ("RUNNING", "COMPLETING", "PENDING", "COMPLETED", "CANCELLED")
         self.assertEqual(

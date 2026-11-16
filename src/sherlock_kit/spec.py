@@ -271,7 +271,8 @@ def _incompatible(message: str) -> ShkError:
         EXIT_REFUSED,
         "partitions_incompatible",
         message,
-        hint="submit incompatible partitions separately, one task each",
+        hint="submit incompatible partitions separately, as different work: "
+        "never queue the same work twice",
     )
 
 
@@ -327,7 +328,7 @@ def partition_request(
 def resources(
     args: argparse.Namespace,
     profile: partitions.Profile,
-    members: tuple[partitions.Profile, ...] | None = None,
+    members: tuple[partitions.Profile, ...] | None,
 ) -> Resources:
     """Checked resources; GPUs and requeue follow the profile (requeue defaults to it).
 

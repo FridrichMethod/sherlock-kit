@@ -67,6 +67,7 @@ class SetChecks(Case):
                 )
                 self.assertFalse(built.profile.borrowed)
                 self.assertEqual(built.profile.courtesy, "")
+                self.assertTrue(built.profile.gpus_allowed)
         gpu_argv = [
             *HEAD,
             f"--partition={GPU_SET}",
@@ -96,7 +97,9 @@ class SetChecks(Case):
         self.assertEqual(
             list(built.document["resources"]["partitions"]), ["normal", "bigmem", "service"]
         )
-        self.assertEqual(self.build(partition="normal,gpu").document["resources"]["gpus"], 0)
+        mixed = self.build(partition="normal,gpu")
+        self.assertEqual(mixed.document["resources"]["gpus"], 0)
+        self.assertFalse(mixed.profile.gpus_allowed)
 
     def test_an_unlisted_member_is_the_existing_unknown_partition_refusal(self):
         for value, first in (
@@ -616,6 +619,14 @@ class Resolution(unittest.TestCase):
         ):
             with self.subTest(newest=newest):
                 self.assertNotIn("ran_on", self.current(rows, newest=newest))
+
+    def test_a_pending_accounting_row_is_never_a_start(self):
+        # A pending row has not started, whatever CPU count accounting keeps on it.
+        newest = slurm.SpecFile(300, 1, ("gpu", "bioe"))
+        pending = a("300", "PENDING", restart=1, elapsed=0, cpus=4, partition="gpu")
+        self.assertEqual(self.current(acct=[pending], newest=newest)["ran_on"], [])
+        started = a("300", "RUNNING", restart=1, elapsed=0, cpus=4, partition="gpu")
+        self.assertEqual(self.current(acct=[started], newest=newest)["ran_on"], ["gpu"])
 
     def test_a_started_row_that_still_shows_the_list_adds_no_ran_on_partition(self):
         current = self.current(

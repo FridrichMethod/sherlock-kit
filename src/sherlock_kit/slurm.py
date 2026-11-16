@@ -130,20 +130,26 @@ class Read:
     spec_files: dict[str, int]  # name -> spec files in its run directory (SHK_S)
 
 
-def _task_count(text: str) -> int | None:
+def _frozen_resources(text: str) -> dict[str, Any]:
+    """The resources of a frozen spec file; {} for a truncated, hand-edited or foreign one."""
     try:
-        array = json.loads(text)["resources"]["array"]
+        found = json.loads(text)["resources"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    return found if isinstance(found, dict) else {}
+
+
+def _task_count(resources: dict[str, Any]) -> int | None:
+    try:
+        array = resources["array"]
         return 1 if array is None else int(array["count"])
-    except (ValueError, KeyError, TypeError):  # truncated, hand-edited or foreign file
+    except (ValueError, KeyError, TypeError):
         return None
 
 
-def _partitions(text: str) -> tuple[str, ...]:
+def _partitions(resources: dict[str, Any]) -> tuple[str, ...]:
     """The members frozen in resources.partitions by a submission to a set, else ()."""
-    try:
-        listed = json.loads(text)["resources"]["partitions"]
-    except (ValueError, KeyError, TypeError):  # a single partition, or an unreadable file
-        return ()
+    listed = resources.get("partitions")
     if isinstance(listed, list) and all(isinstance(name, str) for name in listed):
         return tuple(listed)
     return ()
@@ -185,7 +191,8 @@ def parse_read(stdout: str, tools: Iterable[str]) -> Read:
     specs = {}
     for name, found in _grouped(records["SHK_SPEC"]).items():
         job, _, text = found[-1].partition("|")
-        specs[name] = SpecFile(int(job), _task_count(text), _partitions(text))
+        resources = _frozen_resources(text)
+        specs[name] = SpecFile(int(job), _task_count(resources), _partitions(resources))
     counts = {name: int(found[-1]) for name, found in _grouped(records["SHK_S"]).items()}
     return Read(
         user=facts.get("SHK_USER"),
@@ -252,7 +259,8 @@ class Row:
     submitted: str  # sacct only, UTC
     started: str
     ended: str
-    ran: bool = False  # an explicit row that shows a start: AllocCPUS above 0, or squeue RUNNING
+    # An explicit row that shows a start: sacct AllocCPUS above 0 unless PENDING, or squeue RUNNING.
+    ran: bool = False
 
 
 def _row(fields: dict[str, str]) -> Row:
@@ -265,7 +273,9 @@ def _row(fields: dict[str, str]) -> Row:
     )
     explicit = indices is None
     state = words[0].rstrip("+")
-    shows_start = cpus > 0 if "Restarts" in fields else state in RUNNING
+    # sacct: a pending row has not started, whatever TRES it keeps; squeue: a running state.
+    acct_start = cpus > 0 and state != "PENDING"
+    shows_start = acct_start if "Restarts" in fields else state in RUNNING
     return Row(
         key=(
             "Restarts" in fields,
@@ -350,7 +360,7 @@ class Job:
     cost: dict[str, Any]
     partition_texts: frozenset[str]  # the partition text of every row: one name or a list
 
-    def current(self, anomalies: list[str], ran_on: list[str] | None = None) -> dict[str, Any]:
+    def current(self, anomalies: list[str], ran_on: list[str] | None) -> dict[str, Any]:
         """The status entry of the newest job of a name; ran_on follows partition when given."""
         entry: dict[str, Any] = {"job_id": self.job_id, "partition": self.partition}
         if ran_on is not None:
@@ -495,9 +505,7 @@ def _ran_on(rows: list[Row]) -> list[str]:
     Only a started row whose partition text is one name counts: Slurm prints the partition a
     job runs in once it started, and a list (or one arbitrary member) while it has not.
     """
-    return sorted({
-        row.partition for row in rows if row.ran and row.partition and "," not in row.partition
-    })
+    return sorted({row.partition for row in rows if row.ran and "," not in row.partition})
 
 
 def _non_preemptible(text: str, profiles: Mapping[str, partitions.Profile]) -> bool:
