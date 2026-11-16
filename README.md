@@ -227,7 +227,11 @@ repeat all hard requirements in both. These are explicit arguments, not TOML def
   as given. So `gpu,bioe,stat` combines, while `owners`, `btrippe` and `possu`
   stay alone; by the same profile fields `normal`, `bigmem` and `service` are
   in the class too. A set states that the job may run on any member, and every
-  member's courtesy text applies wherever it starts. The argv holds
+  member's courtesy text applies wherever it starts. Sherlock's acceptance of
+  a partition list, and what `squeue` and `sacct` print for one, are
+  source-confirmed and
+  [not observed live](docs/validation/observed-slurm.md#not-observed-live):
+  try the list with `--preflight` first. The argv holds
   `--partition=<value as given>` in the usual position and is otherwise that
   of a single partition: the job name does not depend on the partition, and the read, the
   live and duplicate guards, `singleton`, the staging and the exit 5 handling
@@ -483,10 +487,12 @@ of the name, for that job id, as for the task count) and its
 `resources.partitions` lists several partitions: that is `status --task` with a
 run directory, plain or with `--details`. Its value is the sorted distinct
 partitions of the job's started rows, that is every partition a task or attempt
-started in, and `[]` until a task has started. A started row is an explicit row
+started in, and `[]` while no row shows a start. A started row is an explicit row
 (not an `N_[...]` aggregate) whose partition text is one name and which shows a
-start: an accounting row with AllocCPUS above 0, or a queue row in a state that
-status counts as running. Without a spec (`--all`, `--name`, `--job-id`) there
+start: an accounting row that is not `PENDING` and has AllocCPUS above 0, or a
+queue row in a state that status counts as running. A job that finished before
+accounting recorded its start also reads `[]` on that read, with `cost.final`
+false. Without a spec (`--all`, `--name`, `--job-id`) there
 is no `ran_on`: `current.partition` is the first row's text, which for an array
 whose tasks started on different members names only one of them or the pending
 list. The per-row partition of `status --details`, or `--task`, tells where

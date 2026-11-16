@@ -25,7 +25,7 @@ notes below.
 - `shk status --task` reports `current.ran_on`, directly after
   `current.partition`, for a job whose frozen spec lists several partitions:
   the sorted distinct partitions in which a task or attempt started, `[]`
-  until one has. `current.partition` stays Slurm's text of the job's first
+  while no row shows a start. `current.partition` stays Slurm's text of the job's first
   row. `unknown_partition` and `unexpected_preemption` judge the members of a
   comma list; `--all`, `--name` and `--job-id` read no spec and print no
   `ran_on`.
@@ -80,6 +80,8 @@ Compatibility notes:
 - A job submitted with a partition list must be read with 0.8.0 or newer:
   older versions report `unknown_partition` (exit 6) while Slurm prints the
   list.
+- The help texts of `submit --partition`, `resources`, `pull` and
+  `pull --validate` changed; help is text, not a reply.
 
 Guidance:
 
@@ -99,8 +101,8 @@ Guidance:
   partitions by queue, setup, compute and recovery time and the pointer to
   department and `owners` partitions leave that section; the skill and the
   campaign guide carry them. The section leaves the borrowed budgets to the
-  partition profiles, and the ban on padding and the discovery of limits and
-  features to the Jobs section of `workstation.md` and the Slurm section of
+  partition profiles, and the ban on padding and tiny jobs and the discovery
+  of limits and features to the Jobs section of `workstation.md` and the Slurm section of
   `cluster.md`, which state them. `workstation.md` adds one sentence on compatible
   partition lists under Jobs. `cluster.md` drops the sentence that `shk push`
   and `pull` refuse there, which `shk` still enforces (exit 3) and the skill

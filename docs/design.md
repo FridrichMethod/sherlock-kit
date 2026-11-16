@@ -287,10 +287,11 @@ attempts. Whether a job used a list is therefore decided by its frozen spec:
 spec of that job (the newest spec file of the name, for that job id, as for the
 task count) and its `resources.partitions` lists several partitions, that is
 `status --task` with a run directory, plain or with `--details`. Its value is
-the sorted distinct partitions of the job's started rows, `[]` until a task has
-started. A started row is an explicit row (not an `N_[...]` aggregate) whose
-partition text is one name and which shows a start: an accounting row with
-AllocCPUS above 0, or a queue row whose state is in `slurm.RUNNING`
+the sorted distinct partitions of the job's started rows, `[]` while no row
+shows a start. A started row is an explicit row (not an `N_[...]` aggregate) whose
+partition text is one name and which shows a start: an accounting row that is
+not `PENDING` and has AllocCPUS above 0, or a queue row whose state is in
+`slurm.RUNNING`
 (`RUNNING`, `COMPLETING`, `SUSPENDED`, `CONFIGURING`, `STAGE_OUT`,
 `SIGNALING`, `RESIZING`, `STOPPED`). Without a spec (`--all`, `--name`,
 `--job-id`) there is no `ran_on`: `current.partition` is the first row's text,
@@ -511,7 +512,14 @@ The pull contract is payload-only:
 - `current.ran_on` needs the frozen spec: it appears only for `status --task`,
   for a job whose spec lists several partitions. `--all`, `--name` and
   `--job-id` read no spec and show Slurm's partition text alone, so they
-  cannot tell that a started job was submitted to a list.
+  cannot tell that a started job was submitted to a list. A job that finished
+  before accounting recorded its start reads `[]` on that read, with
+  `cost.final` false: a finished queue row alone cannot be told from one
+  cancelled while pending.
+- Sherlock's acceptance of a partition list, and what `squeue` and `sacct`
+  print for one, are source-confirmed and
+  [not observed live](validation/observed-slurm.md#not-observed-live); a
+  `--preflight` of the list is the first check.
 - A job submitted with a partition list must be read with a kit version that
   knows lists: an older one reports `unknown_partition` (exit 6) while Slurm
   prints the list.

@@ -121,13 +121,14 @@ Its `queried_at` equals the reply's. Each entry of `nodes` belongs to the
 - `ambiguous` is true when there are several candidates, when the node's
   `Gres` and `CfgTRES` together name more than one GPU type, or when a
   candidate or a GPU type carries a MIG marker; false otherwise. GPU types are
-  the TYPE of every match of `(?:^|,)gpu:(?P<type>[^:,()]+):[0-9]` searched
-  over the whole `Gres` value, without splitting it on commas (a socket suffix
-  such as `(S:0,2)` may hold one; an untyped `gpu:4` and another GRES such as
-  `vgpu` give none), and the TYPE of every `CfgTRES` entry `gres/gpu:TYPE=N`;
-  names compare case-insensitively. A MIG marker is the letters `mig` in any
-  case, or a slice profile `[0-9]+g\.[0-9]+gb`, inside a candidate or a GPU
-  type (`A30_MIG-1g.6gb`, `a100_3g.20gb`).
+  the TYPE of every `gpu:TYPE:COUNT` element of `Gres`, where the word
+  `no_consume` may stand before the count; the whole value is searched without
+  splitting it on commas (a socket suffix such as `(S:0,2)` may hold one; an
+  untyped `gpu:4` or `gpu:no_consume:4` and another GRES such as `vgpu` give
+  none), and the TYPE of every `CfgTRES` entry `gres/gpu:TYPE=N`; names compare
+  case-insensitively. A MIG marker is the letters `mig`, or a slice profile
+  `[0-9]+g\.[0-9]+gb`, in any letter case, inside a candidate or a GPU type
+  (`A30_MIG-1g.6gb`, `a100_3g.20gb`).
 - `source` holds `ActiveFeatures`, `Gres` and `CfgTRES` as the node record
   prints them, each null when absent.
 

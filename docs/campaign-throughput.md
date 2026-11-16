@@ -85,7 +85,7 @@ chooses a request, lowers a floor or ranks GPU models:
   takes batch jobs, none is borrowed, all share one `requeue` and one
   `preemptible` value, and with `--gpus` above 0 every member allows GPUs.
   `owners`, `btrippe` and `possu` stay alone; submit incompatible partitions
-  separately. A repeated `--partition` flag is not a list: the last one wins.
+  separately, for different work, never the same unit twice. A repeated `--partition` flag is not a list: the last one wins.
   `shk status --task` adds `current.ran_on` for such a job, the sorted
   partitions in which a task or attempt started. Without a spec (`--all`,
   `--name`, `--job-id`) there is no `ran_on`: `current.partition` is the first

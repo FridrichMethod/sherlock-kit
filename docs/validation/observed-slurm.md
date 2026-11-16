@@ -325,9 +325,10 @@ shk submit --task multi-partition-probe --script job.sh --partition gpu,bioe,sta
 ```
 
 It runs `sbatch --test-only`: no job, no run directory, no GPU work. Exit 0
-means that the request passed Slurm's creation-time checks with the list and
-that at least one member, the one named in `estimate.partition`, can run it;
-exit 3 keeps Slurm's reason in `preflight.stderr`. Exit 0 does not show that a
+means that the request passed Slurm's creation-time checks with the list; with
+a parsed estimate, the partition named in `estimate.partition` can run it, and
+that is a member or the Alternate of a drained or inactive member; exit 3
+keeps Slurm's reason in `preflight.stderr`. Exit 0 does not show that a
 real multi-partition `sbatch` is accepted, nor that each member is usable: the
 will-run branch returns before the per-partition node-selection test of a real
 submission
@@ -366,9 +367,9 @@ The following are confirmed in the official Slurm source at tag
 ### Test-only estimates
 
 `shk submit --preflight` reads its `estimate` from the line that
-`sbatch --test-only` prints. Confirmed in the source at the same tag, not
-observed live apart from the one line recorded under
-[Submission](#submission):
+`sbatch --test-only` prints. Confirmed in the source at the same tag, or
+inferred from it where a statement says so, and not observed live apart from
+the one line recorded under [Submission](#submission):
 
 - One `info()` call prints it, with the format
   `"Job %u to start at %s%s%s a using %u processors on nodes %s in partition %s"`
@@ -392,7 +393,7 @@ observed live apart from the one line recorded under
   `sbatch` process and the format `%FT%T`, with no zone
   ([`src/common/parse_time.c`, lines 657-672 and 713-717](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/parse_time.c#L657)).
   It is the local time of the process that ran `sbatch`, the login node; the
-  controller sends a raw time value. Other texts are `Unknown` (time 0 or
+  controller sends a raw time value (inferred). Other texts are `Unknown` (time 0 or
   infinite), `None` and a run of `#`
   ([lines 666-669 and 690-697](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/parse_time.c#L666)),
   and whatever `SLURM_TIME_FORMAT` selects in the environment of `sbatch`
@@ -420,7 +421,7 @@ observed live apart from the one line recorded under
   so the name can be one the caller did not list.
 - The start is the select plugin's estimate from running jobs plus a rough
   queue-delay term for pending jobs of no lower priority in the same
-  partition, never earlier than the controller's current time
+  partition, never earlier than the controller's current time (inferred)
   ([`src/slurmctld/job_scheduler.c`, lines 4537-4541](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4537)
   and
   [4590-4593](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L4590)).
@@ -533,7 +534,8 @@ where a statement says so, and not observed live:
 
 `shk resources --summary` reads the `GPU_SKU:` and `CLASS:` features of node
 records, and `shk allocation` reports `gpu_sku_candidates` from them. Confirmed
-in the source at the same tag, not observed live:
+in the source at the same tag, or inferred from it where a statement says so,
+and not observed live:
 
 - `scontrol show node NAME --oneliner` prints, in this order,
   `AvailableFeatures`, `ActiveFeatures`, `Gres`, later `CfgTRES` and
@@ -548,11 +550,12 @@ in the source at the same tag, not observed live:
   `CfgTRES` has `gres/gpu=N` for all GPUs and `gres/gpu:TYPE=N` only for the
   typed TRES the site tracks
   ([`src/slurmctld/controller.c`, lines 3198-3223](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/controller.c#L3198)),
-  so it need not list every type.
+  so it need not list every type (inferred).
 - Node features are free administrator strings with no link to GRES types in
-  the source
+  the source (inferred from the files that were read)
   ([`doc/man/man5/slurm.conf.5`, lines 7118-7130](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/man/man5/slurm.conf.5#L7118)).
-  `GPU_SKU:<model>` and `CLASS:<class>` are Sherlock conventions.
+  `GPU_SKU:<model>` is a Sherlock convention, and `CLASS:` is the prefix that
+  `--by class` assumes.
 - A MIG device is an ordinary `gpu` GRES whose type is optional and
   site-chosen; the documented example type is `a100_3g.20gb`
   ([`doc/html/gres.shtml`, lines 654-669](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/gres.shtml#L654)).
