@@ -19,7 +19,7 @@ import re
 import secrets
 import shlex
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -114,6 +114,7 @@ class SpecFile:
 
     job_id: int
     task_count: int | None  # 1 for a single job; None when the file cannot be read
+    partitions: tuple[str, ...] = ()  # resources.partitions of a set; () otherwise
 
 
 @dataclass(frozen=True)
@@ -135,6 +136,17 @@ def _task_count(text: str) -> int | None:
         return 1 if array is None else int(array["count"])
     except (ValueError, KeyError, TypeError):  # truncated, hand-edited or foreign file
         return None
+
+
+def _partitions(text: str) -> tuple[str, ...]:
+    """The members frozen in resources.partitions by a submission to a set, else ()."""
+    try:
+        listed = json.loads(text)["resources"]["partitions"]
+    except (ValueError, KeyError, TypeError):  # a single partition, or an unreadable file
+        return ()
+    if isinstance(listed, list) and all(isinstance(name, str) for name in listed):
+        return tuple(listed)
+    return ()
 
 
 def _grouped(records: list[str]) -> dict[str, list[str]]:
@@ -173,7 +185,7 @@ def parse_read(stdout: str, tools: Iterable[str]) -> Read:
     specs = {}
     for name, found in _grouped(records["SHK_SPEC"]).items():
         job, _, text = found[-1].partition("|")
-        specs[name] = SpecFile(int(job), _task_count(text))
+        specs[name] = SpecFile(int(job), _task_count(text), _partitions(text))
     counts = {name: int(found[-1]) for name, found in _grouped(records["SHK_S"]).items()}
     return Read(
         user=facts.get("SHK_USER"),
@@ -240,6 +252,7 @@ class Row:
     submitted: str  # sacct only, UTC
     started: str
     ended: str
+    ran: bool = False  # an explicit row that shows a start: AllocCPUS above 0, or squeue RUNNING
 
 
 def _row(fields: dict[str, str]) -> Row:
@@ -251,6 +264,8 @@ def _row(fields: dict[str, str]) -> Row:
         int(fields.get(key, "0")) for key in ("ElapsedRaw", "AllocCPUS", "Restarts")
     )
     explicit = indices is None
+    state = words[0].rstrip("+")
+    shows_start = cpus > 0 if "Restarts" in fields else state in RUNNING
     return Row(
         key=(
             "Restarts" in fields,
@@ -263,7 +278,7 @@ def _row(fields: dict[str, str]) -> Row:
         from_acct="Restarts" in fields,
         explicit=explicit,
         array="_" in fields["JobID"],
-        state=words[0].rstrip("+"),
+        state=state,
         partition=fields["Partition"],
         restart=restart,
         cpu_seconds=elapsed * cpus if explicit else 0,
@@ -272,6 +287,7 @@ def _row(fields: dict[str, str]) -> Row:
         submitted=fields.get("Submit", ""),
         started=fields.get("Start", ""),
         ended=fields.get("End", ""),
+        ran=explicit and shows_start,
     )
 
 
@@ -332,12 +348,15 @@ class Job:
     max_restart: int
     interrupted: frozenset[str]  # partitions of preempted, requeued or restarted attempts
     cost: dict[str, Any]
+    partition_texts: frozenset[str]  # the partition text of every row: one name or a list
 
-    def current(self, anomalies: list[str]) -> dict[str, Any]:
-        """The status entry of the newest job of a name."""
+    def current(self, anomalies: list[str], ran_on: list[str] | None = None) -> dict[str, Any]:
+        """The status entry of the newest job of a name; ran_on follows partition when given."""
+        entry: dict[str, Any] = {"job_id": self.job_id, "partition": self.partition}
+        if ran_on is not None:
+            entry["ran_on"] = ran_on
         return {
-            "job_id": self.job_id,
-            "partition": self.partition,
+            **entry,
             "array": self.array,
             "tasks": self.tasks,
             "exit_codes": self.exit_codes,
@@ -466,13 +485,32 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
             "gpu_seconds": sum(row.gpu_seconds for row in rows),
             "final": not tasks["incomplete_history"] and _final(deciding, accounted, count),
         },
+        partition_texts=frozenset(row.partition for row in rows),
     )
 
 
-def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> list[str]:
-    """invariants: shk names, where one name is one task on a packaged partition.
+def _ran_on(rows: list[Row]) -> list[str]:
+    """Sorted distinct partitions that a task or attempt of one job started in.
 
-    A preemption or restart is unexpected on a packaged non-preemptible partition it happened on.
+    Only a started row whose partition text is one name counts: Slurm prints the partition a
+    job runs in once it started, and a list (or one arbitrary member) while it has not.
+    """
+    return sorted({
+        row.partition for row in rows if row.ran and row.partition and "," not in row.partition
+    })
+
+
+def _non_preemptible(text: str, profiles: Mapping[str, partitions.Profile]) -> bool:
+    """A partition text, one name or a list, whose members are all packaged and not preemptible."""
+    return all(name in profiles and not profiles[name].preemptible for name in text.split(","))
+
+
+def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> list[str]:
+    """invariants: shk names, where one name is one task on packaged partitions.
+
+    A preemption or restart is unexpected on the packaged non-preemptible partition it happened
+    on; a list counts when all its members are (a compatible set shares one value). A partition
+    list on any row of the job is split on "," before the lookup.
     """
     profiles = partitions.profiles()
     found = []
@@ -480,9 +518,11 @@ def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> li
         found.append("duplicate_live")
     if malformed:
         found.append("malformed_rows")
-    if invariants and job.partition not in profiles:
+    if invariants and any(
+        name not in profiles for text in job.partition_texts for name in text.split(",")
+    ):
         found.append("unknown_partition")
-    if any(name in profiles and not profiles[name].preemptible for name in job.interrupted):
+    if any(_non_preemptible(text, profiles) for text in job.interrupted):
         found.append("unexpected_preemption")
     return sorted(found)
 
@@ -498,6 +538,7 @@ def resolve_name(
 
     The largest base id is the current attempt, and any live job makes the name live.
     Without invariants (a legacy name) duplicate_live and unknown_partition do not apply.
+    current.ran_on appears only when newest_spec is the current job's and froze a partition set.
     """
     jobs: dict[int, list[Row]] = {}
     for row in {row.key: row for row in rows}.values():
@@ -509,11 +550,16 @@ def resolve_name(
     for base, found in sorted(jobs.items()):
         known = newest_spec.task_count if newest_spec and newest_spec.job_id == base else None
         summaries[base] = _job(found, known)
-    newest = summaries[max(summaries)]
+    base = max(summaries)
+    newest = summaries[base]
     live = [job for job in summaries.values() if job.state == "live"]
+    in_set = (
+        newest_spec is not None and newest_spec.job_id == base and len(newest_spec.partitions) > 1
+    )
+    ran_on = _ran_on(jobs[base]) if in_set else None
     return {
         "state": "live" if live else newest.state,
-        "current": newest.current(_anomalies(newest, len(live), malformed, invariants)),
+        "current": newest.current(_anomalies(newest, len(live), malformed, invariants), ran_on),
         "history": [job.history() for job in summaries.values() if job is not newest],
         "spec_files": spec_files,
     }
