@@ -592,7 +592,7 @@ class SummaryFlows(Flow):
                 "cn03",
                 "MIXED",
                 "gpu",
-                "GPU_SKU:V100_PCIE,GPU_SKU:A100_SXM4,CLASS:SH3_G8",
+                "GPU_SKU:V100_PCIE,GPU_SKU:A100_SXM4,CLASS:SH3_G8,CLASS:SH3_G4FP64",
                 gpus=8,
                 used=2,
             ),
@@ -630,10 +630,13 @@ class SummaryFlows(Flow):
         self.assertNotIn("by_sku", union)
         entries = union["by_class"]
         self.assertEqual(
-            entry_keys(entries, "class"), [[], ["SH3_CBASE"], ["SH3_G4FP64"], ["SH3_G8"]]
+            entry_keys(entries, "class"),
+            [[], ["SH3_CBASE"], ["SH3_G4FP64"], ["SH3_G4FP64", "SH3_G8"]],
         )
         self.assertEqual([entry["nodes"] for entry in entries], [2, 1, 3, 1])  # cn05, cn07
+        # cn03's eight GPUs are only in its two-value entry, in no single-class entry.
         self.assertEqual(entries[2]["gpus"], {"configured": 12, "allocated": 1, "free": 7})
+        self.assertEqual(entries[3]["gpus"], {"configured": 8, "allocated": 2, "free": 6})
         self.assert_split(union, entries, "class")
 
     def test_by_keeps_the_order_given_without_repeats_and_follows_the_group_fields(self):
