@@ -1,12 +1,14 @@
 """Offline submit checks, the job name, the sbatch argv and the frozen job spec.
 
 Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
-partition or one without batch jobs (dev), GPUs or requeue its profile forbids, a denylisted
+partition or one without batch jobs (dev), an incompatible partition set
+(partitions_incompatible), GPUs or requeue its profile forbids, a denylisted
 option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
 borrowed partition without --courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad
-memory, time, array, --after-ok or --submission-token grammar, --hold without a token, an
-unreadable script or one over 1 MiB, an empty --task or --campaign, or an empty or
-whitespace-only --constraint, --prefer or --signal (the usual cause is an unset shell variable).
+memory, time, array, --after-ok or --submission-token grammar, a partition named twice in a set,
+--hold without a token, an unreadable script or one over 1 MiB, an empty --task or --campaign,
+or an empty or whitespace-only --constraint, --prefer or --signal (the usual cause is an unset
+shell variable). --partition P,P is a set of compatible partitions, passed to sbatch as given.
 A given --constraint, --prefer or --signal goes to sbatch unchanged (Slurm checks it); an omitted
 one adds nothing to the argv. Each --after-ok value must be one job id, since shk joins them into
 its own --dependency string, where a ',' or '?' would add clauses.
@@ -82,6 +84,7 @@ class Resources:
     signal: str | None
     after_ok: tuple[str, ...]
     prefer: str | None = None
+    partitions: tuple[str, ...] | None = None  # the members of a set; None for one partition
 
 
 @dataclass(frozen=True)
@@ -93,7 +96,7 @@ class Spec:
     argv: list[str]
     script: bytes
     sha256: str
-    profile: partitions.Profile
+    profile: partitions.Profile  # of a set: its combined profile, named by the value as given
     document: dict[str, Any]
 
     @property
@@ -251,14 +254,97 @@ def after_ok(values: list[str]) -> tuple[str, ...]:
     return tuple(values)
 
 
-def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resources:
-    """Checked resources; GPUs and requeue follow the profile (requeue defaults to it)."""
+def _batch(profile: partitions.Profile) -> partitions.Profile:
+    """The profile of a partition that accepts batch jobs; exit 3 batch_not_allowed otherwise."""
+    if not profile.batch:
+        raise ShkError(
+            EXIT_REFUSED,
+            "batch_not_allowed",
+            f"partition {profile.name} does not accept batch jobs: {profile.courtesy}",
+            hint="use sh_dev or salloc there, or submit to a batch partition such as normal",
+        )
+    return profile
+
+
+def _incompatible(message: str) -> ShkError:
+    return ShkError(
+        EXIT_REFUSED,
+        "partitions_incompatible",
+        message,
+        hint="submit incompatible partitions separately, one task each",
+    )
+
+
+def _yes(flag: bool) -> str:
+    return "yes" if flag else "no"
+
+
+def partition_request(
+    value: str,
+) -> tuple[partitions.Profile, tuple[partitions.Profile, ...] | None]:
+    """The profile of --partition and, for a set P,P, its member profiles in the order given.
+
+    A value without a comma is one listed partition that accepts batch jobs. A set is checked in
+    this order: every member listed (the empty one included), none repeated, each accepting
+    batch jobs, then compatible: no borrowed member and one common preemptible and requeue
+    value. Its combined profile is named by the value as given, has those common values,
+    gpus_allowed only when every member allows GPUs, and no courtesy text.
+    """
+    if "," not in value:
+        return _batch(partitions.profile(value)), None
+    names = value.split(",")
+    members = tuple(partitions.profile(name) for name in names)
+    repeated = [name for index, name in enumerate(names) if name in names[:index]]
+    if repeated:
+        raise _invalid(f"--partition {value!r} names {repeated[0]} twice: give each member once")
+    for member in members:
+        _batch(member)
+    borrowed = [member.name for member in members if member.borrowed]
+    if borrowed:
+        raise _incompatible(
+            f"partitions {value} include the borrowed {', '.join(borrowed)}: a borrowed "
+            "partition is submitted alone, after shk occupancy and with --courtesy-ack"
+        )
+    if len({(member.preemptible, member.requeue) for member in members}) > 1:
+        flags = ", ".join(
+            f"{member.name} (preemptible={_yes(member.preemptible)}, "
+            f"requeue={_yes(member.requeue)})"
+            for member in members
+        )
+        raise _incompatible(f"partitions {value} differ in preemptible or requeue: {flags}")
+    combined = partitions.Profile(
+        name=value,
+        preemptible=members[0].preemptible,
+        requeue=members[0].requeue,
+        borrowed=False,
+        gpus_allowed=all(member.gpus_allowed for member in members),
+        batch=True,
+        courtesy="",
+    )
+    return combined, members
+
+
+def resources(
+    args: argparse.Namespace,
+    profile: partitions.Profile,
+    members: tuple[partitions.Profile, ...] | None = None,
+) -> Resources:
+    """Checked resources; GPUs and requeue follow the profile (requeue defaults to it).
+
+    For a set, profile is its combined profile and members are its partitions: GPUs need every
+    member to allow them, and the members are frozen as partitions.
+    """
     if args.cpus < 1 or args.tasks < 1 or args.gpus < 0:
         raise _invalid("--cpus and --tasks must be at least 1 and --gpus at least 0")
-    if args.gpus and not profile.gpus_allowed:
-        raise ShkError(
-            EXIT_REFUSED, "gpus_not_allowed", f"partition {profile.name} does not allow GPUs"
+    without = [found.name for found in members or (profile,) if not found.gpus_allowed]
+    if args.gpus and without:
+        named = ", ".join(without)
+        message = (
+            f"partition {named} does not allow GPUs"
+            if len(without) == 1
+            else f"partitions {named} do not allow GPUs"
         )
+        raise ShkError(EXIT_REFUSED, "gpus_not_allowed", message)
     requeue = profile.requeue if args.requeue is None else args.requeue
     if requeue and not profile.requeue:
         raise ShkError(
@@ -277,6 +363,7 @@ def resources(args: argparse.Namespace, profile: partitions.Profile) -> Resource
         prefer=optional_text("prefer", args.prefer),
         signal=optional_text("signal", args.signal),
         after_ok=after_ok(args.after_ok),
+        partitions=None if members is None else tuple(member.name for member in members),
     )
 
 
@@ -358,15 +445,8 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     project = config.project
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
-    profile = partitions.profile(args.partition)
-    if not profile.batch:
-        raise ShkError(
-            EXIT_REFUSED,
-            "batch_not_allowed",
-            f"partition {profile.name} does not accept batch jobs: {profile.courtesy}",
-            hint="use sh_dev or salloc there, or submit to a batch partition such as normal",
-        )
-    wanted = resources(args, profile)
+    profile, members = partition_request(args.partition)
+    wanted = resources(args, profile, members)
     thread_budget = getattr(args, "cpu_thread_budget", None)
     thread_policy = cpu_threads.policy(
         config.cpu_thread_budget if thread_budget is None else thread_budget, wanted.cpus
@@ -406,6 +486,8 @@ def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spe
     }
     if wanted.prefer is None:
         del document["resources"]["prefer"]
+    if wanted.partitions is None:
+        del document["resources"]["partitions"]
     if thread_policy is not None:
         document["cpu_thread_policy"] = thread_policy
     return Spec(name, run, argv, script, digest, profile, document)

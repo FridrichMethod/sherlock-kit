@@ -4,7 +4,9 @@
 tests/fakes/bin/<tool> runs ``$FAKE_SLURM_PYTHON -B fakeslurm.py <tool> ARGS``. The state
 at $FAKE_SLURM_STATE is {"next", "jobs", "calls"}. A job is {"id", "name", "user",
 "partition", "array": null | {"count", "throttle"}, "tasks": [[restart, ...] per index],
-"submit", "last", "script"}; a restart is {"state", "elapsed", "cpus", "tres", "exit"}.
+"submit", "last", "script"}; a restart is {"state", "elapsed", "cpus", "tres", "exit"} plus,
+optionally, the "partition" it started in. "partition" of a job is the text Slurm holds: one
+name or a comma-separated list. A restart has started once its elapsed time is above 0.
 
 Live Sherlock facts modelled: array tasks that never started (throttle-held) have no sacct
 row and show in squeue as one N_[a-b%t] PENDING aggregate (reason JobArrayTaskLimit, which
@@ -12,7 +14,15 @@ shk does not read); started tasks are N_k rows with distinct JobIDRaw, except th
 to leave the array, which keeps N (query.sh does not ask for JobIDRaw, so the quirk cannot
 confuse the parser); --duplicates prints one row per restart (Restarts 0, 1, ...); squeue
 -t all forgets a finished job after MinJobAge; sbatch --parsable prints N or N;cluster;
-slurmdbd refuses sacct windows wider than 31 days.
+slurmdbd refuses sacct windows wider than 31 days; an accounting row that never started has
+AllocCPUS 0.
+
+Partition lists, as the Slurm 25.11 source states them (not observed live): squeue and sacct
+print the list while an attempt is pending and the partition it started in once it started
+(here the restart's "partition", else the first listed); an attempt that left pending without
+starting (cancelled while pending) prints one member in squeue and the list in sacct; after a
+requeue the new attempt holds the list again and the earlier one keeps its run partition; the
+pending N_[...] remainder of an array keeps the list.
 
 Knobs: FAKE_SBATCH_RC (nothing queued, exit that code; FAKE_SBATCH_ERR, when set, replaces
 its stderr text and may be empty), FAKE_SBATCH_UNPARSED, FAKE_SBATCH_SUBMIT_THEN_FAIL (queued,
@@ -151,6 +161,14 @@ class FakeSlurm:
 
         _locked(self.path, change)
 
+    def relist(self, job_id, partition):
+        """Replace the partition text Slurm holds for a job (Slurm can drop or replace members)."""
+
+        def change(state):
+            _job(state, job_id)["partition"] = partition
+
+        _locked(self.path, change)
+
 
 def _options(args):
     """{"u": ..., "name": ..., ...} from the -X VALUE and --long[=VALUE] options the scripts use."""
@@ -190,6 +208,20 @@ def _ranges(indices):
 
 def _never_started(task):
     return len(task) == 1 and task[0]["state"] == "PENDING"
+
+
+def _started(restart):
+    return restart["elapsed"] > 0
+
+
+def _partition(job, restart, queue):
+    """The partition text Slurm prints for one attempt in squeue (queue) or sacct."""
+    first = job["partition"].split(",")[0]
+    if _started(restart):
+        return restart.get("partition", first)
+    if queue and restart["state"] not in LIVE:  # left pending without starting
+        return first
+    return job["partition"]
 
 
 def _queue_entries(job):
@@ -240,7 +272,8 @@ def squeue(state, options):
             if "O" in options:
                 lines.append(_format_columns(job, top, options["O"]))
                 continue
-            values = {"i": job_id, "T": top["state"], "P": job["partition"], "j": job["name"]}
+            partition = _partition(job, top, queue=True)
+            values = {"i": job_id, "T": top["state"], "P": partition, "j": job["name"]}
             lines.append(_format_fields(options["o"], values))
     return "".join(line + "\n" for line in lines), "", 0
 
@@ -258,9 +291,9 @@ def _acct_rows(job, duplicates):
                 "JobIDRaw": str(job["id"] if keeps_id else job["id"] + 1 + index),
                 "JobName": job["name"],
                 "State": entry["state"],
-                "Partition": job["partition"],
+                "Partition": _partition(job, entry, queue=False),
                 "ElapsedRaw": str(entry["elapsed"]),
-                "AllocCPUS": str(entry["cpus"]),
+                "AllocCPUS": str(entry["cpus"] if _started(entry) else 0),
                 "AllocTRES": entry["tres"],
                 "Submit": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(job["submit"])),
                 "Restarts": str(restart),
