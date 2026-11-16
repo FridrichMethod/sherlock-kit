@@ -5,6 +5,10 @@ users and hosts): jobs carry AllocTRES and no Gres; steps print NodeList, Nodes 
 CPUs, Tasks and TRES; an array element's step is StepId=<ArrayJobId>_<ArrayTaskId>.<step>;
 the meta physical id (JobId == ArrayJobId) also returns every sibling record; listpids takes
 and prints only physical ids; pidinfo prints the physical job id and its remaining time.
+GPU node records print AvailableFeatures and ActiveFeatures before Gres and CfgTRES, as 25.11
+does; their GPU_SKU features follow Sherlock's labels, while the Gres and CfgTRES GPU types
+follow the Slurm source grammar (gpu:TYPE:COUNT with an optional (S:...) suffix, gpu:COUNT,
+gres/gpu:TYPE=N) and are not observed live.
 """
 
 import hashlib
@@ -51,6 +55,11 @@ if reply is None:
     sys.exit(1)
 print("\\n".join(reply) if action == "hosts" else reply)
 """
+MEANING = (
+    "GPU_SKU features of the allocated node as Slurm lists them: candidates for the GPU model, "
+    "not the device allocated to this job. A node label does not identify the device on a "
+    "mixed or MIG node, and never replaces the job's own device UUID record."
+)
 
 
 class AllocationCLI(unittest.TestCase):
@@ -166,6 +175,9 @@ class AllocationCLI(unittest.TestCase):
             "CPUAlloc": "20",
             "CPUEfctv": "20",
             "CPUTot": "20",
+            # Absent unless a test sets them; 25.11 prints both right before Gres.
+            "AvailableFeatures": None,
+            "ActiveFeatures": None,
             "Gres": "(null)",
             "NodeAddr": self.host,
             "Version": "25.11.8",
@@ -586,6 +598,250 @@ class AllocationCLI(unittest.TestCase):
             ):
                 allocation.allocation(args, Context(executor="local", cwd=self.tmp))
             self.assertEqual(raised.exception.token, "allocation_invalid")
+
+    @staticmethod
+    def gpu_features(*skus):
+        """Sherlock-style ActiveFeatures of a GPU node with these GPU_SKU features."""
+        return ",".join([
+            "IB:HDR",
+            "CPU_MNF:AMD",
+            "GPU_BRD:TESLA",
+            *skus,
+            "GPU_MEM:40GB",
+            "CLASS:SH3_G4TF64",
+        ])
+
+    def gpu_node(self, skus, gres, tres="gres/gpu=4"):
+        """The local node as a GPU node: GPU_SKU features, Gres and the GPU part of CfgTRES."""
+        features = self.gpu_features(*skus)
+        return self.node_record(
+            AvailableFeatures=features,
+            ActiveFeatures=features,
+            Gres=gres,
+            CfgTRES=f"cpu=20,mem=125G,billing=51,{tres}",
+            AllocTRES="cpu=20,mem=81248M,gres/gpu=2",
+        )
+
+    def sku_entry(self, node):
+        """The one gpu_sku_candidates entry for this local node; no key in it contains alloc."""
+        self.data["node"][self.host] = node
+        code, report = self.run_cli()
+        self.assertEqual(code, 0, report)
+        found = report["gpu_sku_candidates"]
+        self.assertEqual([key for key in keys(found) if "alloc" in key.lower()], [])
+        (entry,) = found["nodes"]
+        return entry
+
+    def assertCandidates(self, cases):
+        for skus, gres, tres, candidates, ambiguous in cases:
+            with self.subTest(skus=skus, gres=gres, tres=tres):
+                entry = self.sku_entry(self.gpu_node(skus, gres, tres))
+                self.assertEqual((entry["candidates"], entry["ambiguous"]), (candidates, ambiguous))
+
+    def test_gpu_sku_candidates_come_last_with_one_unambiguous_candidate(self):
+        tres = "gres/gpu=4,gres/gpu:a100=4"
+        self.data["node"][self.host] = self.gpu_node(
+            ["GPU_SKU:A100_SXM4"], "gpu:a100:4(S:0-1)", tres
+        )
+        code, report = self.run_cli()
+        self.assertEqual(code, 0, report)
+        # The candidates come from the node record already read: no extra scheduler call.
+        self.assertEqual(
+            self.calls(),
+            [
+                ["show", "job", "44", "--oneliner"],
+                ["show", "hostnames", self.host],
+                ["show", "node", self.host, "--oneliner"],
+                ["pidinfo", str(self.worker.pid)],
+            ],
+        )
+        self.assertEqual(list(report)[-2:], ["membership_evidence", "gpu_sku_candidates"])
+        found = report["gpu_sku_candidates"]
+        self.assertEqual(list(found), ["queried_at", "meaning", "nodes"])
+        self.assertEqual(found["queried_at"], report["queried_at"])
+        self.assertEqual(found["meaning"], MEANING)
+        self.assertEqual([key for key in keys(found) if "alloc" in key.lower()], [])
+        (entry,) = found["nodes"]
+        self.assertEqual(list(entry), ["node", "candidates", "ambiguous", "source"])
+        self.assertEqual(list(entry["source"]), ["ActiveFeatures", "Gres", "CfgTRES"])
+        self.assertEqual(
+            entry,
+            {
+                "node": self.host,
+                "candidates": ["A100_SXM4"],
+                "ambiguous": False,
+                "source": {
+                    "ActiveFeatures": self.gpu_features("GPU_SKU:A100_SXM4"),
+                    "Gres": "gpu:a100:4(S:0-1)",
+                    "CfgTRES": f"cpu=20,mem=125G,billing=51,{tres}",
+                },
+            },
+        )
+
+    def test_several_distinct_sku_features_are_ambiguous_and_none_is_an_empty_list(self):
+        self.assertCandidates([
+            (
+                ["GPU_SKU:V100_PCIE", "GPU_SKU:A100_PCIE"],
+                "gpu:4",
+                "gres/gpu=4",
+                ["A100_PCIE", "V100_PCIE"],
+                True,
+            ),
+            ([], "gpu:4", "gres/gpu=4", [], False),
+            (["GPU_SKU:A40", "GPU_SKU:A40"], "gpu:4", "gres/gpu=4", ["A40"], False),
+        ])
+        # Only the active features count, not a feature the node merely makes available.
+        node = self.gpu_node(["GPU_SKU:A40"], "gpu:4").replace(
+            "AvailableFeatures=", "AvailableFeatures=GPU_SKU:L40S,", 1
+        )
+        entry = self.sku_entry(node)
+        self.assertEqual((entry["candidates"], entry["ambiguous"]), (["A40"], False))
+
+    def test_a_mig_marker_in_a_candidate_or_gpu_type_is_ambiguous(self):
+        self.assertCandidates([
+            (["GPU_SKU:A30_MIG-1g.6gb"], "gpu:4", "gres/gpu=4", ["A30_MIG-1g.6gb"], True),
+            (
+                ["GPU_SKU:A100_SXM4"],
+                "gpu:a100_3g.20gb:2",
+                "gres/gpu=2,gres/gpu:a100_3g.20gb=2",
+                ["A100_SXM4"],
+                True,
+            ),
+            (["GPU_SKU:A30"], "gpu:4", "gres/gpu=4,gres/gpu:a30_Mig=4", ["A30"], True),
+            # A MIG type that only Gres names: the site tracks no typed GPU TRES.
+            (["GPU_SKU:A100_SXM4"], "gpu:a100_3g.20gb:2", "gres/gpu=2", ["A100_SXM4"], True),
+        ])
+
+    def test_two_gpu_types_across_gres_and_cfgtres_are_ambiguous(self):
+        self.assertCandidates([
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:a100:2(S:0,2),gpu:v100:2(S:1,3)",
+                "gres/gpu=4,gres/gpu:a100=2,gres/gpu:v100=2",
+                ["A100_PCIE"],
+                True,
+            ),
+            # The same Gres with an untyped CfgTRES: only the Gres parser can see both types.
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:a100:2(S:0,2),gpu:v100:2(S:1,3)",
+                "gres/gpu=4",
+                ["A100_PCIE"],
+                True,
+            ),
+            (["GPU_SKU:A100_PCIE"], "gpu:a100:2,gpu:v100:2", "gres/gpu=4", ["A100_PCIE"], True),
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:a100:4(S:0,1)",
+                "gres/gpu=4,gres/gpu:v100=4",
+                ["A100_PCIE"],
+                True,
+            ),
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:4",
+                "gres/gpu=4,gres/gpu:a100=2,gres/gpu:v100=2",
+                ["A100_PCIE"],
+                True,
+            ),
+            # One type in two spellings, and a comma inside the socket suffix names no type.
+            (
+                ["GPU_SKU:A100_PCIE"],
+                "gpu:a100:4(S:0,1)",
+                "gres/gpu=4,gres/gpu:A100=4",
+                ["A100_PCIE"],
+                False,
+            ),
+        ])
+
+    def test_untyped_other_and_null_gres_name_no_gpu_type(self):
+        self.assertCandidates([
+            (["GPU_SKU:V100_PCIE"], "gpu:4", "gres/gpu=4,gres/gpu:v100=4", ["V100_PCIE"], False),
+            # An untyped Gres with a socket suffix: the count and suffix name no type.
+            (
+                ["GPU_SKU:V100_PCIE"],
+                "gpu:4(S:0-1)",
+                "gres/gpu=4,gres/gpu:v100=4",
+                ["V100_PCIE"],
+                False,
+            ),
+            (
+                ["GPU_SKU:V100_PCIE"],
+                "vgpu:t4:8,gpu:4",
+                "gres/gpu=4,gres/gpu:v100=4",
+                ["V100_PCIE"],
+                False,
+            ),
+        ])
+        null = {"ActiveFeatures": "(null)", "Gres": "(null)", "CfgTRES": "(null)"}
+        entry = self.sku_entry(self.node_record(AvailableFeatures="(null)", **null))
+        self.assertEqual(
+            entry, {"node": self.host, "candidates": [], "ambiguous": False, "source": null}
+        )
+
+    def test_cpu_only_job_on_a_gpu_less_node_still_gets_an_entry(self):
+        self.data["job"]["44"] = self.job_record("44", AllocTRES="cpu=4,mem=2G,node=1,billing=4")
+        features = "IB:EDR,CPU_MNF:INTEL,NO_GPU"
+        entry = self.sku_entry(
+            self.node_record(AvailableFeatures=features, ActiveFeatures=features)
+        )
+        source = {
+            "ActiveFeatures": features,
+            "Gres": "(null)",
+            "CfgTRES": "cpu=20,mem=125G,billing=51",
+        }
+        self.assertEqual(
+            entry, {"node": self.host, "candidates": [], "ambiguous": False, "source": source}
+        )
+        # A field the node record does not print is null, not an empty text.
+        entry = self.sku_entry(self.node_record(Gres=None, CfgTRES=None))
+        self.assertEqual(entry["source"], {"ActiveFeatures": None, "Gres": None, "CfgTRES": None})
+        self.assertEqual((entry["candidates"], entry["ambiguous"]), ([], False))
+
+    def test_each_node_record_gets_one_entry_in_the_same_order(self):
+        self.data["node"][self.host] = self.gpu_node(["GPU_SKU:L40S"], "gpu:l40s:4")
+        code, report = self.run_cli("--step-id", "0")
+        self.assertEqual(code, 0, report)
+        self.assertEqual(
+            [entry["node"] for entry in report["gpu_sku_candidates"]["nodes"]],
+            [record["node"] for record in report["node_records"]],
+        )
+        self.assertEqual(report["gpu_sku_candidates"]["nodes"][0]["candidates"], ["L40S"])
+
+    def test_node_records_keep_their_0_7_1_shape_unchanged(self):
+        # Unchanged behavior, green on v0.7.1 too: the candidates add no field to node_records.
+        from sherlock_kit import allocation
+
+        node = self.gpu_node(
+            ["GPU_SKU:H100_SXM5"], "gpu:h100:4(S:0-1)", "gres/gpu=4,gres/gpu:h100=4"
+        )
+        self.data["node"][self.host] = node
+        code, report = self.run_cli()
+        self.assertEqual(code, 0, report)
+        self.assertEqual(
+            report["node_records"],
+            [
+                {
+                    "node": self.host,
+                    "fields": allocation.strict_fields(node),
+                    "raw": node,
+                    "sha256": hashlib.sha256(node.encode()).hexdigest(),
+                }
+            ],
+        )
+        self.assertEqual(list(report["node_records"][0]), ["node", "fields", "raw", "sha256"])
+        self.assertEqual(report["node_records"][0]["fields"]["Gres"], "gpu:h100:4(S:0-1)")
+
+
+def keys(value):
+    """Every dictionary key inside a JSON value, at any depth."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from keys(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from keys(item)
 
 
 def allocation_namespace(pid):

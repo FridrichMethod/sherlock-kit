@@ -28,6 +28,17 @@ IDENTITIES: dict[str, Callable[[dict[str, str]], tuple[str | None, ...]]] = {
     "step": lambda f: (f.get("StepId"),),
     "node": lambda f: (f.get("NodeName"),),
 }
+GPU_SKU = "GPU_SKU:"
+# A Gres element is gpu:TYPE:COUNT or untyped gpu:COUNT, with an optional (S:...) socket suffix
+# that may hold a comma; CfgTRES names a typed GPU TRES as gres/gpu:TYPE=N.
+GRES_GPU_TYPE = re.compile(r"(?:^|,)gpu:([^:,()]+):[0-9]")
+TRES_GPU_TYPE = re.compile(r"(?:^|,)gres/gpu:([^=,]+)=[0-9]")
+MIG = re.compile(r"(?i:mig)|[0-9]+g\.[0-9]+gb")
+SKU_MEANING = (
+    "GPU_SKU features of the allocated node as Slurm lists them: candidates for the GPU model,"
+    " not the device allocated to this job. A node label does not identify the device on a"
+    " mixed or MIG node, and never replaces the job's own device UUID record."
+)
 
 
 def invalid(message: str) -> ShkError:
@@ -342,6 +353,35 @@ def node_record(collector: Collector, node: str) -> dict[str, Any]:
     return {"node": node, "fields": fields, **hashed(raw)}
 
 
+def gpu_types(fields: dict[str, str]) -> list[str]:
+    """The GPU types that a node record's Gres and CfgTRES name, as printed."""
+    return [
+        *GRES_GPU_TYPE.findall(fields.get("Gres", "")),
+        *TRES_GPU_TYPE.findall(fields.get("CfgTRES", "")),
+    ]
+
+
+def sku_candidates(record: dict[str, Any]) -> dict[str, Any]:
+    """A node's GPU_SKU features as candidates for its GPU model, never the job's device."""
+    fields = record["fields"]
+    features = fields.get("ActiveFeatures", "").split(",")
+    candidates = sorted({
+        value.removeprefix(GPU_SKU) for value in features if value.startswith(GPU_SKU)
+    })
+    types = gpu_types(fields)
+    ambiguous = (
+        len(candidates) > 1
+        or len({name.lower() for name in types}) > 1
+        or any(MIG.search(name) for name in candidates + types)
+    )
+    return {
+        "node": record["node"],
+        "candidates": candidates,
+        "ambiguous": ambiguous,
+        "source": {key: fields.get(key) for key in ("ActiveFeatures", "Gres", "CfgTRES")},
+    }
+
+
 def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
     """Produce complete evidence only after stable own worker identity is verified."""
     if ctx.executor().kind != "local":
@@ -375,11 +415,12 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
     # Start ticks, not the affinity a worker may change, establish that it is the same process.
     if process_identity(pid) != before:
         raise invalid("worker process identity changed during evidence collection")
+    queried_at = ctx.clock().isoformat().replace("+00:00", "Z")
     return Outcome({
         "action": "allocation",
         "executor": "local",
         "complete": True,
-        "queried_at": ctx.clock().isoformat().replace("+00:00", "Z"),
+        "queried_at": queried_at,
         "process": {
             "pid": pid,
             "uid": before[0],
@@ -394,4 +435,9 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
         "node_records": nodes,
         "hostlists": collector.hostlists,
         "membership_evidence": evidence,
+        "gpu_sku_candidates": {
+            "queried_at": queried_at,
+            "meaning": SKU_MEANING,
+            "nodes": [sku_candidates(record) for record in nodes],
+        },
     })
