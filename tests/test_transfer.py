@@ -34,6 +34,18 @@ VALIDATORS = {
     "ok": "import pathlib, sys; sys.exit(0 if pathlib.Path(sys.argv[1], 'result.json').is_file() else 3)",
     "bad": "import sys; print('science says no', file=sys.stderr); sys.exit(3)",
     "writes": "import pathlib, sys; (pathlib.Path(sys.argv[1]) / 'report.txt').write_text('fine')",
+    # Writes what it finds in the stage to seen.json in its working directory, the project root,
+    # which is outside the stage.
+    "records": (
+        "import json, pathlib, sys; stage = pathlib.Path(sys.argv[1]); "
+        "found = [p.relative_to(stage).as_posix() + '/' * p.is_dir() for p in stage.rglob('*')]; "
+        "pathlib.Path('seen.json').write_text(json.dumps([str(stage), sorted(found)]))"
+    ),
+    "litters": (
+        "import pathlib, sys; stage = pathlib.Path(sys.argv[1]); "
+        "(stage / 'report.txt').write_text('fine'); (stage / 'SHA256SUMS').write_text('mine'); "
+        "(stage / 'nested' / 'made').mkdir()"
+    ),
 }
 CONTROL_CHECK = ["-O", "check", "-oBatchMode=yes", "sherlock-plain"]
 DTN_CHECK = ["-O", "check", "-oBatchMode=yes", "sherlock-dtn"]
@@ -45,6 +57,11 @@ def sha(text: str) -> str:
 
 def tree(root: Path) -> dict:
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def entries(root: Path) -> list:
+    """Every path below root, sorted, a directory with a trailing "/"."""
+    return sorted(p.relative_to(root).as_posix() + "/" * p.is_dir() for p in root.rglob("*"))
 
 
 class StubControl:
@@ -466,6 +483,71 @@ class PullTests(TransferCase):
         self.assert_refused(result, 1, "transfer_failed")
         self.assertEqual(result[1]["message"], "rsync timed out after 7 s")
         self.assertEqual(lists, [{b"nested/log.txt", b"result.json", b"with space", b""}] * 2)
+
+
+# The stage and LOCAL hold exactly the listed files and the directories their paths imply.
+PAYLOAD = [
+    "deep/",
+    "deep/er/",
+    "deep/er/file",
+    "nested/",
+    "nested/log.txt",
+    "result.json",
+    "with space",
+]
+
+
+class PayloadOnlyTests(TransferCase):
+    """What the real pull stages and promotes; every test here pins the 0.7.1 behavior, unchanged."""
+
+    def setUp(self):
+        super().setUp()
+        for name in ("empty", "nested/hollow", "deep/er/emptier"):
+            (self.remote / name).mkdir(parents=True)
+        self.write(self.remote, {"deep/er/file": "f\n", "inner/SHA256SUMS": f"{H}  x\n"})
+        self.sums()  # lists the four regular files: no SHA256SUMS, no directory
+
+    def seen(self) -> list:
+        """[stage path, entries of the stage] as the "records" validator found them."""
+        return json.loads((self.project / "seen.json").read_text())
+
+    def test_the_validator_sees_and_local_gets_only_the_listed_files(self):
+        code, body = self.pull("--validate", "records")
+        self.assertEqual((code, body["action"], body["files"]), (0, "pulled", 4), body)
+        self.assertEqual(self.seen(), [str(self.stage), PAYLOAD])
+        self.assertEqual(entries(self.dest), PAYLOAD)  # no SHA256SUMS, no empty directory
+        digest = hashlib.sha256((self.remote / "SHA256SUMS").read_bytes()).hexdigest()
+        self.assertEqual(self.receipt()["manifest_sha256"], digest)
+
+    def test_a_resumed_stage_is_pruned_to_the_listed_files_before_the_validator(self):
+        self.write(
+            self.stage,
+            {"SHA256SUMS": "old", "inner/SHA256SUMS": "old", "result.json": "outdated\n"},
+        )
+        for name in ("empty", "nested/hollow"):
+            (self.stage / name).mkdir(parents=True)
+        code, body = self.pull("--validate", "records")
+        self.assertEqual((code, body["action"]), (0, "pulled"), body)
+        self.assertEqual(self.seen(), [str(self.stage), PAYLOAD])
+        self.assertEqual(entries(self.dest), PAYLOAD)
+
+    def test_whatever_the_validator_writes_is_promoted_unverified(self):
+        # The reason for the read-only rule: nothing checks the stage after the validator, so its
+        # file, its SHA256SUMS and its empty directory all become part of LOCAL.
+        code, body = self.pull("--validate", "litters")
+        self.assertEqual(
+            (code, body["action"], body["files"], body["bytes"]), (0, "pulled", 4, 22), body
+        )
+        self.assertEqual(
+            entries(self.dest), sorted([*PAYLOAD, "SHA256SUMS", "nested/made/", "report.txt"])
+        )
+        self.assertEqual(
+            ((self.dest / "report.txt").read_text(), (self.dest / "SHA256SUMS").read_text()),
+            ("fine", "mine"),
+        )
+        self.assertEqual(self.receipt()["files"], 4)
+        code, body = self.pull("--validate", "litters")
+        self.assertEqual((code, body["action"]), (0, "already_present"), body)
 
 
 LEGACY_PULL = (
