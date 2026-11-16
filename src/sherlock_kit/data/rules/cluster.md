@@ -11,7 +11,7 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 - Use variables: `$HOME`/`$GROUP_HOME` for code/environments/small files, no intensive I/O; `$SCRATCH`/`$GROUP_SCRATCH` for job I/O, 90-day purge/no backup; `$L_SCRATCH_JOB` for temp data that fits, export before job end; `$OAK` for durable data. Check `sh_quota`.
 - Never extend scratch lifetime by touch/rewrite/copy-over or refresh helpers, even once: account termination. Keep durable copies in GROUP_HOME/Oak or the workstation.
 - Own/explicitly shared directories only; readable/group paths alone grant no access. Scope scans, never roots. Low/Moderate Risk only; ask when unclear.
-- Large internal copies need jobs. DTN/Globus transfers start outside; no ssh to DTN here. `shk push`/`pull` refuse here.
+- Large internal copies need jobs. DTN/Globus transfers start outside; no ssh to DTN here.
 
 ### Login nodes and software
 - Light editing/reads/preparation/submitting/polling only; sustained CPU/memory, GPUs, intensive I/O or many processes need jobs. No model/web/API serving; listeners only for own interactive tools. No unattended processes, keep-alive/restart loops, continuous sync or processes outliving the session. No `claude agents`/`--bg` or restarting terminated supervisors; site cleanup is expected.
@@ -19,17 +19,17 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 - Use `#!/bin/bash -l`, `ml purge`, explicit modules/environment; record versions. Set `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` unless `--cpu-thread-budget` overrides it. No probing/changing system configuration/infrastructure (except reading `/etc/agents/`) or slow shell startup. Find CLIs/Python with `ml spider`.
 
 ### Slurm
-- Use local `shk submit`/`shk status`/`shk cancel`, explicit resources/profiles, no `--account`/`--exclude`. Discover limits/features. Checks at least 60 s apart; no watch/polling loops; prefer dependencies. Jobs need 10 useful minutes, no padding. Diagnose failures; no pending duplicates. Exit 5: obey `next` time; exit 6: stop/report.
+- Use local `shk submit`/`status`/`cancel`, explicit resources/profiles, no `--account`/`--exclude`. Discover limits/features. Checks at least 60 s apart; no watch/polling loops; prefer dependencies. Jobs need 10 useful minutes, no padding. Diagnose failures; no pending duplicates. Exit 5: obey `next` time; exit 6: stop/report.
 - Bounded deterministic controllers may use `shk --executor local` inside allocations; never schedule future agent/LLM sessions (scrontab, begin, self-resubmission). Never submit GPU work while developing/testing sherlock-kit.
 - Cancel exact verified own jobs through Slurm and explain why. Ask for unclear scope/ownership, unrelated/broad cancellation or material irreversible loss. Never cancel all user jobs or kill compute processes instead; inspect only own processes.
 
 ### GPU scheduling defaults
-- Site/task rules take precedence. Discover features/limits; use broad compatible OR `--constraint`, with new GPUs. Avoid RTX_2080Ti/Pascal. Narrow for memory/architecture/kernel/dtype needs; honor MIG slice/partition rules.
-- `--prefer`: one tier of compatible discovered L40/A/H and future B/newer GPUs, then other allowed GPUs. Slurm tries it independently before constraint: both must encode every hard requirement. OR is not ordered.
-- SKU is provenance, not a new cohort/control by default. Keep inputs/model/seeds/numerical/environment protocol fixed; no bitwise guarantee. Check compatibility as needed, not every model/SKU pair.
-- Choose authorized partitions by queue/setup/compute/recovery time; consider departments/owners. Keep borrowed budgets. Owners needs proven same-command resume: durable checkpoints, verified completed units, attempt logs/bounded retries. Requeue restarts the script, not application state.
-- Queue ready independent work concurrently; refill; report ready/unsubmitted, queued, running and blockers. Favor longer useful resumable bundles to amortize queues/setup; honor limits/courtesy/budgets. No padding or tiny jobs.
-- Batch status/resources checks at least 60 s apart as needed; snapshots do not guarantee starts. Adapt future requests to evidence. Transfer units only after terminal/nonrestartable proof or durable revocation across requeue; pending/unknown units stay owned. No duplicate queue racing.
+- Site/task rules take precedence. Use broad OR `--constraint` of discovered compatible GPUs, new ones too; avoid RTX_2080Ti/Pascal; narrow for architecture needs and only evidenced memory/kernel/dtype needs; obey MIG slice/partition rules.
+- Soft `--prefer`: one tier of compatible discovered L40/A/H and future B/newer GPUs, purely by compute capability, so cross-project; Slurm tries it independently, then the fallback constraint: both must encode every hard requirement. OR is not ordered.
+- GPU models are scientifically equivalent, may mix or change on requeue; SKU is provenance, by default no reason for new controls/cohorts/reruns/per-model qualification. Fix inputs/model/seeds/numerical/environment protocol; no bitwise guarantee; check compatibility as needed.
+- Prioritize the earliest start; reduce oversized CPU requests. Owners needs proven same-command resume: durable checkpoints, verified completed units, attempt logs/bounded retries; requeue restarts the script, not app state.
+- Queue/refill ready independent work concurrently; report ready/unsubmitted/queued/running/blocked. Favor longer useful resumable bundles over tiny jobs to amortize queues/setup, within limits/courtesy/budgets.
+- Batch status/resources checks as needed, at least 60 s apart; snapshots guarantee no start; adapt future requests to evidence. Move units only on terminal/nonrestartable proof or durable revocation across requeue; pending/unknown ones stay owned; no duplicate queue racing.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).

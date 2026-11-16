@@ -10,7 +10,7 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 - Other exit 4: run `shk doctor`, retry once after about a minute, then stop and report.
 
 ### Jobs
-- Submit with `shk submit`, not raw ssh sbatch. Explicit partition, CPUs, memory and walltime are toolkit choices; the site requires walltime. Request GPUs with `--gpus` on an allowed partition. No `--account` or `--exclude`; use `--constraint` and discovered features/limits.
+- Submit with `shk submit`, not raw ssh sbatch. Explicit partition, CPUs, memory and walltime are toolkit choices; the site requires walltime. Compatible partitions join in one value, e.g. `gpu,bioe,stat`; owners/borrowed stay alone. Request GPUs with `--gpus` on an allowed partition. No `--account` or `--exclude`; use `--constraint` and discovered features/limits.
 - Names derive from project/campaign/task. Submit refuses live duplicates and finished tasks without `--resubmit "reason"`; diagnose failures first. Exit 5 means unknown outcome: use the reply's `next` command no earlier than its time, never resubmit blind. Exit 6: stop and report the anomaly.
 - Batch status reads at least 60 s apart (`shk status --all`); no watch or polling loops. Prefer `--after-ok` dependencies. Each job/array task does at least 10 useful minutes, ideally 30; never pad with sleep.
 - Cancel exact verified own jobs within an authorized task and explain why. Ask for unclear ownership/scope, unrelated or broad cancellation, or material irreversible loss. Never cancel all user jobs.
@@ -23,12 +23,12 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 - Low/Moderate Risk only; ask when unclear. Access only own/explicitly shared files and jobs, and only own processes; visibility is not authorization.
 
 ### GPU scheduling defaults
-- Site/task rules take precedence. Discover features/limits; use broad compatible OR `--constraint`, with new GPUs. Avoid RTX_2080Ti/Pascal. Narrow for memory/architecture/kernel/dtype needs; honor MIG slice/partition rules.
-- `--prefer`: one tier of compatible discovered L40/A/H and future B/newer GPUs, then other allowed GPUs. Slurm tries it independently before constraint: both must encode every hard requirement. OR is not ordered.
-- SKU is provenance, not a new cohort/control by default. Keep inputs/model/seeds/numerical/environment protocol fixed; no bitwise guarantee. Check compatibility as needed, not every model/SKU pair.
-- Choose authorized partitions by queue/setup/compute/recovery time; consider departments/owners. Keep borrowed budgets. Owners needs proven same-command resume: durable checkpoints, verified completed units, attempt logs/bounded retries. Requeue restarts the script, not application state.
-- Queue ready independent work concurrently; refill; report ready/unsubmitted, queued, running and blockers. Favor longer useful resumable bundles to amortize queues/setup; honor limits/courtesy/budgets. No padding or tiny jobs.
-- Batch status/resources checks at least 60 s apart as needed; snapshots do not guarantee starts. Adapt future requests to evidence. Transfer units only after terminal/nonrestartable proof or durable revocation across requeue; pending/unknown units stay owned. No duplicate queue racing.
+- Site/task rules take precedence. Use broad OR `--constraint` of discovered compatible GPUs, new ones too; avoid RTX_2080Ti/Pascal; narrow for architecture needs and only evidenced memory/kernel/dtype needs; obey MIG slice/partition rules.
+- Soft `--prefer`: one tier of compatible discovered L40/A/H and future B/newer GPUs, purely by compute capability, so cross-project; Slurm tries it independently, then the fallback constraint: both must encode every hard requirement. OR is not ordered.
+- GPU models are scientifically equivalent, may mix or change on requeue; SKU is provenance, by default no reason for new controls/cohorts/reruns/per-model qualification. Fix inputs/model/seeds/numerical/environment protocol; no bitwise guarantee; check compatibility as needed.
+- Prioritize the earliest start; reduce oversized CPU requests. Owners needs proven same-command resume: durable checkpoints, verified completed units, attempt logs/bounded retries; requeue restarts the script, not app state.
+- Queue/refill ready independent work concurrently; report ready/unsubmitted/queued/running/blocked. Favor longer useful resumable bundles over tiny jobs to amortize queues/setup, within limits/courtesy/budgets.
+- Batch status/resources checks as needed, at least 60 s apart; snapshots guarantee no start; adapt future requests to evidence. Move units only on terminal/nonrestartable proof or durable revocation across requeue; pending/unknown ones stay owned; no duplicate queue racing.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
