@@ -456,7 +456,8 @@ observed live apart from the one line recorded under
 ### Jobs submitted to several partitions
 
 `shk submit --partition P,P...` and the partition rules of `shk status`
-depend on these. Confirmed in the source at the same tag, not observed live:
+depend on these. Confirmed in the source at the same tag, or inferred from it
+where a statement says so, and not observed live:
 
 - `sbatch` documents a comma-separated partition list: the job starts in the
   partition offering the earliest initiation
@@ -486,22 +487,24 @@ depend on these. Confirmed in the source at the same tag, not observed live:
   ([`src/plugins/accounting_storage/mysql/as_mysql_job.c`, lines 738-740 and 809-811](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/accounting_storage/mysql/as_mysql_job.c#L738);
   sent from
   [`src/slurmctld/node_scheduler.c`, lines 3037-3043](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/node_scheduler.c#L3037)),
-  asynchronously, and `sacct` prints the stored value
+  asynchronously (inferred), and `sacct` prints the stored value
   ([`src/sacct/print.c`, lines 1554-1558](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/sacct/print.c#L1554)).
   After a requeue the new row holds the list again, and the row of the
-  earlier run keeps its run partition
-  ([`src/slurmctld/job_mgr.c`, lines 16916-16921](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L16916)).
+  earlier run keeps its run partition (inferred from
+  [`src/slurmctld/job_mgr.c`, lines 16916-16921](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L16916)).
 - A job that leaves pending without ever running (cancelled while pending)
   shows one partition name in `squeue` and `scontrol`, whichever the
-  controller's pointer last named, not where anything ran (the same lines
-  10611-10614 of `job_mgr.c`), while its accounting row keeps the list: the
-  completion message sends no partition
+  controller's pointer last named, not where anything ran (inferred from the
+  same lines 10611-10614 of `job_mgr.c`), while its accounting row keeps the
+  list: the completion message sends no partition
   ([`accounting_storage_slurmdbd.c`, from line 2763](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/accounting_storage/slurmdbd/accounting_storage_slurmdbd.c#L2763)).
 - Array tasks are independent records, and different tasks of one array can
   start in different partitions
   ([`src/slurmctld/job_mgr.c`, lines 3596-3597](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L3596);
   [`src/slurmctld/job_scheduler.c`, lines 1561-1575](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L1561)).
-  The pending remainder keeps the list.
+  The pending remainder keeps the list (inferred: the split happens before
+  the started task's string is rebuilt,
+  [`src/slurmctld/node_scheduler.c`, lines 2929-2935](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/node_scheduler.c#L2929)).
 - `--dependency=singleton` compares user id and job name only
   ([`src/slurmctld/job_scheduler.c`, lines 258-279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L258)).
   Requeue, job name and array handling have no partition-list rule.
