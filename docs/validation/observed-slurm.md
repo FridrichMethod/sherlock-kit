@@ -507,7 +507,8 @@ where a statement says so, and not observed live:
   [`src/slurmctld/node_scheduler.c`, lines 2929-2935](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/node_scheduler.c#L2929)).
 - `--dependency=singleton` compares user id and job name only
   ([`src/slurmctld/job_scheduler.c`, lines 258-279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L258)).
-  Requeue, job name and array handling have no partition-list rule.
+  Requeue, job name and array handling have no partition-list rule
+  (inferred: none was found on the multi-partition paths that were read).
 - Submission checks: one nonexistent name rejects the whole submission
   (`Invalid partition name specified`,
   [`src/slurmctld/job_mgr.c`, lines 6611-6626](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6611)).
