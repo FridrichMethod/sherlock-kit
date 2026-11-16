@@ -645,6 +645,16 @@ class AllocationCLI(unittest.TestCase):
         )
         code, report = self.run_cli()
         self.assertEqual(code, 0, report)
+        # The candidates come from the node record already read: no extra scheduler call.
+        self.assertEqual(
+            self.calls(),
+            [
+                ["show", "job", "44", "--oneliner"],
+                ["show", "hostnames", self.host],
+                ["show", "node", self.host, "--oneliner"],
+                ["pidinfo", str(self.worker.pid)],
+            ],
+        )
         self.assertEqual(list(report)[-2:], ["membership_evidence", "gpu_sku_candidates"])
         found = report["gpu_sku_candidates"]
         self.assertEqual(list(found), ["queried_at", "meaning", "nodes"])
