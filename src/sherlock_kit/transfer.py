@@ -11,10 +11,15 @@ completely (an unreadable subdirectory) is remote_failed, exit 1. Under a flock 
 existing LOCAL with a matching receipt is already_present (no DTN dial); otherwise rsync fetches
 exactly the listed files into the private stage .NAME.shk-stage. A rerun resumes the stage: what an
 earlier attempt fetched is kept, anything this manifest does not list (temp files of a killed rsync,
-files of an older manifest) is pruned first. Then: verify the exact inventory and every sha256,
-re-read the manifest, run validators[NAME] + [stage] from the project root (exit 0 = pass; validators
-treat the stage as read-only, whatever they write is promoted with it), rename the stage onto LOCAL
-(--replace keeps the old copy as .NAME.shk-old-<UTC>) and write .NAME.shk-receipt.json.
+files of an older manifest) is pruned first. Then: verify that the stage holds exactly the listed
+files with their sha256 and the directories their paths imply (the payload only: never SHA256SUMS,
+and no empty directory, since a manifest lists files), re-read the manifest, run validators[NAME] +
+[stage] from the project root (exit 0 = pass; validators treat the stage as read-only: nothing
+re-verifies it after them, so whatever they write is promoted with it), rename the stage onto LOCAL
+(--replace keeps the old copy as .NAME.shk-old-<UTC>) and write .NAME.shk-receipt.json with the
+sha256 of the SHA256SUMS text it read. The pulled and already_present replies end with
+PAYLOAD_CONTRACT, which states this; already_present reads nothing again and rests on the receipt
+of the earlier pull.
 
 manifest: write DIR/SHA256SUMS locally (inside jobs, no network), sha256sum-compatible and sorted.
 
@@ -67,6 +72,16 @@ MANIFEST_HINT = (
     "write SHA256SUMS last in the job: shk manifest DIR (or the documented sha256sum one-liner)"
 )
 RERUN_HINT = "push is idempotent and pull resumes from its stage"
+# What a pull promotes, the last key of the pulled and already_present replies: the files SHA256SUMS
+# lists and the directories they imply. The validator obligation is stated, not enforced.
+PAYLOAD_CONTRACT = {
+    "name": "payload-only",
+    "version": 1,
+    "verified_against": SUMS,
+    "manifest_in_payload": False,
+    "empty_directories_preserved": False,
+    "validator_must_not_write_stage": True,
+}
 
 
 # SHA256SUMS ------------------------------------------------------------------------------------
@@ -357,6 +372,7 @@ def _existing(places: Places, digest: str, validator: str | None, replace: bool)
                 "local": str(places.dest),
                 "manifest_sha256": digest,
                 "validator": receipt.get("validator"),
+                "payload_contract": PAYLOAD_CONTRACT,
             })
         reason = f"holds this SHA256SUMS but was pulled without validator {validator!r}"
     else:
@@ -580,6 +596,7 @@ def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
         "local": str(places.dest),
         **receipt,
         "replaced": str(old) if old else None,
+        "payload_contract": PAYLOAD_CONTRACT,
     })
 
 
@@ -621,14 +638,17 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     to.add_argument("--anywhere", action="store_true", help="allow REMOTE outside remote_root")
     to.set_defaults(handler=push)
     back = subparsers.add_parser(
-        "pull", help="fetch what REMOTE/SHA256SUMS lists, verify it, then create LOCAL"
+        "pull",
+        help="fetch only the files REMOTE/SHA256SUMS lists (not SHA256SUMS, no empty directories), "
+        "verify them, then create LOCAL",
     )
     back.add_argument("remote", metavar="REMOTE")
     back.add_argument("local", metavar="LOCAL", help="new directory; its parent must exist")
     back.add_argument(
         "--validate",
         metavar="NAME",
-        help="first run validators.NAME from the config on the stage (treat it as read-only)",
+        help="first run validators.NAME from the config on the stage (treat it as read-only: "
+        "whatever it writes is promoted unverified)",
     )
     back.add_argument(
         "--replace", action="store_true", help="swap an existing LOCAL (kept as .LOCAL.shk-old-*)"

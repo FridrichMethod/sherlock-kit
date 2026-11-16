@@ -47,6 +47,20 @@ VALIDATORS = {
         "(stage / 'nested' / 'made').mkdir()"
     ),
 }
+PAYLOAD_CONTRACT = (
+    '{"name": "payload-only", "version": 1, "verified_against": "SHA256SUMS", '
+    '"manifest_in_payload": false, "empty_directories_preserved": false, '
+    '"validator_must_not_write_stage": true}'
+)
+RECEIPT_KEYS = [
+    "manifest_sha256",
+    "remote",
+    "files",
+    "bytes",
+    "validator",
+    "shk_version",
+    "created_utc",
+]
 CONTROL_CHECK = ["-O", "check", "-oBatchMode=yes", "sherlock-plain"]
 DTN_CHECK = ["-O", "check", "-oBatchMode=yes", "sherlock-dtn"]
 
@@ -263,6 +277,55 @@ class PullTests(TransferCase):
                 ("sherlock-plain", "sh"),
             ],
         )
+
+    def test_payload_contract_ends_the_pulled_and_already_present_replies(self):
+        receipt = self.dest.parent / ".run1.shk-receipt.json"
+        code, body = self.pull()
+        self.assertEqual((code, body["action"]), (0, "pulled"), body)
+        self.assertEqual(
+            list(body),
+            [
+                "schema_version",
+                "ok",
+                "action",
+                "local",
+                *RECEIPT_KEYS,
+                "replaced",
+                "payload_contract",
+            ],
+        )
+        self.assertEqual(json.dumps(body["payload_contract"]), PAYLOAD_CONTRACT)  # true is not 1
+        written = receipt.read_bytes()
+        self.assertEqual(list(json.loads(written)), RECEIPT_KEYS)  # the receipt is unchanged
+        self.assertEqual(json.loads(written), {key: body[key] for key in RECEIPT_KEYS})
+        code, body = self.pull()
+        self.assertEqual((code, body["action"]), (0, "already_present"), body)
+        self.assertEqual(
+            list(body),
+            [
+                "schema_version",
+                "ok",
+                "action",
+                "local",
+                "manifest_sha256",
+                "validator",
+                "payload_contract",
+            ],
+        )
+        self.assertEqual(json.dumps(body["payload_contract"]), PAYLOAD_CONTRACT)
+        self.assertEqual(receipt.read_bytes(), written)
+        (self.remote / "result.json").write_text("new\n")
+        self.sums()
+        code, body = self.pull()
+        self.assertEqual((code, body["error"]), (3, "destination_exists"), body)
+        self.assertNotIn("payload_contract", body)  # every other reply is unchanged
+        code, body = self.pull("--replace")
+        self.assertEqual(
+            (code, body["action"], list(body)[-2:]), (0, "pulled", ["replaced", "payload_contract"])
+        )
+        self.assertIsNotNone(body["replaced"])
+        self.assertEqual(json.dumps(body["payload_contract"]), PAYLOAD_CONTRACT)
+        self.assertEqual(list(json.loads(receipt.read_bytes())), RECEIPT_KEYS)
 
     def test_an_idempotent_rerun_needs_no_dtn_master(self):
         self.assertEqual(self.pull()[0], 0)
