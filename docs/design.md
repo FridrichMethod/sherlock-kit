@@ -16,9 +16,9 @@ script does) stays with the user, the site rules and the project.
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
 | `partitions.py` | the packaged partition table and the generated rules block |
 | `doctor.py` | read-only checks |
-| `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources, job name, sbatch argv and its optional thread-budget `env` prefix; `submit`, `status`, `cancel`, `occupancy`, `resources`, `release`, `requeue` |
-| `allocation.py` | local worker PID and allocation/step evidence, strict field parsing and actual resources |
-| `transfer.py` | `push`, `pull`, `manifest` |
+| `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources (one partition or a compatible partition list), job name, sbatch argv and its optional thread-budget `env` prefix; `submit` (with the `--preflight` estimate), `status`, `cancel`, `occupancy`, `resources` (per node or `--summary`), `release`, `requeue` |
+| `allocation.py` | local worker PID and allocation/step evidence, strict field parsing, actual resources and GPU SKU candidates of the node records |
+| `transfer.py` | `push`, payload-only `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
 | `data/remote/*.sh` | the fixed POSIX `sh` programs run on the login node |
 | `data/rules/*.md`, `data/skills/sherlock-kit/SKILL.md` | agent content, delivered by `install-skill` or read with `shk rules` |
@@ -113,7 +113,31 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    batch jobs (`batch: false` for `dev`, where Sherlock rejects every sbatch
    job; `occupancy` and `resources` still read it); GPUs only
    where the profile allows them; requeue only where the profile allows it
-   (today `owners`), else `--no-requeue`; the `--mem`, `--time` and `--array`
+   (today `owners`), else `--no-requeue`. A `--partition` value with a comma
+   is a partition list, Slurm's own syntax (`gpu,bioe,stat`), on `submit` only:
+   `resources` and `occupancy` take one name per flag and refuse a comma as
+   exit 3 `unknown_partition`, and a repeated `--partition` flag is not a list
+   (argparse keeps the last one). A value without a comma takes the
+   single-partition path. The members of a list are checked where the
+   single partition's profile is looked up and `batch` tested, before the
+   resource checks, in this order: an unlisted member, the empty one included
+   (exit 3 `unknown_partition`, the usual message for the first such member);
+   a repeated member (exit 1 `spec_invalid`); a member without batch jobs
+   (exit 3 `batch_not_allowed`, the usual message for the first such member);
+   an incompatible set (exit 3 `partitions_incompatible`). Compatibility is
+   derived from the existing profile fields alone: no member `borrowed`, one
+   common `requeue` value and one common `preemptible` value. With a borrowed
+   member the message names every borrowed member; otherwise it lists every
+   member with both values, and the hint says to submit incompatible
+   partitions separately. The resource checks then apply to the set: `--gpus`
+   above 0 needs `gpus_allowed` on every member (`gpus_not_allowed` names
+   every member without GPUs), requeue defaults to the common profile value,
+   and `--requeue` on a set that does not allow it is `requeue_not_allowed`,
+   naming the set as given. So `gpu,bioe,stat` combines and `owners`,
+   `btrippe` and `possu` stay alone; `normal`, `bigmem` and `service` are in
+   the class too. A set states that the job may run on any member, and every
+   member's courtesy text applies wherever it starts. A list is explicit at
+   submission only, never a TOML key. The other checks: the `--mem`, `--time` and `--array`
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
    `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
    `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
@@ -133,7 +157,15 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    `--export=ALL,SHK_NAME=<name>`, `singleton` for single jobs; a submission
    token adds `,SHK_SUBMISSION_TOKEN=<token>` to the export and
    `--comment=<token>`, and `--hold` is accepted only with a token) and the
-   frozen spec. An explicit `--prefer` is also recorded in `resources.prefer`;
+   frozen spec. A partition list reaches the argv as
+   `--partition=<value as given>` in the same position, and the argv is
+   otherwise that of a single partition; the job name does not depend on the
+   partition. The frozen
+   spec keeps the value as given in `resources.partition` and adds the list as
+   `resources.partitions`, only for more than one member; in the `spec` that
+   `--dry-run` and `--preflight` print it is the last key of `resources` (after
+   `prefer` when both are present), and the staged file has sorted keys. A
+   single partition leaves the frozen spec and argv as they are. An explicit `--prefer` is also recorded in `resources.prefer`;
    omitting it leaves the resource document and argv unchanged. Slurm tries
    preferred features independently before the fallback constraint; callers must
    include every hard requirement in both. With `--cpu-thread-budget` or the
@@ -145,7 +177,10 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 
 2. **Read call** (`query.sh`, shared with `status`): one `squeue -t all` and one
    `sacct --duplicates` over the last 30 days for the user and name, plus the
-   newest spec file; for a borrowed partition also its occupancy. Only
+   newest spec file; for a borrowed partition also its occupancy (never for a
+   partition list, which has no borrowed member). The read, the live and
+   duplicate guards, `singleton`, the staging and the exit 5 handling are the
+   same for a list as for one partition. Only
    `SHK_`-prefixed lines count, and the read is complete only with `SHK_END`
    and every tool returning 0 (else exit 1 `malformed_read`). Every remote
    program that calls a Slurm client first unsets `SBATCH_*`, `SQUEUE_*`,
@@ -229,10 +264,40 @@ restarts, CPU and GPU seconds) and the history, plus `queried_at` and
 `next_check_after` (now + 60 s). Anomalies are evaluated on the current job only:
 `unexpected_preemption` (an interrupted attempt, that is a `PREEMPTED`/`REQUEUED`
 row or an attempt replaced by a later restart, on a partition whose profile is not
-preemptible), `duplicate_live`, `unknown_partition`, `malformed_rows`; any of them
+preemptible, or on a comma list whose members are all listed and none
+preemptible, since a compatible set shares one value), `duplicate_live`,
+`unknown_partition` (some row of the job has a partition text, split on `,`,
+with a member that is not listed; the verdict does not depend on the row
+order), `malformed_rows`; any of them
 gives exit 6. `duplicate_live` and `unknown_partition` apply to `shk.` names only,
 and `--job-id` entries are per base job. Nothing is acknowledged or stored,
 so nothing needs closing: a deliberate `--resubmit` makes a new current job.
+
+Status reports what Slurm prints. `current.partition` is the partition text of
+the first row Slurm printed for the job, queue rows before accounting rows, in
+Slurm's order, which `shk` does not fix. The rows of a started job do not show
+that it was submitted to a list: clients get the run partition for a job that
+is not pending and the list only while it pends, and a job that
+ended without starting shows one member in `squeue` and keeps the list in
+`sacct` ([source-confirmed](validation/observed-slurm.md#jobs-submitted-to-several-partitions)).
+For an array, or a requeued job read from accounting only, the text is one
+row's, can change between reads and says nothing about the other tasks or
+attempts. Whether a job used a list is therefore decided by its frozen spec:
+`current.ran_on`, directly after `partition`, appears only when status read the
+spec of that job (the newest spec file of the name, for that job id, as for the
+task count) and its `resources.partitions` lists several partitions, that is
+`status --task` with a run directory, plain or with `--details`. Its value is
+the sorted distinct partitions of the job's started rows, `[]` until a task has
+started. A started row is an explicit row (not an `N_[...]` aggregate) whose
+partition text is one name and which shows a start: an accounting row with
+AllocCPUS above 0, or a queue row whose state is in `slurm.RUNNING`
+(`RUNNING`, `COMPLETING`, `SUSPENDED`, `CONFIGURING`, `STAGE_OUT`,
+`SIGNALING`, `RESIZING`, `STOPPED`). Without a spec (`--all`, `--name`,
+`--job-id`) there is no `ran_on`: `current.partition` is the first row's text,
+which for an array whose tasks started on different members names only one of
+them or the pending list. The per-row partition of `status --details`, or
+`--task`, tells where each ran. The cost arithmetic is the same for a list, and
+every detail row keeps its partition text as Slurm printed it.
 
 `cancel` resolves one name and cancels only its live jobs (`scancel` scoped by
 user and name), reporting the job ids and `next_check_after`. A guard that
@@ -259,7 +324,19 @@ final cost.
 FreeMem does not drive admission. `resources.sh` keeps only nodes whose
 `Partitions=` list names a wanted partition, `schedulable` comes from the State
 flags while `free_*` stays configured minus allocated, and a failed `scontrol`
-read is exit 1. `control.py` implements read-only `sbatch --test-only` (a
+read is exit 1. `resources --summary` is a separate output mode of that same
+single read: the reply replaces `nodes` with `summary`, and without
+`--summary` it is the per-node reply. The summary puts every shipped node in
+exactly one class (countable: all facts known and schedulable; unschedulable: all
+facts known and not schedulable; unknown: any fact missing, a malformed line
+included) and sums groups for the union, for each requested partition and for
+the `--by sku` and `--by class` breakdowns of the `GPU_SKU:` and `CLASS:`
+features, with optional `--shape` slot counts
+([README](../README.md#resource-summary)). Unknown stays unknown: a sum with
+nothing known behind it is null, never 0. The reply carries its rules as four
+fixed texts and ranks nothing. `--by` and `--shape` need `--summary`; they and
+the shapes are checked offline, after the partitions and before any remote
+call. `control.py` implements read-only `sbatch --test-only` (a
 controller transport failure is a retryable exit 1, not a refusal), exact
 identity-verified user-hold release and local allocation-only self requeue: PID
 membership through `listpids` and `show job` both use the physical
@@ -272,6 +349,33 @@ submission token is correlation data stored in Slurm Comment, the job's
 `SHK_SUBMISSION_TOKEN` and the frozen spec, not a credential; a held job needs
 one, because release verifies it. No project ledger, checkpoint or retry
 policy enters the kit.
+
+The `--preflight` reply adds `estimate` directly after `preflight`; the
+`preflight` object, the exit codes (0 accepted, 3 rejected by Slurm, 1
+`malformed_read`) and `preflight.sh` are those of a plain preflight.
+`control.py` splits `stderr`, then `stdout`, on LF only, and an estimate line
+is a line that matches this pattern from its first character to its last:
+
+```text
+(?:sbatch: )?Job [0-9]+ to start at (?P<start>\S+)(?: on cluster \S+)?(?: a)? using [0-9]+ processors on nodes (?P<nodes>\S+) in partition (?P<partition>\S+)
+```
+
+`status` is `parsed` when there is exactly one estimate line and its `start`
+also matches `[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}`; `start`,
+`nodes`, `partition` and `line` are then set, and lines that merely resemble an
+estimate do not change this. `absent` means no estimate line and no line
+holding the words `to start at` between spaces, with those four null; it
+covers an accepted call without an estimate and a rejected call. `unparsed`
+is every other case (several estimate lines, an estimate line whose time is
+not an ISO time, or no estimate line while some line holds the words, as for
+an unknown shape or an empty node list): `start`, `nodes` and `partition` are
+null and `line` is the first estimate line, else the first line holding the
+words. `start` is the text Slurm printed, the local time of the `sbatch`
+process on the executor host without a zone, which the constant
+`start_zone: "sbatch-local"` names; `observed_at` is UTC and equals
+`queried_at`. The kit converts nothing and guesses nothing, and no key of
+`estimate` holds the job id of the line, which belongs to a temporary record
+([source-confirmed](validation/observed-slurm.md#test-only-estimates)).
 
 ## Transfer
 
@@ -324,6 +428,23 @@ itself is not verified again. Any other existing LOCAL is kept unless
 writes `DIR/SHA256SUMS` inside jobs; the skill's `sha256sum` one-liner writes
 the same.
 
+The pull contract is payload-only:
+
+- The stage, and so LOCAL, holds exactly the regular files that
+  `REMOTE/SHA256SUMS` lists, and the directories they imply. `SHA256SUMS`
+  itself is not staged and not promoted; the receipt keeps its sha256.
+- A manifest lists files only, so an empty remote directory is not created
+  locally. A validator must not require one, and must not create one.
+- The validator gets the stage as its last argument and treats it as
+  read-only: nothing re-verifies the stage after the validator, and whatever
+  it writes is promoted with the data. The kit does not enforce this.
+- The `pulled` and `already_present` replies end with the constant
+  `payload_contract`:
+  `{"name": "payload-only", "version": 1, "verified_against": "SHA256SUMS", "manifest_in_payload": false, "empty_directories_preserved": false, "validator_must_not_write_stage": true}`.
+  It describes what a pull promotes; `validator_must_not_write_stage` states
+  the validator's obligation. On `already_present` nothing is read again: that
+  reply rests on the receipt of the earlier pull.
+
 ## Weaker guarantees, accepted
 
 - Deduplication uses only `squeue -t all` and `sacct` over the last 30 days
@@ -362,7 +483,35 @@ the same.
   itself is killed, a mutation in flight is outcome unknown without an exit 5
   reply, and a transfer may still be running.
 - `already_present` trusts the pull receipt, and a failed push can leave a
-  truncated remote file (see Transfer).
+  truncated remote file (see Transfer). Nothing re-verifies the pull stage
+  after the validator, and the kit does not enforce that a validator leaves it
+  unwritten.
+- `resources --summary` is a snapshot heuristic at `queried_at`: configured
+  minus allocated capacity. It does not model fairshare, QOS or partition
+  limits, reservations, preemption or pending work, reserves nothing and
+  predicts no start time. Beside a nonzero `unknown_nodes` its numbers are
+  lower bounds.
+- The `--preflight` estimate is advisory: not a reservation and not a promise,
+  and its start is the local time of the `sbatch` process, which the kit does
+  not convert. For a request with several partitions Slurm names the first
+  partition, in its own priority order, that can run the job, and estimates
+  the start there: it is not the earliest start over the set, and the named
+  partition can be the Alternate of a listed one
+  ([source-confirmed](validation/observed-slurm.md#test-only-estimates)).
+  Comparing partitions takes one preflight per partition.
+- The partition text of a job submitted with a partition list is what Slurm
+  prints: the list while it pends, in an order Slurm may change, and the run
+  partition once it has started; one member in `squeue` and the list in
+  `sacct` for a job that ended without starting; one row's text for an array
+  or a requeued job read from accounting only. `current.partition` therefore
+  does not say where every task ran.
+- `current.ran_on` needs the frozen spec: it appears only for `status --task`,
+  for a job whose spec lists several partitions. `--all`, `--name` and
+  `--job-id` read no spec and show Slurm's partition text alone, so they
+  cannot tell that a started job was submitted to a list.
+- A job submitted with a partition list must be read with a kit version that
+  knows lists: an older one reports `unknown_partition` (exit 6) while Slurm
+  prints the list.
 
 ## Rules, skill and delivery
 
