@@ -97,7 +97,8 @@ chooses a request, lowers a floor or ranks GPU models:
   `preflight` reply: a `parsed`, `absent` or `unparsed` status, Slurm's start
   time, nodes and partition, the line it was read from and `observed_at`. It is
   advisory, not a reservation and not a promise, and an accepted request can
-  carry no estimate (`absent`, all values null). The start is the text Slurm
+  carry no estimate (`absent`, with null `start`, `nodes`, `partition` and
+  `line`). The start is the text Slurm
   printed, in the local time of the `sbatch` process (`start_zone` is
   `sbatch-local`). For a partition list Slurm names the first partition, in its
   own priority order, that can run the job and estimates its start there: it is
