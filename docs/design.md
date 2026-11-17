@@ -333,7 +333,7 @@ facts known and not schedulable; unknown: any fact missing, a malformed line
 included) and sums groups for the union, for each requested partition and for
 the `--by sku` and `--by class` breakdowns of the `GPU_SKU:` and `CLASS:`
 features, with optional `--shape` slot counts
-([README](../README.md#resource-summary)). Unknown stays unknown: a sum with
+([command reference](cli.md#resource-summary)). Unknown stays unknown: a sum with
 nothing known behind it is null, never 0. The reply carries its rules as four
 fixed texts and ranks nothing. `--by` and `--shape` need `--summary`; they and
 the shapes are checked offline, after the partitions and before any remote

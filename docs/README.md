@@ -4,7 +4,9 @@ These guides describe the supported toolkit and its operating constraints.
 
 | Guide | Purpose |
 | --- | --- |
-| [Getting started and CLI reference](../README.md) | Installation, commands, configuration, JSON results and exit codes |
+| [Overview](../README.md) | What `shk` does, a short install and a quick start |
+| [Installation and connection](install.md) | Install forms, environments on Sherlock and inside jobs, SSH control masters |
+| [Command reference](cli.md) | Every command and its JSON reply, configuration and exit codes |
 | [GPU campaign scheduling](campaign-throughput.md) | Compatible GPUs, soft preferences, partitions, resumable bundles and parallel work |
 | [Allocation proofs](allocation.md) | Job, array element, process and step identity inside an allocation, and GPU SKU candidates |
 | [CPU thread budgets](cpu-threads.md) | Numerical library thread defaults on the host and in containers |

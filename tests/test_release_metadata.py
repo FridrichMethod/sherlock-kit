@@ -26,7 +26,13 @@ CONTRACT = {
     "C4": "bin/shk",
 }
 RULES = (ROOT / CONTRACT["C1"], ROOT / CONTRACT["C2"])
-MENTIONING = (*RULES, ROOT / CONTRACT["C3"], ROOT / "README.md")
+MENTIONING = (
+    *RULES,
+    ROOT / CONTRACT["C3"],
+    ROOT / "README.md",
+    ROOT / "docs/cli.md",
+    ROOT / "docs/install.md",
+)
 REMOVED = (
     "policy --identity",
     "reconcile",

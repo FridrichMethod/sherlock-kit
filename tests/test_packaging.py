@@ -279,7 +279,9 @@ class BuildTests(HeadCase):
             "README.md",
             "CONTRIBUTING.md",
             "AGENTS.md",
+            "docs/cli.md",
             "docs/design.md",
+            "docs/install.md",
             *(f"src/{DATA}{c}" for c in CONTENT),
         ):
             self.assertIn(rel, members)

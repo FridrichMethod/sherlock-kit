@@ -1,7 +1,8 @@
 # Contributing
 
-Read [AGENTS.md](AGENTS.md), [README.md](README.md) and [docs/design.md](docs/design.md)
-first. Keep changes small and preserve other people's work. Commits use
+Read [AGENTS.md](AGENTS.md), [README.md](README.md), the
+[command reference](docs/cli.md) and [docs/design.md](docs/design.md) first.
+Keep changes small and preserve other people's work. Commits use
 conventional messages (`feat:`, `fix:`, `docs:`, `test:`, ...), stage files by
 explicit path and carry no agent attribution.
 
@@ -10,7 +11,8 @@ explicit path and carry no agent attribution.
 The owner's development checkout lives at `~/data/repos/sherlock-kit`. It is a
 working copy only: apart from its own development environment, never install
 from it, link to it or point a project at it; installs come from a pinned release
-or an editable install of a tree you chose (see the README).
+or an editable install of a tree you chose (see
+[docs/install.md](docs/install.md)).
 Concurrent writers each use their own branch and Git worktree (for example
 `.worktrees/<name>`, ignored by Git); reviewers are read-only. Only the lead
 merges to `main` and tags releases.

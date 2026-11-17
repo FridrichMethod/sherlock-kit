@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+Documentation:
+
+- The README is an overview with highlights, a diagram, a quick start and a
+  command table. The command contracts, configuration keys and exit codes
+  are in the new command reference, `docs/cli.md`, split into a section per
+  command; install forms, environments on Sherlock and the SSH setup are in
+  `docs/install.md`. Documentation only; no CLI change.
+
 ## 0.8.0
 
 Additions. Without the new options, replies, frozen specs and `sbatch` argv

@@ -36,7 +36,7 @@ configuration, paths, specs, receipts and bundles are not reproduced here;
   directory and a manifest written beside the results as the last step. These
   runs used that pattern; the supported way to run the kit inside jobs is a
   project-pinned environment called by absolute path
-  ([README](../../README.md#install)).
+  ([installation guide](../install.md#inside-jobs-and-controllers)).
 
 ## Hosts, shells and limits
 
