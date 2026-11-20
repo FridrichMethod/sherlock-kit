@@ -732,8 +732,14 @@ These run before any remote call, without network; each failure is exit 1
 that start with `JobId=`: the job's record, or every record of the array (the
 meta record and every split task still in the controller, finished ones
 included). Before any change it refuses with exit 3 `remote_refused`, message
-`update: SHK_REFUSED <reason>` with Slurm's text where a read failed. The
-checks run in this order, each over every record:
+`update: SHK_REFUSED <reason>` with Slurm's text where a read failed; nothing
+is dispatched on any refusal. After the read (`query`), `ambiguous` and `id`
+look at every record first. Then each record in turn, in the order Slurm
+prints them, goes through `name`, `uid`, `token`, `state` and the checks of
+the field in the order of the table, so the first record that fails one names
+the reason. Last, a partition request reads each requested member, one at a
+time, and checks every record's TimeLimit against its MaxTime
+(`partition_query`, then `maxtime`):
 
 | Reason | Refused when |
 |---|---|
