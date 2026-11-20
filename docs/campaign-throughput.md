@@ -202,6 +202,23 @@ an allocation under the permitted persistent location. Keep necessary allocation
 environment and provenance checks in each job, but do not put a general CPU test
 suite on every GPU job's startup path.
 
+### Run different revisions from one Git mirror
+
+A project can keep one Git mirror on Sherlock and create a detached linked
+worktree for each revision needed by concurrent jobs. The project uses Git to
+manage these checkouts and coordinate changes to their shared Git metadata.
+Kit submits the project's batch script and transfers its inputs and outputs.
+
+Record the absolute worktree path, full commit SHA, interpreter or container
+image, and a separate writable output directory for each job before submission.
+At job startup, verify the commit, working directory, runtime identity and the
+paths of the modules actually imported. Jobs at the same commit can share a
+read-only checkout when their runtimes resolve the intended code and their
+writes go to separate run directories. Pin shared environments and model assets
+to immutable versions, or hold a project read lease until the worker and its
+children exit. Updates to those assets must acquire the corresponding write
+lease.
+
 ## Queue independent first pilots as they become ready
 
 1. For each needed, CPU-ready lane, reserve one first-pilot slot and a unique
