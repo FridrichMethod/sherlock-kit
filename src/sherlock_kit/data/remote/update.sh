@@ -17,9 +17,11 @@ for v in $(env | sed -n "s/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p"); do
 done
 LC_ALL=C # the patterns below match bytes, whatever locale the login shell has
 export LC_ALL
+# Slurm text is cut to 1999 bytes plus LF (precision counts bytes under LC_ALL=C), so the
+# line after it always starts a new line.
 refuse() {
     printf "SHK_REFUSED %s\n" "$1"
-    [ -z "${2:-}" ] || printf "%s\n" "$2" | head -c 2000 | sed "s/^/SHK_ERR|/"
+    [ -z "${2:-}" ] || printf "%.1999s\n" "$2" | sed "s/^/SHK_ERR|/"
     exit 0
 }
 # word KEY TEXT: got is the value of the first word of TEXT (which starts with a space) that
@@ -210,15 +212,15 @@ out=$(
     {
         err=$(scontrol update "JobId=$job_id" "$@" </dev/null 2>&1 >&4 4>&- 3>&-)
         printf "SHK_DISPATCHED %s\n" "$?" >&3
-        [ -z "$err" ] || printf "%s\n" "$err" | head -c 2000 | sed "s/^/SHK_ERR|/" >&3
+        [ -z "$err" ] || printf "%.1999s\n" "$err" | sed "s/^/SHK_ERR|/" >&3
     } 4>&1
 )
-[ -z "$out" ] || printf "%s\n" "$out" | head -c 2000 | sed "s/^/SHK_OUT|/"
+[ -z "$out" ] || printf "%.1999s\n" "$out" | sed "s/^/SHK_OUT|/"
 after=$(scontrol show job "$job_id" --oneliner 2>&1)
 rc=$?
 if [ "$rc" -ne 0 ]; then
     printf "SHK_AFTER_FAILED %s\n" "$rc"
-    printf "%s\n" "$after" | head -c 2000 | sed "s/^/SHK_ERR|/"
+    printf "%.1999s\n" "$after" | sed "s/^/SHK_ERR|/"
 else
     printf "%s\n" "$after" | grep "^JobId=" | sed "s/^/SHK_AFTER|/"
 fi

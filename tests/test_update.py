@@ -604,6 +604,54 @@ class UpdateCases:
                 self.assertEqual((code, self.unknown(report)), (5, detail))
                 self.assertEqual(len(self.dispatches()), 1)
 
+    def test_slurm_text_cut_mid_line_never_hides_the_first_reread_record(self):
+        # The array's meta record comes first in the re-read and is the one that did not move.
+        err = "50_1-3: Access/permission denied (" + "x" * 2100 + ")\n"
+        self.scontrol({
+            show("50"): [
+                {
+                    "out": lines(
+                        record("50", array="50", task="1-3"), record("51", array="50", task="0")
+                    )
+                },
+                {
+                    "out": lines(
+                        record("50", array="50", task="1-3"),
+                        record("51", array="50", task="0", Partition="bigmem"),
+                    )
+                },
+            ],
+            "show partition bigmem --oneliner": {"out": partition("bigmem")},
+            "update JobId=50 Partition=bigmem": {"err": err, "rc": 1},
+        })
+        code, report = self.update("--partition", "bigmem", job="50")
+        self.assertEqual(code, 5)
+        self.assertEqual(
+            self.unknown(report, job="50"),
+            f"update outcome not confirmed: scontrol update exit 1: {err[:1999]}; records 50 "
+            "do not show Partition=bigmem",
+        )
+
+    def test_long_slurm_text_is_cut_and_the_reread_still_confirms(self):
+        # 68-byte lines: the cut falls inside a line, whichever stream carries the text.
+        notes = "".join(f"job_submit: note {i:02d} {'y' * 47}\n" for i in range(40))
+        for stream in ("err", "out"):
+            with self.subTest(stream=stream):
+                self.fresh()
+                self.scontrol({
+                    show(): [
+                        {"out": lines(record())},
+                        {"out": lines(record(TimeLimit="01:00:00"))},
+                    ],
+                    "update JobId=44 TimeLimit=60": {stream: notes},
+                })
+                code, report = self.update("--time", "1h")
+                self.assertEqual((code, report["action"]), (0, "updated"), report)
+                self.assertEqual(
+                    (report["slurm_messages"], [found["TimeLimit"] for found in report["after"]]),
+                    (notes[:1999], ["01:00:00"]),
+                )
+
     def test_free_text_never_shadows_a_field_or_the_array_identity(self):
         # Command, SubmitLine, WorkDir and Comment come after the fixed fields; the name is
         # pinned between the leading fields and UserId.
