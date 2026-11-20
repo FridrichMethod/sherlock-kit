@@ -8,20 +8,21 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 - Do not contact support. Stop affected work if infrastructure seems broken; draft symptoms/host/time/job id for the user. Slurm timeout: retry once after a minute, then stop.
 
 ### Filesystems
-- Use variables: `$HOME`/`$GROUP_HOME` for code/environments/small files, no intensive I/O; `$SCRATCH`/`$GROUP_SCRATCH` for job I/O, 90-day purge/no backup; `$L_SCRATCH_JOB` for temp data that fits, export before job end; `$OAK` for durable data. Check `sh_quota`.
-- Never extend scratch lifetime by touch/rewrite/copy-over or refresh helpers, even once: account termination. Keep durable copies in GROUP_HOME/Oak or the workstation.
+- Use variables: `$HOME`/`$GROUP_HOME` for code/environments/small files, no intensive I/O; `$SCRATCH`/`$GROUP_SCRATCH` for job I/O, 90-day purge/no backup; `$L_SCRATCH_JOB` for temp data that fits, export before job end. Check `sh_quota`.
+- Never extend scratch lifetime by touch/rewrite/copy-over or refresh helpers, even once: account termination. Keep durable copies in `$GROUP_HOME`/`$OAK` or the workstation.
 - Own/explicitly shared directories only; readable/group paths alone grant no access. Scope scans, never roots. Low/Moderate Risk only; ask when unclear.
-- Large internal copies need jobs. DTN/Globus transfers start outside; no ssh to DTN here.
+- DTN/Globus transfers start outside; no ssh to DTN here.
 
 ### Login nodes and software
 - Light editing/reads/preparation/submitting/polling only; sustained CPU/memory, GPUs, intensive I/O or many processes need jobs. No model/web/API serving; listeners only for own interactive tools. No unattended processes, keep-alive/restart loops, continuous sync or processes outliving the session. No `claude agents`/`--bg` or restarting terminated supervisors; site cleanup is expected.
-- Check `ml spider NAME`; prefer modules, group installs, own builds, then containers. Large/shared environments: GROUP_HOME. Scratch only by explicit request with purge/rebuild warning, never refresh. No sudo/system installs/unreviewed install scripts. Compile/heavy installs in jobs; fetch sources beforehand if needed.
-- Use `#!/bin/bash -l`, `ml purge`, explicit modules/environment; record versions. Set `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` unless `--cpu-thread-budget` overrides it. No probing/changing system configuration/infrastructure (except reading `/etc/agents/`) or slow shell startup. Find CLIs/Python with `ml spider`.
+- Check `ml spider NAME`; prefer modules, group installs, own builds, then containers. Large/shared environments: GROUP_HOME. Scratch only by explicit request with purge/rebuild warning. No sudo/system installs/unreviewed install scripts. Compile/heavy installs in jobs; fetch sources beforehand if needed.
+- Use `#!/bin/bash -l`, `ml purge`, explicit modules/environment; record versions. Set `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` unless `--cpu-thread-budget` overrides it. No probing/changing system configuration/infrastructure or slow shell startup.
 
 ### Slurm
-- Use local `shk submit`/`status`/`cancel`, explicit resources/profiles, no `--account`/`--exclude`. Discover limits/features. Checks at least 60 s apart; no watch/polling loops; prefer dependencies. Jobs need 10 useful minutes, no padding. Diagnose failures; no pending duplicates. Exit 5: obey `next` time; exit 6: stop/report.
+- Use local `shk submit`/`status`/`cancel`/`update`, explicit resources/profiles, no `--account`/`--exclude`. Discover limits/features. Checks at least 60 s apart; no watch/polling loops; prefer dependencies. Jobs need 10 useful minutes, no padding. Diagnose failures; no pending duplicates. Exit 5: obey `next` time; exit 6: stop/report.
+- Update a pending job's walltime (decrease only), partition (compatible, non-borrowed) or constraint/prefer, or an array's throttle, one field group per call; never raw `scontrol update`.
 - Bounded deterministic controllers may use `shk --executor local` inside allocations; never schedule future agent/LLM sessions (scrontab, begin, self-resubmission). Never submit GPU work while developing/testing sherlock-kit.
-- Cancel exact verified own jobs through Slurm and explain why. Ask for unclear scope/ownership, unrelated/broad cancellation or material irreversible loss. Never cancel all user jobs or kill compute processes instead; inspect only own processes.
+- Cancel exact verified own jobs and explain why. Ask for unclear scope/ownership, unrelated/broad cancellation or material irreversible loss. Never cancel all user jobs or kill compute processes instead; inspect only own processes.
 
 ### GPU scheduling defaults
 - Site/task rules take precedence. Use a broad OR `--constraint` over discovered compatible GPUs, new SKUs too. Avoid RTX_2080Ti/Pascal. Narrow only for evidenced architecture/memory/kernel/dtype needs. Obey MIG rules.
@@ -30,7 +31,7 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 - Prioritize the earliest start; reduce oversized CPU requests. Before GPU submission compare `--shape` slots (useful threads, measured peak RAM plus headroom) in one fresh `shk resources --partition P --summary --by sku`.
 - Owners needs proven same-command resume with durable checkpoints, verified units, attempt logs and bounded retries. Requeue restarts the script, not app state.
 - Queue independent ready work concurrently. Report ready/unsubmitted/queued/running/blocked. Favor longer useful resumable bundles to amortize queue/setup within limits/courtesy/budgets.
-- Batch status/resources checks at least 60 s apart. Snapshots do not guarantee starts. Move units only on terminal/nonrestartable proof or durable revocation across requeue. Keep pending/unknown units owned. Never race duplicates.
+- Snapshots do not guarantee starts. Move units only on terminal/nonrestartable proof or durable revocation across requeue. Keep pending/unknown units owned. Never race duplicates.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
