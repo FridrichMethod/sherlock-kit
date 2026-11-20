@@ -169,15 +169,17 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   refused.
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
-- Only `submit` takes a partition list, one comma-separated value such as
-  `--partition gpu,bioe,stat`, and only for a compatible set, derived from the
-  profile fields: every member is listed and takes batch jobs, none is
-  borrowed, all share one `requeue` and one `preemptible` value, and every
-  member allows GPUs when GPUs are requested. So `gpu`, `bioe` and `stat`
-  combine, and `owners`, `btrippe` and `possu` stay alone. By the same profile
-  fields `normal`, `bigmem` and `service` are in the class too: a set states
-  that the job may run on any member, and every member's courtesy text applies
-  wherever it starts.
+- Only `submit` and `update` (for a pending job) take a partition list;
+  `resources` and `occupancy` take one name per flag. A list is one
+  comma-separated value on the command line such as
+  `--partition gpu,bioe,stat`, never a TOML key, and only for a compatible set,
+  derived from the profile fields: every member is listed and takes batch
+  jobs, none is borrowed, all share one `requeue` and one `preemptible` value,
+  and every member allows GPUs when GPUs are requested. So `gpu`, `bioe` and
+  `stat` combine, and `owners`, `btrippe` and `possu` stay alone. By the same
+  profile fields `normal`, `bigmem` and `service` are in the class too: a set
+  states that the job may run on any member, and every member's courtesy text
+  applies wherever it starts.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,
   partition, array, dependency, begin, job name, hold, and comment when a
   submission token sets it) or start a heterogeneous job.

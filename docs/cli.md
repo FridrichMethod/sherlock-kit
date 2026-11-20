@@ -183,9 +183,10 @@ controller compatibility.
 `--partition` takes one partition, or compatible partitions as one
 comma-separated value, Slurm's own syntax (`--partition gpu,bioe,stat`); a
 repeated `--partition` flag is not a list (the last one wins). Only `submit`
-takes a list: `resources` and `occupancy` take one name per `--partition` flag
-and refuse a value with a comma (exit 3 `unknown_partition`). A list is given
-at submission only; it is not a TOML key.
+and `update` (for a pending job) take a list: `resources` and `occupancy` take
+one name per `--partition` flag and refuse a value with a comma (exit 3
+`unknown_partition`). A list is given on the command line only; it is never a
+TOML key.
 
 The members of a list are checked where a single partition's profile is looked
 up, before the resource checks, in this order:

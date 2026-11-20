@@ -114,7 +114,8 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    job; `occupancy` and `resources` still read it); GPUs only
    where the profile allows them; requeue only where the profile allows it
    (today `owners`), else `--no-requeue`. A `--partition` value with a comma
-   is a partition list, Slurm's own syntax (`gpu,bioe,stat`), on `submit` only:
+   is a partition list, Slurm's own syntax (`gpu,bioe,stat`), on `submit` and
+   on `update` (for a pending job) only:
    `resources` and `occupancy` take one name per flag and refuse a comma as
    exit 3 `unknown_partition`, and a repeated `--partition` flag is not a list
    (argparse keeps the last one). A value without a comma takes the
@@ -136,8 +137,9 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    naming the set as given. So `gpu,bioe,stat` combines and `owners`,
    `btrippe` and `possu` stay alone; `normal`, `bigmem` and `service` are in
    the class too. A set states that the job may run on any member, and every
-   member's courtesy text applies wherever it starts. A list is explicit at
-   submission only, never a TOML key. The other checks: the `--mem`, `--time` and `--array`
+   member's courtesy text applies wherever it starts. A list is explicit on
+   the command line only (`submit`, or `update` for a pending job), never a
+   TOML key. The other checks: the `--mem`, `--time` and `--array`
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
    `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
    `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
