@@ -318,6 +318,32 @@ within known compatibility and authorized partition rules; shorter walltime must
 still fit the complete unit or the project's declared resumable checkpoint scheme.
 Queue predictions are estimates, not deadlines or promises.
 
+A bounded change of a pending request uses `shk update`, which changes the job
+in place. It keeps the job id, so the units stay with that job and jobs that
+depend on it (`--after-ok`) keep waiting for it, and it settles its outcome
+from a re-read of every record. Its limits:
+
+- One field group per call: `--time`, `--partition`, `--throttle`, or
+  `--constraint` and `--prefer` together, since both must carry every hard
+  requirement.
+- Time, partition and features change only while every record of the job is
+  pending; the time limit only decreases.
+- A partition move stays within the job's requeue and preemptible class,
+  takes a GPU job only to partitions that allow GPUs and never targets
+  `btrippe` or `possu`. It can lower the job's age priority for a while.
+- Slurm checks constraint and preference names against the features of the
+  whole cluster, not of the job's partitions: check them with `shk resources`
+  first, or the job is accepted and never starts.
+- An array's throttle can be lowered in any state, and raised except on a
+  borrowed partition.
+- CPUs, memory, GPUs and the request of a running job do not change: cancel
+  and resubmit those, once Slurm shows the old job terminal.
+
+The frozen spec keeps the request as submitted;
+`shk status --job-id N --details` shows the current one. An exit 5 reply from
+`shk update` is settled by the status read in its `next` before any further
+change.
+
 To transfer units between workers, require either complete evidence that the old
 job is terminal and cannot restart, or a project-level durable revocation ACK
 that remains effective across requeue. A cancellation ACK alone is insufficient.
@@ -342,7 +368,7 @@ score. Other checkpoint schemes must state their equivalent guarantees up front.
 | Ready lanes have no queued pilot | Submission ledger and actual dependencies | Queue independent first pilots within both caps; scope the blocker. |
 | A pilot imports successfully but fails before inference | Real wrapper, container, PID and environment evidence | Fix the failed launch boundary; keep independent lanes progressing. |
 | A GPU job spends startup time on general CPU tests | Startup timeline | Move those tests into local preparation; retain mandatory in-allocation gates. |
-| Many jobs are pending despite free-looking GPUs | Complete status, frozen request and schedulable resources | Consider a bounded request change or safe transfer; do not assume a scheduler defect. |
+| Many jobs are pending despite free-looking GPUs | Complete status, current request and schedulable resources | Consider a bounded request change with `shk update`, which keeps the job id and its dependents, or a safe transfer; do not assume a scheduler defect. |
 | Local GPU is idle while work is ready | Compatibility, ownership and admission leases | Dispatch an unowned ready unit, or complete a verified ownership transfer first. |
 | A mutation reply is lost, or an owners job is pending again | Saved token, known job ID and detailed status | Check Slurm evidence; retain ownership and the reserved slot. |
 | A seed restarts or a low-quality result is produced | Unit completeness versus scientific QC | Rerun only interrupted technical units; retain complete low-quality outputs. |

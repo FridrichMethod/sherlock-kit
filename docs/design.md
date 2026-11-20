@@ -16,7 +16,7 @@ script does) stays with the user, the site rules and the project.
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
 | `partitions.py` | the packaged partition table and the generated rules block |
 | `doctor.py` | read-only checks |
-| `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources (one partition or a compatible partition list), job name, sbatch argv and its optional thread-budget `env` prefix; `submit` (with the `--preflight` estimate), `status`, `cancel`, `occupancy`, `resources` (per node or `--summary`), `release`, `requeue` |
+| `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources (one partition or a compatible partition list), job name, sbatch argv and its optional thread-budget `env` prefix; `submit` (with the `--preflight` estimate), `status`, `cancel`, `occupancy`, `resources` (per node or `--summary`), `release`, `requeue`, `update` |
 | `allocation.py` | local worker PID and allocation/step evidence, strict field parsing, actual resources and GPU SKU candidates of the node records |
 | `transfer.py` | `push`, payload-only `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
@@ -343,7 +343,17 @@ identity-verified user-hold release and local allocation-only self requeue: PID
 membership through `listpids` and `show job` both use the physical
 `SLURM_JOB_ID`, the job's own record is kept out of any sibling records, and an
 array element is requeued as that record's `ArrayJobId_ArrayTaskId` on a
-partition whose profile allows requeue. After a mutation is
+partition whose profile allows requeue. `control.py` also implements
+`update`, one field group per call (`--time`, `--partition`, `--throttle`, or
+`--constraint` and `--prefer` together): offline checks of the value, then
+`update.sh`, a fixed program beside `control.sh`, which reads every record of
+the job once (`show job N`: one record, or the meta record and every split
+record of an array), checks name, UID and the optional token on every record
+and the field's own rules, prints `SHK_UNCHANGED` when every record already
+shows the value, and otherwise dispatches one `scontrol update` and re-reads
+every record. The outcome is the re-read's: `updated` only when every record
+shows the requested value, whatever `scontrol` returned, and exit 5 otherwise
+([command reference](cli.md#update)). After a mutation is
 issued an ambiguous reply stays unknown, with no retry. Slurm identity reads
 and mutations are not atomic; no exactly-once guarantee is claimed. The public
 submission token is correlation data stored in Slurm Comment, the job's
@@ -524,6 +534,47 @@ The pull contract is payload-only:
 - A job submitted with a partition list must be read with a kit version that
   knows lists: an older one reports `unknown_partition` (exit 6) while Slurm
   prints the list.
+- One `scontrol update` that carries several keys is not atomic: the
+  controller validates and commits one key at a time (throttle, partition,
+  time limit, features, prefer) with no rollback, and it updates an array
+  record by record, the meta record and then every split record, finished
+  ones included
+  ([source-confirmed](validation/observed-slurm.md#job-updates)). `update`
+  therefore takes one field group per call. The features group sends Features
+  and Prefer in one request, because Slurm tries the preference instead of the
+  constraint and both must carry every hard requirement; such a request can
+  still leave Features applied and Prefer not, which the re-read reports as
+  exit 5.
+- The outcome of an update is the re-read's, never the exit status of
+  `scontrol`: a stored throttle exits 1 while finished split records remain in
+  the controller, a partition commit can be followed by an error, a job_submit
+  plugin can reject or rewrite the request, and a lost reply looks the same
+  whether or not the request reached the controller. A re-read that does not
+  show the requested value on every record, or that fails, is exit 5 and is
+  never retried. The identity read and the dispatch are not atomic either: a
+  job that starts in between still gets a shorter time limit, because Slurm
+  allows a decrease on a running job.
+- The frozen spec under `<run-dir>/.shk/` stays the request as submitted:
+  `update` writes no file and keeps no receipt, because no run directory is
+  named by `--job-id`, `shk` keeps no state, and a second side effect after a
+  dispatch would add a failure mode. Slurm's records carry the current request
+  and the reply carries the records before and after. `current.ran_on`
+  therefore still follows the spec's partition list.
+- What Sherlock's job_submit plugin does with an update is unknown. Its modify
+  hook runs on every update, once per array record, and can reject the update
+  or rewrite the values; a rewritten value reads as exit 5.
+- Slurm validates feature names against the union of the features of every
+  node in the cluster, not per partition, so a `--constraint` or `--prefer`
+  that no node of the job's partitions has is accepted and the job never
+  starts. `update` adds no per-partition check; `shk resources` shows the
+  features of a partition's nodes.
+- Under `AccountingStorageEnforce=limits` without
+  `PriorityFlags=ACCRUE_ALWAYS`, a partition move zeroes the job's accrue
+  time: the age factor of its priority dips until the next scheduler pass, and
+  restarts from the move where accrue limits (`MaxJobsAccrue`,
+  `GrpJobsAccrue`) apply. Sherlock's settings are not known.
+- The update facts above are source-confirmed at Slurm 25.11.9 and not observed
+  live on Sherlock, which runs 25.11.8.
 
 ## Rules, skill and delivery
 

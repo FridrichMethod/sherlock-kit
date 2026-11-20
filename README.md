@@ -181,6 +181,7 @@ how `shk` finds the task in Slurm.
 | | `shk status` | State, anomalies and cost of tasks from one `squeue` and one `sacct` call |
 | | `shk cancel` | Cancel the live jobs of one task or name |
 | | `shk release` | Release an identity-verified user hold |
+| | `shk update` | Change one field of an identity-verified job in place: a shorter time limit, the partition or the features while it pends, or an array's throttle |
 | Capacity | `shk occupancy` | Running and pending jobs per user; required before borrowed partitions |
 | | `shk resources` | Configured minus allocated node capacity, per node or as a `--summary` |
 | Data | `shk push` | rsync a local directory to Sherlock through the DTN; never deletes |
@@ -201,7 +202,7 @@ and the exit codes:
 | 0 | ok |
 | 1 | local error: configuration, spec, verification, validator, malformed reply, failed remote read |
 | 2 | usage error |
-| 3 | refused, and nothing was submitted, cancelled, released or requeued |
+| 3 | refused, and nothing was submitted, cancelled, released, requeued or updated |
 | 4 | SSH transport or master check unavailable |
 | 5 | outcome unknown after a dispatched mutation: run the `shk status` command in the reply's `next` |
 | 6 | status ok, but the newest job of a requested name has an anomaly |
