@@ -205,20 +205,28 @@ suite on every GPU job's startup path.
 
 ### Run different revisions from one Git mirror
 
-A project can keep one Git mirror on Sherlock and create a detached linked
-worktree for each revision needed by concurrent jobs. The project uses Git to
-manage these checkouts and coordinate changes to their shared Git metadata.
-Kit submits the project's batch script and transfers its inputs and outputs.
+A project can keep one Git mirror on Sherlock and add a detached worktree for
+each revision that concurrent jobs need. The project creates and removes these
+worktrees with Git; Kit does not manage them. It submits the project's batch
+script and transfers its inputs and outputs.
 
-Record the absolute worktree path, full commit SHA, interpreter or container
-image, and a separate writable output directory for each job before submission.
-At job startup, verify the commit, working directory, runtime identity and the
-paths of the modules actually imported. Jobs at the same commit can share a
-read-only checkout when their runtimes resolve the intended code and their
-writes go to separate run directories. Pin shared environments and model assets
-to immutable versions, or hold a project read lease until the worker and its
-children exit. Updates to those assets must acquire the corresponding write
-lease.
+Before submission, record each job's absolute worktree path, full commit SHA,
+interpreter or container image and its own writable output directory. At job
+startup, check the commit with a read-only command such as
+`git -C "$WORKTREE" rev-parse HEAD`, the working directory, the runtime
+identity and the file paths of the modules actually imported. An editable
+install (`pip install -e`) in a shared environment imports the checkout it was
+installed from, not the job's worktree: put the worktree's source directory
+first on `PYTHONPATH`, or install each revision into its own environment. Jobs
+at the same commit can share one worktree when each writes its outputs to its
+own run directory.
+
+Never change a worktree, environment or model asset in place while a submitted
+job may still use it. A pending job starts later and a requeued job runs its
+script again, so either would pick up the change. Put a new version at a new
+path and point later submissions at it. Remove an old worktree or asset only
+after Slurm accounting shows every job that references it as terminal and
+unable to restart; pending, running, requeued and unknown jobs keep it.
 
 ## Queue independent first pilots as they become ready
 

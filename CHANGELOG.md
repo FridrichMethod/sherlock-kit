@@ -21,6 +21,13 @@ Guidance:
 
 Documentation:
 
+- The campaign guide describes running several revisions of a project from
+  one Git mirror with a detached worktree per revision: what to record before
+  submission, what to check at job startup (including an editable install
+  that imports another checkout), and why a worktree, environment or model
+  asset stays unchanged until every job that references it is terminal.
+  Documentation only; no CLI change.
+
 - The README is an overview with highlights, a diagram, a quick start and a
   command table. The command contracts, configuration keys and exit codes
   are in the new command reference, `docs/cli.md`, split into a section per
