@@ -137,11 +137,12 @@ stated elsewhere:
   queue, setup, compute and recovery time and the pointer to department and
   `owners` partitions, which the skill and the
   [campaign guide](campaign-throughput.md) carry beside the earliest-start
-  priority. That section also does not repeat three statements that each file
+  priority. That section also does not repeat four statements that each file
   makes elsewhere: the borrowed budgets, which the partition profiles give; the
-  ban on padding and on jobs of less than 10 useful minutes, and the discovery
-  of partition limits and features, which the workstation file's Jobs and the
-  cluster file's Slurm section give;
+  ban on padding and on jobs of less than 10 useful minutes, the discovery of
+  partition limits and features, and the 60 s cadence for status and resources
+  checks, which the workstation file's Jobs and the cluster file's Slurm
+  section give;
 - in the GPU scheduling defaults, the check of a real compatibility
   uncertainty and the reading of `resources --summary` slots for the eligible
   GPU features only, which the skill and the campaign guide give;
