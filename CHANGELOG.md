@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+Guidance:
+
+- Before GPU submission, the rules files, the skill and the campaign guide
+  size a request to the worker's useful threads and measured peak host RAM
+  plus headroom, and compare candidate requests by their
+  `shk resources --summary --shape` slots in one fresh snapshot: a node whose
+  GPU is free but whose CPUs or scheduler memory are taken has no slot. The
+  accepted owner GPU defaults all stay: GPU models are scientifically
+  equivalent, snapshots do not guarantee starts, the `--prefer` tier is purely
+  a compute-capability ordering, so it applies across projects, and requeue
+  restarts the script, not application state. Both rules files carry
+  `Reviewed 2026-11-20`; none of the five site files changed since the last
+  review.
+- The rules files and the skill changed, so `shk install-skill --check`
+  reports installed copies as stale; run `shk install-skill` again, with the
+  same `--rules`, to refresh them.
+
 Documentation:
 
 - The README is an overview with highlights, a diagram, a quick start and a

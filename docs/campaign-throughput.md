@@ -22,7 +22,8 @@ Before submitting a GPU job, check how many eligible nodes can fit its CPU and
 host memory request alongside its GPUs. A node with a free GPU can already have
 most of its CPUs or scheduler memory allocated. Start with the worker's useful
 thread count and a representative peak host memory measurement (for example,
-the batch step's `MaxRSS`), plus headroom for the largest input and model
+`sacct` `MaxRSS` of the step that ran the worker: the batch step, or the
+`srun` step that launched it), plus headroom for the largest input and model
 loading. Check GPU memory, kernels and numerical precision separately.
 
 Compare plausible requests in one current snapshot. For example, if a worker

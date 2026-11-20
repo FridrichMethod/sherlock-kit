@@ -142,9 +142,12 @@ stated elsewhere:
   ban on padding and on jobs of less than 10 useful minutes, and the discovery
   of partition limits and features, which the workstation file's Jobs and the
   cluster file's Slurm section give;
-- the `submit --preflight` estimate and the `resources --summary` mode, and in
-  the cluster file the compatible partition list of `submit`, which the skill
-  describes.
+- in the GPU scheduling defaults, the check of a real compatibility
+  uncertainty and the reading of `resources --summary` slots for the eligible
+  GPU features only, which the skill and the campaign guide give;
+- the `submit --preflight` estimate and the `resources --summary` output
+  fields, and in the cluster file the compatible partition list of `submit`,
+  which the skill describes.
 
 ## Toolkit choices stricter than the site
 
@@ -193,9 +196,12 @@ owner defaults, not Slurm enforcement or site rules. They favor the earliest
 start, broad compatible GPU choices with a soft preference for compatible
 L40/A/H and future B/newer GPUs, expected completion time across authorized
 partitions (in the skill and the campaign guide), longer useful resumable
-bundles, parallel ready work and bounded resource-aware rebalancing. Before GPU submission, compare workload-sized CPU and host RAM requests against
-the remaining GPUs, CPUs and scheduler memory on each eligible node. Use the
-worker thread budget and representative peak host RAM with headroom. Only the memory, kernel and dtype requirements that
+bundles, parallel ready work and bounded resource-aware rebalancing. Oversized
+CPU requests are reduced: before GPU submission, requests sized to the
+worker's useful threads and measured peak host RAM plus headroom are compared
+by their `shk resources --summary --shape` slots, which count how many whole
+requests fit in the GPUs, CPUs and scheduler memory still unallocated on each
+node. Only the memory, kernel and dtype requirements that
 have real evidence are kept, beside the site rules; RTX_2080Ti and Pascal-era
 GPUs are avoided by default, and real architecture needs still narrow the
 choice.
