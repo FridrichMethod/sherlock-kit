@@ -720,7 +720,8 @@ These run before any remote call, without network; each failure is exit 1
   made of letters, digits and `_ . : + * & | ( ) [ ] -` only: whitespace never
   matches a feature and would break the one-line re-read, Slurm stores `,` as
   `&` (write `&`), and `=` could forge a field of the record. An empty value,
-  which would clear the field, is not supported.
+  which would clear the field, is not supported, and neither is the literal
+  `(null)`, which Slurm prints for an unset value.
 - `--throttle` takes a decimal from 1 to 1000, the per-array task maximum; 0,
   Slurm's "no limit", is not accepted.
 

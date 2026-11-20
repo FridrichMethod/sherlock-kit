@@ -17,7 +17,8 @@ command.
   Zero or several groups are exit 1 `spec_invalid`, because Slurm applies the
   keys of one `scontrol update` one at a time without rollback; so are an
   `N_TASK` job id, an empty, too long or out-of-alphabet feature value
-  (whitespace, `,` or `=`) and a throttle of 0.
+  (whitespace, `,` or `=`), the feature value `(null)` (how Slurm prints an
+  unset value) and a throttle of 0.
 - The partition checks of `submit` apply offline (`unknown_partition`,
   `batch_not_allowed`, `partitions_incompatible`), and a move to a borrowed
   partition is exit 3 `borrowed_not_allowed`: cancel, run `shk occupancy`,

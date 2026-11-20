@@ -302,6 +302,11 @@ def _request(args: argparse.Namespace) -> tuple[str, list[str], dict[str, str]]:
                     f"--{label} {value!r}: give 1 to 1024 characters of A-Z a-z 0-9 _ . : + * & "
                     "| ( ) [ ] - (no spaces, commas or '='); clearing a value is not supported"
                 )
+            if value == "(null)":
+                raise _invalid(
+                    f"--{label} '(null)': Slurm prints (null) for an unset value; clearing a "
+                    "value is not supported"
+                )
             requested[key] = value
         return field, [args.constraint or "", args.prefer or ""], requested
     if not THROTTLE.fullmatch(args.throttle) or int(args.throttle) > spec.ARRAY_MAX_TASKS:

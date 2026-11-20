@@ -763,6 +763,8 @@ class UpdateOffline(UpdateFlow):
             (("--constraint", "CPU_GEN:SKX CPU_GEN:CLX"), 1, "spec_invalid"),
             (("--constraint", "CPU_GEN:SKX,IB:HDR"), 1, "spec_invalid"),
             (("--constraint", "a Partition=gpu"), 1, "spec_invalid"),
+            (("--constraint", "(null)"), 1, "spec_invalid"),  # how Slurm prints an unset value
+            (("--prefer", "(null)"), 1, "spec_invalid"),
             (("--prefer", "CPU_GEN=SKX"), 1, "spec_invalid"),
             (("--prefer", long), 1, "spec_invalid"),
             (("--prefer", "é"), 1, "spec_invalid"),
