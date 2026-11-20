@@ -233,6 +233,7 @@ class UpdateCases:
             ("1-00:00:00", "90m", "TimeLimit=90", "01:30:00"),
             ("02:00:00", "1:59:01", "TimeLimit=120", None),  # rounds up to the current limit
             ("7-00:00:00", "47h", "TimeLimit=2820", "1-23:00:00"),
+            ("09:08:00", "8:09:00", "TimeLimit=489", "08:09:00"),  # 08 and 09 are not octal
         )
         for limit, given, sent, shown in cases:
             with self.subTest(given=given):
@@ -275,6 +276,20 @@ class UpdateCases:
                 ["show", "partition", "bioe", "--oneliner"],
             ],
         )
+
+    def test_a_partition_set_narrowed_to_one_member_is_dispatched(self):
+        gpu_job = {"ReqTRES": GPU_TRES, "TresPerNode": "gres/gpu:1"}
+        self.scontrol({
+            show(): [
+                {"out": lines(record(Partition="bioe,gpu", **gpu_job))},
+                {"out": lines(record(Partition="gpu", **gpu_job))},
+            ],
+            "show partition gpu --oneliner": {"out": partition("gpu")},
+            "update JobId=44 Partition=gpu": {},
+        })
+        code, report = self.update("--partition", "gpu")
+        self.assertEqual((code, report["action"]), (0, "updated"), report)
+        self.assertEqual(self.dispatches(), [["update", "JobId=44", "Partition=gpu"]])
 
     def test_constraint_and_prefer_go_together_and_each_alone(self):
         allowed, preferred = (
@@ -413,6 +428,12 @@ class UpdateCases:
                 features,
             ),
             ("50", record("50", **array), ("--throttle", "2"), {"ArrayTaskThrottle": "2"}),
+            (
+                "50",
+                record("50", **array, Partition="btrippe"),
+                ("--throttle", "2"),
+                {"ArrayTaskThrottle": "2"},
+            ),
         )
         for job, found, argv, requested in cases:
             with self.subTest(argv=argv):
@@ -531,16 +552,20 @@ class UpdateCases:
                 self.assertEqual((code, report["error"]), (3, "remote_refused"), report)
                 self.assertTrue(report["message"].startswith(f"update: SHK_REFUSED {why}"))
                 self.assertEqual(self.dispatches(), [])
-        self.fresh()
-        self.scontrol({
-            show(): [
-                {"out": lines(record(**long))},
-                {"out": lines(record(**long, Partition="bigmem"))},
-            ],
-            "show partition bigmem --oneliner": {"out": partition("bigmem", "UNLIMITED")},
-            "update JobId=44 Partition=bigmem": {},
-        })
-        self.assertEqual(self.update("--partition", "bigmem")[1]["action"], "updated")
+        # UNLIMITED fits any time limit, and a limit equal to MaxTime fits.
+        for limit, max_time in (("3-00:00:00", "UNLIMITED"), ("2-00:00:00", "2-00:00:00")):
+            with self.subTest(limit=limit, max_time=max_time):
+                self.fresh()
+                self.scontrol({
+                    show(): [
+                        {"out": lines(record(TimeLimit=limit))},
+                        {"out": lines(record(TimeLimit=limit, Partition="bigmem"))},
+                    ],
+                    "show partition bigmem --oneliner": {"out": partition("bigmem", max_time)},
+                    "update JobId=44 Partition=bigmem": {},
+                })
+                code, report = self.update("--partition", "bigmem")
+                self.assertEqual((code, report["action"]), (0, "updated"), report)
 
     def test_a_failed_update_that_left_the_records_unchanged_is_unknown(self):
         self.scontrol({
@@ -577,6 +602,39 @@ class UpdateCases:
             "update outcome not confirmed: scontrol update exit 0; records 51 do not show "
             "Partition=bigmem",
         )
+        # Within one record: Slurm stores Features, then rejects Prefer without rollback.
+        self.fresh()
+        self.scontrol({
+            show(): [{"out": lines(record())}, {"out": lines(record(Features="CPU_GEN:SKX"))}],
+            "update JobId=44 Features=CPU_GEN:SKX Prefer=BOGUS": {
+                "err": "Invalid prefer specification for job 44\n",
+                "rc": 1,
+            },
+        })
+        code, report = self.update("--constraint", "CPU_GEN:SKX", "--prefer", "BOGUS")
+        self.assertEqual(code, 5)
+        self.assertEqual(
+            self.unknown(report),
+            "update outcome not confirmed: scontrol update exit 1: Invalid prefer specification "
+            "for job 44; records 44 do not show Features=CPU_GEN:SKX Prefer=BOGUS",
+        )
+        # A member Slurm drops (DRAIN or INACTIVE) while scontrol exits 0.
+        self.fresh()
+        gpu_job = {"ReqTRES": GPU_TRES, "TresPerNode": "gres/gpu:1"}
+        self.scontrol({
+            show(): {"out": lines(record(Partition="gpu", **gpu_job))},
+            "show partition gpu --oneliner": {"out": partition("gpu")},
+            "show partition bioe --oneliner": {"out": partition("bioe")},
+            "update JobId=44 Partition=gpu,bioe": {},
+        })
+        code, report = self.update("--partition", "gpu,bioe")
+        self.assertEqual(code, 5)
+        self.assertEqual(
+            self.unknown(report),
+            "update outcome not confirmed: scontrol update exit 0; records 44 do not show "
+            "Partition=gpu,bioe",
+        )
+        self.assertEqual(self.dispatches(), [["update", "JobId=44", "Partition=gpu,bioe"]])
 
     def test_a_failed_or_empty_reread_is_unknown(self):
         cases = (
