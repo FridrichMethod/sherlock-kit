@@ -18,9 +18,31 @@ Keep partition, GPU count, CPUs, memory, walltime and constraint explicit in the
 submission. The owner defaults below are agent guidance, not additional TOML
 keys, automatic hardware selection or a new site policy.
 
-Prioritize the earliest start. Reduce oversized CPU requests. Keep only the
-memory, kernel and dtype requirements that have real evidence, and the site
-rules.
+Before submitting a GPU job, check how many eligible nodes can fit its CPU and
+host memory request alongside its GPUs. A node with a free GPU can already have
+most of its CPUs or scheduler memory allocated. Start with the worker's useful
+thread count and a representative peak host memory measurement (for example,
+the batch step's `MaxRSS`), plus headroom for the largest input and model
+loading. Check GPU memory, kernels and numerical precision separately.
+
+Compare plausible requests in one current snapshot. For example, if a worker
+uses four threads and peaks at 12 GiB of host RAM, compare a 24 GiB request
+with a 48 GiB request.
+
+```sh
+shk resources --partition owners --summary --by sku \
+  --shape measured:cpus=4,mem=24G,gpus=1 \
+  --shape larger:cpus=4,mem=48G,gpus=1
+```
+
+Read `slots` for the GPU features the workload accepts. For combined SKU and
+class constraints, apply both conditions to the per-node output from
+`shk resources --partition owners`. Each slot requires enough unallocated CPUs,
+host RAM and GPUs on the same node. If an eligible node has one free GPU,
+four free CPUs and 32 GiB of scheduler memory left, only the 24 GiB request
+fits there. Choose a request that covers the workload and fits more available
+capacity. More fitting slots can improve backfill opportunities. Priority,
+reservations and other pending work still determine the start time.
 
 Use a broad OR constraint over compatible GPUs rather than one SKU without a
 technical reason. Discover current feature names and limits with `sh_node_feat`

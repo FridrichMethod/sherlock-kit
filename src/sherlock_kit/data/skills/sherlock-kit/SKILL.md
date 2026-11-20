@@ -53,7 +53,7 @@ shk submit --task train-a --script job.sh --partition normal --cpus 4 --mem 16G 
 
 ## GPU and partition preferences
 
-These owner defaults guide agents; they do not inject CLI/TOML defaults or change site restrictions. Explicit task requirements and site policy take precedence. Discover actual features with `sh_node_feat` and partition limits with `sh_part` in a login shell. Prioritize the earliest start, and choose by expected time to completion, including queueing, startup, computation and recovery, not peak GPU speed alone. Reduce oversized CPU requests. Keep only the memory, kernel and dtype requirements that have real evidence, and the site rules.
+These owner defaults guide agents; they do not inject CLI/TOML defaults or change site restrictions. Explicit task requirements and site policy take precedence. Discover actual features with `sh_node_feat` and partition limits with `sh_part` in a login shell. Prioritize the earliest start, and choose by expected time to completion, including queueing, startup, computation and recovery, not peak GPU speed alone. Before GPU submission, compare viable CPU and host RAM requests with one fresh `shk resources --partition P --summary --by sku --shape name:cpus=N,mem=SIZE,gpus=1` snapshot. Compare slots for eligible GPU features only. All requested GPUs, CPUs and scheduler memory must fit on the same node. Set CPUs to the useful thread count and host RAM to measured peak use plus headroom. A shape that fits more nodes can shorten the wait. Keep only the memory, kernel and dtype requirements that have real evidence, and the site rules.
 
 Start with a broad compatible OR constraint. The discovered production candidates include:
 

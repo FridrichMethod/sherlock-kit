@@ -12,7 +12,7 @@ recommended practice.
 
 The rules follow Sherlock's agent instructions, `/etc/agents/AGENTS.md` and the
 four topic files beside it, as last modified on the dates below. Both rules
-files carry `Reviewed 2026-11-14`, the date of their last comparison with those
+files carry `Reviewed 2026-11-20`, the date of their last comparison with those
 files; `tests/test_release_metadata.py` pins that date.
 
 | File | Last modified | Topics |
@@ -193,8 +193,9 @@ owner defaults, not Slurm enforcement or site rules. They favor the earliest
 start, broad compatible GPU choices with a soft preference for compatible
 L40/A/H and future B/newer GPUs, expected completion time across authorized
 partitions (in the skill and the campaign guide), longer useful resumable
-bundles, parallel ready work and bounded resource-aware rebalancing. Oversized
-CPU requests are reduced. Only the memory, kernel and dtype requirements that
+bundles, parallel ready work and bounded resource-aware rebalancing. Before GPU submission, compare workload-sized CPU and host RAM requests against
+the remaining GPUs, CPUs and scheduler memory on each eligible node. Use the
+worker thread budget and representative peak host RAM with headroom. Only the memory, kernel and dtype requirements that
 have real evidence are kept, beside the site rules; RTX_2080Ti and Pascal-era
 GPUs are avoided by default, and real architecture needs still narrow the
 choice.
