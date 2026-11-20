@@ -161,7 +161,12 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   `--courtesy-ack`; their budgets and the possu 00:00-07:00 Pacific window are
   the owner's courtesy terms, carried as text. Releasing a job held there counts
   as submitting it (same occupancy check, budget and window); `shk release`
-  itself checks neither occupancy nor the clock.
+  itself checks neither occupancy nor the clock. `shk update` refuses borrowed
+  targets: a move to `btrippe` or `possu` (exit 3 `borrowed_not_allowed`) and
+  a throttle raise on an array with a record on one of them; the caller
+  cancels, runs `shk occupancy` and resubmits with `--courtesy-ack`. Lowering
+  that throttle, or moving a pending job off a borrowed partition, is not
+  refused.
 - Requeue only where the profile allows it (`owners`); everything else is
   submitted with `--no-requeue`.
 - Only `submit` takes a partition list, one comma-separated value such as
@@ -182,6 +187,12 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Remote work goes only through `shk` or bounded OpenSSH over the user's
   control masters, and jobs only through `shk submit`, never raw `sbatch` over
   ssh.
+- Changes to a pending job, and to an array's throttle, go through
+  `shk update`, never raw `scontrol update`: one field group per call, a time
+  limit only decreased (Slurm accepts a pending increase up to the partition's
+  MaxTime), a partition only within the job's requeue and preemptible class
+  and never a borrowed one, and an outcome settled by a re-read of every
+  record rather than by the exit status of `scontrol`.
 - Jobs on `owners` must checkpoint periodically (the site accepts checkpoint or
   requeue); live requeues gave no usable SIGTERM window
   (docs/validation/observed-slurm.md).

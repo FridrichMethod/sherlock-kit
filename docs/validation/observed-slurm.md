@@ -339,6 +339,38 @@ so both stay unverified-live after this check. A real submission that Slurm
 rejects is exit 5 (outcome unknown) in `shk submit`, as for any `sbatch`
 error.
 
+`shk update` has not run live either. It rests on the Slurm source at tag
+`slurm-25-11-9-1` ([job updates](#job-updates)) and on offline tests with a
+fake `scontrol`, while Sherlock runs Slurm 25.11.8. The 25.11.9 changelog lists
+no change on the job update paths read there
+([`CHANGELOG/slurm-25.11.md`, lines 1-7](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/CHANGELOG/slurm-25.11.md#L1)),
+so 25.11.8 most likely behaves the same (inferred from the changelog, not from
+a diff; line numbers in `job_mgr.c` can differ by a few lines). Not
+determinable from the source: what the modify hook of Sherlock's job_submit
+plugin does with an update (pass, reject or rewrite it), and the
+`EnforcePartLimits`, `AccountingStorageEnforce` and `PriorityFlags` values and
+accrue limits (`MaxJobsAccrue`, `GrpJobsAccrue`) that decide whether a
+partition move is checked against partition limits and whether it resets the
+age factor. The attended check that would confirm them needs the owner's
+approval: a held CPU job on `normal`, here a 2-task array so that the
+throttle can be tried too, each field updated and re-read.
+
+```sh
+shk submit --task update-probe --script job.sh --partition normal --cpus 1 --mem 2G --time 20m --array 2%1 --submission-token update-probe-1 --hold
+shk update --job-id N --expect-name NAME --expect-token update-probe-1 --time 10m
+shk update --job-id N --expect-name NAME --expect-token update-probe-1 --throttle 2
+shk status --job-id N --details
+shk cancel --task update-probe
+```
+
+The hold keeps the 2-task array pending, so nothing runs and no GPU is
+involved. The partition and features steps follow the same pattern, with a
+second listed partition of the same class that the job may use and a feature
+name discovered on `normal` nodes at the time. Each reply's `before`, `after`
+and `slurm_messages`, and the control records of `status --details`, show what
+Slurm stored, whether the plugin added a message, and whether a held job keeps
+`Reason=JobHeldUser`.
+
 The following are confirmed in the official Slurm source at tag
 `slurm-25-11-9-1` and are likewise not observed live:
 
@@ -567,3 +599,193 @@ and not observed live:
   ([`src/scontrol/info_job.c`, lines 508-515 and 556-561](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L508)).
   The index printed with details is a position in a bitmap, not a device
   UUID.
+
+### Job updates
+
+`shk update` depends on these. Confirmed in the source at the same tag, or
+inferred from it where a statement says so, and not observed live:
+
+- One update is not atomic. The controller commits the keys of a request one
+  at a time, in a fixed order whatever their order on the command line:
+  ArrayTaskThrottle
+  ([`src/slurmctld/job_mgr.c`, lines 12692-12698](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L12692)),
+  Partition
+  ([lines 13680-13690](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13680)),
+  TimeLimit
+  ([lines 13966-13990](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13966)),
+  Features
+  ([lines 14410-14416](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14410))
+  and Prefer
+  ([lines 14462-14468](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14462)),
+  then runs `job_limits_check` on the modified job
+  ([line 15062](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15062)).
+  A failure jumps to the end of the function, which rolls nothing back
+  ([lines 15320-15368](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15320)),
+  so the keys committed before it stay applied. The throttle is stored before
+  the job_submit modify hook runs
+  ([lines 12738-12740](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L12738))
+  and before the checks that return early, so it survives even their
+  rejection.
+- `JobId=<ArrayJobId>` updates the meta record and then, separately, every
+  split record still in the controller, finished ones included
+  ([lines 15526-15555](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15526)).
+  The reply groups the per-record results by return code and keeps the first
+  message of each group
+  ([lines 649-650](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L649)
+  and
+  [779-790](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L779)).
+  `scontrol` prints a failed group as `N_1-3,7: <error>` on stderr and a
+  successful group's message on stdout, and exits 1 when any group failed
+  ([`src/scontrol/update_job.c`, lines 1139-1174](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/update_job.c#L1139));
+  its exit status is 0 or 1 only
+  ([`src/scontrol/scontrol.c`, line 72](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/scontrol.c#L72)).
+- A split record has no array records and skips the throttle, so a finished
+  one returns `Job has already finished`
+  ([`src/slurmctld/job_mgr.c`, lines 12692-12715](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L12692)):
+  a throttle update exits 1 while finished split records are still in the
+  controller (until MinJobAge expires), although the meta record stored the
+  new throttle. Every record of an array, the meta record and each split
+  record, prints the meta record's current throttle as `ArrayTaskThrottle=M`
+  after `ArrayTaskId` when it is not 0, and no such field without a limit
+  ([`src/scontrol/info_job.c`, lines 180-193](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L180);
+  [`src/slurmctld/job_mgr.c`, lines 10536-10548](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L10536)).
+- ArrayTaskThrottle is accepted only on an ArrayJobId: a regular job, a split
+  task addressed by its own id and a hetjob get
+  `Update of ArrayTaskThrottle is only allowed on ArrayJobId` with
+  `Requested operation not supported on this system`, and nothing changes
+  ([lines 15511-15523](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15511)
+  and
+  [15395-15398](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15395)).
+  The owner may raise or lower it, and it is stored whether the meta record is
+  pending, running or finished; the value is not compared with the old one or
+  with any limit
+  ([lines 12692-12709](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L12692)),
+  and 0 removes the limit
+  ([`doc/man/man1/scontrol.1`, lines 935-938](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/man/man1/scontrol.1#L935)).
+- The modify hook of the job_submit plugins runs on every update, once per
+  record of an array, before the field checks. It can reject the update or
+  rewrite the requested values, and its message reaches the client
+  ([`src/interfaces/job_submit.c`, lines 220-244](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/interfaces/job_submit.c#L220);
+  [`src/plugins/job_submit/lua/job_submit_lua.c`, lines 1475-1525](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/job_submit/lua/job_submit_lua.c#L1475)).
+  It is not called for a finished record, and a Lua runtime error lets the
+  update proceed. The message of a reply that is not an array reply is printed
+  on stderr as `scontrol: error: <text>`, also on success
+  ([`src/common/slurm_protocol_pack.c`, lines 8358-8369](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/slurm_protocol_pack.c#L8358)).
+- After the keys are committed, `job_limits_check` can still return
+  `Requested partition configuration not available now` or a QOS threshold
+  error with every change kept, while a time limit above the partition's
+  MaxTime, a node-count limit or a DOWN partition returns success and leaves
+  the job pending
+  ([`src/slurmctld/job_mgr.c`, lines 15062-15082](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15062)).
+- When no reply is decoded, after a connection or timeout failure, the reply
+  type stays unset, and `scontrol` prints
+  `Unexpected message received for job N` and exits 1, whether or not the
+  request reached the controller
+  ([`src/api/update_config.c`, lines 88-124](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/update_config.c#L88);
+  [`src/common/slurm_protocol_defs.h`, lines 363-373](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/slurm_protocol_defs.h#L363)).
+- TimeLimit: the owner may decrease it in PENDING, RUNNING or SUSPENDED state.
+  A finished job, or one whose preemption has started, gets
+  `Job has already finished`; a value below the effective TimeMin gets error
+  2124, `Invalid time-min specification (exceeds job's time or other limits)`;
+  an equal value is a successful no-op
+  ([`src/slurmctld/job_mgr.c`, lines 13966-13990](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13966);
+  [`src/common/slurm_errno.c`, lines 672-673](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/slurm_errno.c#L672)).
+  An increase is accepted for a PENDING job up to the MaxTime of its partition
+  and refused otherwise (`Access/permission denied`)
+  ([`src/slurmctld/job_mgr.c`, lines 14018-14034](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14018)),
+  so refusing a pending increase is `shk` policy, not a Slurm certainty.
+  Neither partition MaxTime nor QOS MaxWall can reject a decrease that only
+  touches TimeLimit: the limit check that can fail runs only when the
+  partition, QOS or account changes
+  ([lines 13532-13561](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13532)).
+- A decrease below a RUNNING job's elapsed time does not end the job inside
+  the request: its end time is moved and clamped to the present
+  ([lines 13997-14008](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13997)),
+  and the periodic time-limit pass, every 30 s, ends it as TIMEOUT once the end
+  time plus OverTimeLimit has passed
+  ([lines 9459-9476](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L9459);
+  [`src/slurmctld/controller.c`, lines 2848-2853](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/controller.c#L2848)).
+- `scontrol` reads `TimeLimit=+N`, `TimeLimit=-N`, `TimeLimit+=N` and
+  `TimeLimit-=N` as relative changes computed in the client, so
+  `TimeLimit=-1` means one minute less; a plain number is minutes
+  ([`src/scontrol/update_job.c`, lines 586-593 and 672-683](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/update_job.c#L586)).
+  `scontrol show job` prints TimeLimit as `Partition_Limit`, `UNLIMITED`,
+  `D-HH:MM:SS` or `HH:MM:SS` with seconds `00`, and TimeMin the same way or
+  `N/A` when unset
+  ([`src/scontrol/info_job.c`, lines 297-308](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L297);
+  [`src/common/parse_time.c`, lines 820-843](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/parse_time.c#L820)).
+- Partition: a real change needs a PENDING record
+  (`Job is no longer pending execution`), and a byte-identical value is a
+  successful no-op, compared as a string, so the same set in another order is
+  a real change
+  ([`src/slurmctld/job_mgr.c`, lines 12834-12841](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L12834)).
+  The parsed list is sorted by PriorityTier
+  ([`src/slurmctld/partition_mgr.c`, lines 729-741](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/partition_mgr.c#L729)),
+  and the stored string is rebuilt from it at commit
+  ([`src/slurmctld/job_mgr.c`, lines 13680-13690](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13680)).
+  A member that takes no submissions (DRAIN, INACTIVE) is replaced by its
+  Alternate, with no new sort or deduplication, or dropped while the request
+  still succeeds
+  ([lines 6647-6690](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6647)).
+- An update leaves Requeue, the dependency (`singleton`, `afterok`) and the
+  begin time alone unless the request names them: each changes only in its
+  own block
+  ([lines 14113-14117](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14113),
+  [14914](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14914)
+  and
+  [14971](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14971)).
+  A partition change can re-resolve the job's association where
+  partition-specific associations exist. A held job stays held: the priority
+  changes only with `Priority=`
+  ([line 14119](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14119)),
+  and a user or administrator hold keeps its Reason, while a successful update
+  can reset the Reason of other jobs to None
+  ([lines 15083-15101](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L15083)).
+- A job's GRES request (its GPUs) is checked again only when a GRES or task
+  field is itself updated
+  ([lines 13217-13221](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13217)),
+  never against new partitions, so a GPU job moved to a partition without GPUs
+  is accepted and then pends; for a single partition the scheduler marks such
+  a job `BadConstraints` with priority 0
+  ([`src/slurmctld/job_scheduler.c`, lines 2012-2023](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L2012))
+  (inferred: the select plugin's verdict on a GRES mismatch was not traced).
+- Under `AccountingStorageEnforce=limits` without
+  `PriorityFlags=ACCRUE_ALWAYS`, any real partition change, a reordered list
+  included, zeroes the job's accrue time
+  ([`src/slurmctld/job_mgr.c`, lines 13626-13632](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L13626);
+  [`src/slurmctld/acct_policy.c`, lines 5118-5170](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L5118)).
+  The next scheduler pass sets it again, to the begin time without an accrue
+  limit and to the present where `MaxJobsAccrue` or `GrpJobsAccrue` applies
+  ([lines 4864-4873](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L4864);
+  [`src/slurmctld/job_scheduler.c`, lines 681-687](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L681)),
+  so the age factor of the job's priority dips until then, or restarts.
+- `Features=` and `Prefer=` are separate keys. There is no `Constraint` key:
+  `scontrol` answers it with `Update of this parameter is not supported` and
+  sends nothing
+  ([`src/scontrol/update_job.c`, lines 999-1004 and 1084-1090](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/update_job.c#L999)).
+  The value is the raw text after the first `=` of one argv element
+  ([lines 586-593](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/update_job.c#L586)).
+  A changed value needs a PENDING record, and an identical one is a successful
+  no-op
+  ([`src/slurmctld/job_mgr.c`, lines 14410-14416 and 14462-14468](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L14410)).
+  Slurm stores `,` as `&`
+  ([`src/slurmctld/job_scheduler.c`, lines 5125-5127](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L5125)),
+  and each value takes at most 1024 bytes
+  ([`src/slurmctld/job_mgr.c`, lines 7851-7862](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L7851)).
+- Feature names are checked against the features of every node in the
+  cluster, whatever the job's partitions and the user's access
+  ([`src/slurmctld/job_scheduler.c`, lines 5632-5653](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L5632);
+  [`src/common/node_features.c`, lines 141-178](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/common/node_features.c#L141)),
+  so a name that no node of the job's partitions has is accepted, and the
+  scheduler finds no node for the job
+  ([`src/slurmctld/node_scheduler.c`, lines 4089-4096](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/node_scheduler.c#L4089)).
+- A job with a Prefer is tried first with the Prefer alone, not with Prefer
+  and Features together, and then with Features
+  ([`src/slurmctld/job_scheduler.c`, lines 1105-1117 and 1120-1138](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L1105)).
+- `scontrol show job` prints the stored Features of a PENDING record, with `,`
+  already `&`, and `Prefer=` only when one is set
+  ([`src/scontrol/info_job.c`, lines 711 and 722-724](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/scontrol/info_job.c#L711));
+  unset Features print as `Features=(null)`, an inference from the C library.
+  For a record that is not pending it prints the expression in use, which can
+  be the Prefer, and no Prefer
+  ([`src/slurmctld/job_mgr.c`, lines 11132-11138](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L11132)).

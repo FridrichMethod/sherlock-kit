@@ -10,7 +10,7 @@ flag list. [Installation and connection](install.md) covers setup; the
 - [Exit codes](#exit-codes)
 - [Configuration](#configuration)
 - Jobs: [submit](#submit), [status](#status), [cancel](#cancel),
-  [occupancy](#occupancy)
+  [update](#update), [occupancy](#occupancy)
 - Capacity: [resources](#resources), [resource summary](#resource-summary)
 - Inside a job: [allocation](#allocation),
   [release and requeue](#release-and-requeue),
@@ -35,6 +35,8 @@ shk resources --partition P [--partition P ...]
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION [--hostlist EXPRESSION ...]]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
 shk requeue --self --expect-name NAME [--expect-token TOKEN]
+shk update --job-id N --expect-name NAME [--expect-token TOKEN]
+           (--time DUR | --partition P[,P...] | --throttle M | [--constraint X] [--prefer X])
 shk status (--task T [--task T ...] [--campaign C [--campaign C ...]] [--run-dir PATH [--run-dir PATH ...]] | --name NAME [--name NAME ...] | --all | --job-id ID [--job-id ID ...])
            [--since DAYS] [--details]
            (--campaign once for every --task, or once per --task; --run-dir once per --task, or not at all)
@@ -64,9 +66,9 @@ shk manifest DIR
 | 0 | ok |
 | 1 | local error: configuration, spec, verification, validator, malformed reply, failed remote read |
 | 2 | usage error |
-| 3 | refused, and nothing was submitted, cancelled, released or requeued: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, an incompatible partition list (`partitions_incompatible`), a remote guard that stopped before `sbatch` or `scancel` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock |
+| 3 | refused, and nothing was submitted, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, an incompatible partition list (`partitions_incompatible`), an `update` to a borrowed partition (`borrowed_not_allowed`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock |
 | 4 | SSH transport or master check unavailable: `auth_required` (ask the user to open the master); `unavailable` with a local permission denial (check the sandbox; request per-command approval in Codex); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop) |
-| 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, `scontrol` exited nonzero in `release` or `requeue`, or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
+| 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, `scontrol` exited nonzero in `release` or `requeue`, the re-read after `scontrol update` in `update` failed or does not show the requested value on every record (whatever `scontrol` returned), or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
 | 6 | status ok, but the newest job of a requested name has an anomaly |
 
 ## Configuration
@@ -664,6 +666,187 @@ failed; a nonzero `scontrol` mutation is exit 5 with `scontrol ACTION exit RC`
 and Slurm's message in `detail`, and a lost reply is exit 5 too. Slurm
 ownership checks still apply, and concurrent user changes can race the
 identity read. Checkpoint durability and retry limits belong to the caller.
+
+## `update`
+
+`update` changes one field group of one own job in place, after identity
+checks on every record that Slurm holds for it. The job keeps its job id, so
+jobs that depend on it (`--after-ok`) still wait for it.
+
+### Field groups
+
+| Group | Options | Slurm key | Every record | What may change |
+|---|---|---|---|---|
+| time | `--time DUR` | `TimeLimit` | `PENDING` | a decrease, not below `TimeMin` |
+| partition | `--partition P[,P...]` | `Partition` | `PENDING` | a listed, non-borrowed partition or compatible set of the job's requeue and preemptible class |
+| features | `--constraint X`, `--prefer X` or both | `Features`, `Prefer` | `PENDING` | a new nonempty value |
+| throttle | `--throttle M` | `ArrayTaskThrottle` | any state | an array's run limit, 1 to 1000 |
+
+Give exactly one group per call. Zero or several groups are exit 1
+`spec_invalid`, with a hint to run one update per field: Slurm validates and
+commits the keys of one `scontrol update` one at a time, without rollback, so a
+request with several fields can fail with some of them applied
+([source-confirmed](validation/observed-slurm.md#job-updates)). `--constraint`
+and `--prefer` are one group and go in one request, because Slurm tries the
+preference instead of the constraint, not as their intersection: both must
+carry every hard requirement. A `--constraint` alone leaves a stored Prefer as
+it is, and Slurm still tries that Prefer first.
+
+- `--job-id` takes a plain job id or an array's ArrayJobId, `N` only. An update
+  addresses the whole job or the whole array, every record that Slurm holds for
+  it, so `N_TASK` is exit 1 `spec_invalid`.
+- `--expect-name` is required and nonempty, any name as for `release`, and must
+  equal JobName on every record.
+- `--expect-token` is optional, as for `requeue`: when given it must be a valid
+  token (exit 1 `spec_invalid` otherwise) and equal the Comment on every
+  record.
+
+### Offline checks
+
+These run before any remote call, without network; each failure is exit 1
+`spec_invalid` unless stated otherwise:
+
+- `--time` takes the `submit --time` grammar (`2h`, `90m` or `H:MM:SS`, above
+  zero), rounded up to whole minutes.
+- `--partition` takes the checks of a `submit` value, in the order of
+  [partition lists](#partition-lists): an unlisted member is exit 3
+  `unknown_partition`, a repeated member exit 1 `spec_invalid`, a member
+  without batch jobs exit 3 `batch_not_allowed` and an incompatible set exit 3
+  `partitions_incompatible`. A single borrowed partition (`btrippe`, `possu`)
+  is exit 3 `borrowed_not_allowed`, with the hint "cancel, run shk occupancy,
+  then resubmit with --courtesy-ack"; a set with a borrowed member is already
+  `partitions_incompatible`.
+- `--constraint` and `--prefer` take a nonempty value of at most 1024 bytes,
+  made of letters, digits and `_ . : + * & | ( ) [ ] -` only: whitespace never
+  matches a feature and would break the one-line re-read, Slurm stores `,` as
+  `&` (write `&`), and `=` could forge a field of the record. An empty value,
+  which would clear the field, is not supported.
+- `--throttle` takes a decimal from 1 to 1000, the per-array task maximum; 0,
+  Slurm's "no limit", is not accepted.
+
+### Remote checks
+
+`update.sh` reads `scontrol show job N --oneliner` once and keeps the lines
+that start with `JobId=`: the job's record, or every record of the array (the
+meta record and every split task still in the controller, finished ones
+included). Before any change it refuses with exit 3 `remote_refused`, message
+`update: SHK_REFUSED <reason>` with Slurm's text where a read failed. The
+checks run in this order, each over every record:
+
+| Reason | Refused when |
+|---|---|
+| `query` | the `show job` read failed |
+| `ambiguous` | there is no record, or a record's leading fields do not parse |
+| `id` | no record has JobId N; N is a split array task's own id; or a job that is not an array has several records |
+| `name`, `uid`, `token` | JobName is not NAME, UserId is not the caller, or Comment is not the given token |
+| `state` | time, partition, features: a record's JobState is not exactly `PENDING` |
+| `time` | TimeLimit is not `[D-]HH:MM:SS` (`UNLIMITED`, `Partition_Limit`), or the requested minutes exceed it |
+| `timemin` | the requested minutes are below TimeMin (`N/A` is 0) |
+| `requeue` | Requeue differs from the target's `requeue` value |
+| `preemptible` | a member of the current Partition is not a listed partition with the target's `preemptible` value |
+| `gpus` | the target does not allow GPUs and the job requests them (`gres/gpu` in ReqTRES or a TresPer field) |
+| `partition_query` | the `scontrol show partition` read of a target member failed |
+| `maxtime` | TimeLimit exceeds a target member's MaxTime (`UNLIMITED` passes) |
+| `array` | throttle: the job is not an array |
+| `borrowed` | throttle: a member of a record's Partition is borrowed and the throttle would rise (no throttle is no limit, so any value lowers it) |
+
+The partition checks hold a move to the rules of a submission: the job's
+requeue and preemptible class, GPUs only where the target allows them, and a
+time limit within every member's MaxTime. Slurm does not check the GPUs of a
+moved job and, unless partition limits are enforced at update time, accepts a
+time limit above MaxTime: such a job would pend instead of being refused. The
+current partition is judged by its class alone, so a job pending on a borrowed
+partition can move to a non-borrowed partition of the same class.
+
+### Outcome and reply
+
+When every record already shows the requested value (the same minutes, the
+same set of partitions in any order, the same Features and Prefer text, the
+same throttle) the reply is `unchanged` (exit 0) and nothing is dispatched.
+Otherwise `update.sh` runs exactly one `scontrol update JobId=N K=V [K=V]`,
+each `K=V` one argv element (`TimeLimit=M` in whole minutes, `Partition=` the
+value as given, `Features=`, `Prefer=`, `ArrayTaskThrottle=M`), never retries
+it, and re-reads every record. The outcome comes from that re-read alone,
+whatever `scontrol` returned:
+
+- `updated` (exit 0) when the re-read has at least one record and every record
+  shows the requested value: TimeLimit equal to the minutes, the Partition set
+  equal to the requested set, Features and Prefer equal to the given values,
+  ArrayTaskThrottle equal to M.
+- Otherwise exit 5 with `action: unknown`: `detail` names
+  `scontrol update exit RC`, Slurm's text and the records that do not show the
+  requested value, or that the re-read failed, and `next` names
+  `shk status --job-id N --details`. A lost reply, or one without exactly one
+  terminal marker, is exit 5 too.
+
+The exit status of `scontrol update` does not say whether the change happened
+([source-confirmed](validation/observed-slurm.md#job-updates)). A throttle
+stored on an array exits 1 while finished split records are still in the
+controller (`Job has already finished`), and reads as `updated` with that text
+in `slurm_messages`; a partition can be committed before a later check returns
+an error; a job_submit plugin can reject or rewrite the request; and a lost
+reply reads the same whether or not the request reached the controller. A value
+that a plugin rewrote, or a drained or inactive member that Slurm replaced by
+its Alternate or dropped, therefore reads as exit 5, settled by the status read
+in `next`.
+
+The reply, after `schema_version` and `ok`:
+
+```text
+{"action": "updated" | "unchanged", "job_id": "N", "name": NAME,
+ "submission_token": TOKEN | null, "field": "time" | "partition" | "features" | "throttle",
+ "requested": {SLURM_KEY: VALUE, ...}, "before": [RECORD, ...], "after": [RECORD, ...],
+ "slurm_messages": TEXT | null, "executor": ..., "queried_at": ..., "next_check_after": ...}
+```
+
+- `requested` holds the Slurm keys and values sent: `TimeLimit` (minutes),
+  `Partition`, `Features` and `Prefer` as given, or `ArrayTaskThrottle`.
+- `before` holds every record of the first read and `after` every record of
+  the re-read. A RECORD is `{job_id, array_task_id, state}` plus the field's
+  keys as Slurm printed them: `TimeLimit` and `TimeMin`; `Partition` and
+  `Requeue`; `Features` and `Prefer`; or `ArrayTaskThrottle`, null when the
+  record prints none.
+- For `unchanged`, `after` is `[]` and `slurm_messages` is null. For `updated`,
+  `slurm_messages` keeps Slurm's stderr and stdout text when there was any: a
+  nonzero exit with every record applied, or a plugin message.
+
+### Effects and limits
+
+- A held job stays held: an update neither releases nor sets a hold, so
+  release it with `shk release` when ready (on a borrowed partition, releasing
+  counts as submitting). For a job that is not held, a successful update can
+  reset Reason to None until the scheduler sets it again.
+- The job keeps its job id, its dependencies (`singleton`, `afterok`), its
+  begin time, its QOS and its requeue flag.
+- A partition move can lower the job's priority for a while: under
+  `AccountingStorageEnforce=limits` without `PriorityFlags=ACCRUE_ALWAYS`, the
+  move zeroes the job's accrue time, so its age factor dips until the next
+  scheduler pass and restarts from the move where accrue limits
+  (`MaxJobsAccrue`, `GrpJobsAccrue`) apply. Sherlock's settings are not known.
+- Features are not checked per partition: Slurm checks feature names against
+  the union of all node features in the cluster, so a feature that no node of
+  the job's partitions has is accepted and the job never starts. Check the
+  names on the job's partitions with `shk resources --partition P` first.
+- A shorter time limit must still fit the work or its checkpoint scheme. Slurm
+  has no "only if pending" condition: a job that starts between the read and
+  the dispatch still gets the shorter limit (`after` then shows it running, and
+  Slurm ends it if the limit is below its elapsed time), while a partition or
+  features change then fails and reads as exit 5.
+- `update` writes no file: the frozen spec under `<run-dir>/.shk/` stays the
+  request as submitted, Slurm's records carry the current one, and the reply
+  carries the records before and after. `status --task` therefore decides
+  `current.ran_on` from the spec: a job moved from one partition to a set
+  shows no `ran_on`, and a job submitted to a set keeps it.
+
+Not supported, by design: CPUs, memory, GPUs, tasks, the array size, the
+script, the signal, dependencies, the requeue flag, the begin time, the comment
+or token, nice, clearing a constraint or preference, a throttle of 0, an
+element `N_TASK`, and the time, partition or features of a job with a record
+that is not pending (a running job, or an array with a started task). The CPU
+thread budget environment is fixed at submission, a change of GPUs or memory
+changes what the script can use, and a change of several fields can apply
+partially. For these, cancel the job (`shk cancel`) and submit it again with
+`--resubmit REASON`.
 
 ## Controllers inside a job
 

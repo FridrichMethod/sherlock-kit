@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+Additions. Nothing else changes: the replies, frozen specs, `sbatch` argv
+and remote programs of the other commands are byte-identical to 0.8.0
+(`release` and `requeue` keep `control.sh`), and `shk --help` lists the new
+command.
+
+- `shk update --job-id N --expect-name NAME [--expect-token TOKEN]` changes
+  one field group of one own job in place and keeps its job id, so its
+  dependencies and the jobs that depend on it stay: `--time DUR` (a decrease,
+  not below TimeMin), `--partition P[,P...]` (a listed partition or
+  compatible set of the job's requeue and preemptible class), `--constraint X`
+  and `--prefer X` (sent together), each only while every record pends, or
+  `--throttle M` (an array's ArrayTaskThrottle, 1 to 1000, in any state).
+  Zero or several groups are exit 1 `spec_invalid`, because Slurm applies the
+  keys of one `scontrol update` one at a time without rollback; so are an
+  `N_TASK` job id, an empty, too long or out-of-alphabet feature value
+  (whitespace, `,` or `=`) and a throttle of 0.
+- The partition checks of `submit` apply offline (`unknown_partition`,
+  `batch_not_allowed`, `partitions_incompatible`), and a move to a borrowed
+  partition is exit 3 `borrowed_not_allowed`: cancel, run `shk occupancy`,
+  then resubmit with `--courtesy-ack`. The fixed program `update.sh` reads
+  every record of the job once and refuses with exit 3 `remote_refused`
+  before any change, naming the reason: identity (`name`, `uid`, `token`,
+  `id`), a record that is not pending, a time limit increase or a value below
+  TimeMin, another requeue or preemptible class, GPUs on a partition without
+  them, a time limit above a member's MaxTime, a throttle on a job that is not
+  an array, or a throttle raise on a borrowed partition.
+- When every record already shows the value the reply is `unchanged`, with
+  nothing dispatched. Otherwise one `scontrol update` runs, never retried, and
+  one re-read decides: `updated` (exit 0) only when every record shows the
+  requested value, whatever `scontrol` returned, and exit 5 otherwise, with
+  `next` naming `shk status --job-id N --details`. The reply carries the
+  field, the requested Slurm values, the records before and after, and
+  Slurm's messages.
+- `update` writes no file: the frozen spec stays the request as submitted, so
+  `current.ran_on` still follows its partition list.
+
 Guidance:
 
 - Before GPU submission, the rules files, the skill and the campaign guide
@@ -15,9 +51,11 @@ Guidance:
   restarts the script, not application state. Both rules files carry
   `Reviewed 2026-11-20`; none of the five site files changed since the last
   review.
-- The rules files and the skill changed, so `shk install-skill --check`
-  reports installed copies as stale; run `shk install-skill` again, with the
-  same `--rules`, to refresh them.
+- The rules files and the skill changed, for request sizing and for
+  `shk update` (change a pending job with it, never with raw
+  `scontrol update`), so `shk install-skill --check` reports installed copies
+  as stale; run `shk install-skill` again, with the same `--rules`, to refresh
+  them.
 
 Documentation:
 
