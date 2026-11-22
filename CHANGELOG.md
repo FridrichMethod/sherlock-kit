@@ -1,5 +1,99 @@
 # Changelog
 
+## Unreleased
+
+Stanford's Marlowe cluster is a second packaged site. Sherlock stays the
+default: its `sbatch` argv, replies, hints, exit 5 `next`, remote programs,
+rules files, skill, partition table and executor detection are unchanged,
+apart from the changes listed under "Visible on Sherlock". The Marlowe argv,
+the reply additions (`site`, `estimate.note`) and the Marlowe content paths
+(rules, skill and their project copies) are provisional and may change in a
+later release.
+
+Sites:
+
+- The global option `--site {sherlock,marlowe}` and the configuration keys
+  `site` (`sherlock` or `marlowe`, absent means `sherlock`) and `account`. A
+  command that can reach a cluster takes `--site`, else the found
+  configuration's `site`, else Sherlock; no environment variable selects a
+  site. A `--site` that names another site than the found configuration is
+  exit 1 `site_mismatch`, whose hint names `--project-dir`. `rules` and
+  `install-skill` take the site from `--site` alone and never read a
+  configuration.
+- `sites.py` holds the two site records: default hosts (`marlowe-plain` for
+  both Marlowe hosts), the Slurm client environment, the account rule, the
+  on-cluster test, the site instructions file, the test before submit, the
+  partition table, the rules files and the skill. No limit, duration, price
+  or node shape is packaged.
+- `account` must fully match `marlowe-[a-z]+[0-9]+`, which refuses
+  `marlowe-users` and every suffixed account, and is `config_invalid` in a
+  Sherlock configuration; a `control_host` or `data_host` that is a default
+  alias of the other site is `config_invalid` too. A release without site
+  support reads a Marlowe configuration as `config_invalid`.
+
+Marlowe:
+
+- The remote programs run after the fixed prelude `data/remote/site-env.sh`,
+  which appends `/cm/shared/apps/slurm/current/bin` to `PATH` and exports
+  `SLURM_CONF`: Marlowe's Slurm clients are not on the login `PATH`.
+- `submit` requires `account`, dry run included (exit 1 `config_required`,
+  with a hint that reads `marlowe-$PROJECT_ID` over the open master), and
+  passes `--account=<account>` directly after `--partition=`; the frozen spec
+  gains no key.
+- A plain `submit` runs Slurm's test (`sbatch --test-only`) after the
+  duplicate read and before staging, and returns the preflight reply
+  unchanged when Slurm refuses: exit 3, nothing staged.
+- Every Marlowe preflight reply ends `estimate` with `note`: the start that
+  the test prints is no wait prediction there.
+- `data/partitions-marlowe.json` lists `preempt` alone (preemptible, requeue,
+  GPUs). `unknown_partition` names the selected site's partitions, and the
+  status anomalies and `update`, `occupancy` and `resources` use the selected
+  site's table. The generated rules block names borrowed partitions only for
+  a table that has one.
+- Replies that print `executor` add `"site": "marlowe"` after it, and so does
+  `doctor`; the `shk` commands in hints and the exit 5 `next` carry
+  `--site marlowe`; messages name Marlowe (`Marlowe unreachable`,
+  `is not a directory on Marlowe`), and the `--since` hint says that shk
+  reads at most 31 days of accounting on every site.
+- `doctor` checks the one `marlowe-plain` master once, reports no
+  `site_instructions`, reports `site_mismatch` as a problem without checking
+  masters, and with an invalid configuration checks the defaults of the site
+  that `--site` names.
+- `push` and `pull` go over `marlowe-plain`; on Marlowe they are refused with
+  exit 3 `transfer_on_marlowe`.
+- The local executor is chosen where Marlowe's Slurm configuration file
+  exists, on a Marlowe login or compute node; that test never selects the
+  site.
+- `shk --site marlowe rules workstation` and `shk --site marlowe rules cluster`
+  print the new `data/rules/marlowe-workstation.md` and `marlowe-cluster.md`,
+  and `shk --site marlowe install-skill` copies the new skill
+  `sherlock-kit-marlowe` to `.claude/skills/sherlock-kit-marlowe/` and
+  `.agents/skills/sherlock-kit-marlowe/` and, with `--rules`, the rules to
+  `.claude/rules/sherlock-kit-marlowe.md`, beside the Sherlock copies. The
+  help texts still name Sherlock.
+
+Visible on Sherlock:
+
+- `shk --help` lists `--site`.
+- The hint of an unknown configuration key lists `account` and `site`, and a
+  Sherlock configuration may write `site = "sherlock"`.
+- `account` in a Sherlock configuration is `config_invalid` with the message
+  "account is set, but site sherlock takes no account" instead of an unknown
+  key, and a `control_host` or `data_host` of `marlowe-plain` is
+  `config_invalid`.
+- `--site marlowe` in a Sherlock project is exit 1 `site_mismatch`, for a dry
+  run too: a dry run resolves the site.
+
+Documentation:
+
+- `docs/marlowe-policy.md` records the source of every Marlowe rules sentence
+  (documentation pages retrieved 2026-11-21, owner choices, toolkit choices),
+  and `docs/validation/observed-marlowe.md` records Slurm 25.05.2 on Marlowe
+  and `shk`'s own commands there. The command reference, the design guide,
+  the installation guide (the `marlowe-plain` stanza, a project on both
+  clusters, the remote root, `shk` on a login node), the README and the
+  contributor guides describe the site.
+
 ## 0.9.0
 
 Additions. Nothing else changes: the replies, frozen specs, `sbatch` argv
