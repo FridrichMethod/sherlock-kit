@@ -19,7 +19,7 @@ from fakes import MARLOWE_ACCOUNT, SRC, marlowe_config
 from test_flows import NEXT, NOW, Flow
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import cli, slurm, spec
+from sherlock_kit import cli, executor, slurm, spec
 
 PROJECT = "demo-mw"
 NAME = spec.job_name(PROJECT, "default", "train-a")
@@ -345,6 +345,35 @@ class TestBeforeSubmit(OnMarlowe, Flow):
             code, out = self.submit()
         self.assertEqual((code, out["error"]), (1, "malformed_read"))
         self.assertEqual(self.sbatch_calls()[1], [])
+        self.assertFalse(self.remote.exists())
+
+    def test_a_lost_test_is_exit_4_and_dispatches_no_submit(self):
+        real, programs = executor.run_program, []
+
+        def lose_the_test(status):
+            def run_program(ex, name, args=(), **options):
+                programs.append(name)
+                if name == "preflight":
+                    lost = "Connection closed by 192.0.2.1 port 22\n"
+                    return executor.Result(status, "", lost, 255, site=ex.site)
+                return real(ex, name, args, **options)
+
+            return patch.object(executor, "run_program", run_program)
+
+        hint = "run shk --site marlowe doctor"
+        for status in ("unavailable", "auth_required"):
+            programs.clear()
+            with self.subTest(status=status), lose_the_test(status):
+                code, out = self.submit()
+                self.assertEqual((code, out["error"], out["hint"]), (4, status, hint), out)
+                self.assertEqual(programs, ["query", "preflight"])  # no submit.sh
+        self.config(command_timeout=2)
+        with patch.dict(os.environ, FAKE_SBATCH_HANG="30"):  # the test-only sbatch never returns
+            code, out = self.submit()
+        self.assertEqual((code, out["error"], out["hint"]), (4, "timeout", hint), out)
+        tested, submitted = self.sbatch_calls()
+        self.assertEqual((len(tested), submitted), (1, []))
+        self.assertEqual(self.slurm.state()["jobs"], [])
         self.assertFalse(self.remote.exists())
 
     def test_preflight_alone_is_one_test_with_the_estimate_note(self):
