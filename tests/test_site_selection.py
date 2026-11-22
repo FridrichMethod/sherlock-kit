@@ -366,6 +366,21 @@ class OfflineGateTests(SiteCase):
             transfer._read_manifest(None, "/scratch/run")
         self.assertEqual(caught.exception.hint, "run shk --site marlowe doctor --remote")
 
+    def test_push_without_a_master_hints_the_login_of_the_data_host(self):
+        local = self.tmp / "local"
+        local.mkdir()
+        sherlock = self.tmp / "sherlock"
+        sherlock.mkdir()
+        (sherlock / "sherlock-kit.toml").write_text('project = "demo"\n')
+        self.knobs(FAKE_SSH_MASTER="none")
+        for where, hint in (
+            ({"project_dir": self.empty, "site": "marlowe"}, "ssh marlowe-plain"),
+            ({"project_dir": sherlock}, "ssh -fN sherlock-dtn"),
+        ):
+            with self.subTest(hint=hint):
+                code, reply = self.shk("push", "--anywhere", str(local), "/scratch/x", **where)
+                self.assertEqual((code, reply["error"], reply["hint"]), (4, "auth_required", hint))
+
     def test_on_marlowe_push_and_pull_are_refused(self):
         with marlowe_site(on_cluster=True):
             for argv in (

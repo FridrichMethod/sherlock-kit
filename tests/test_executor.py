@@ -543,9 +543,9 @@ class MarloweDetectionTests(unittest.TestCase):
     def test_off_marlowe_both_roles_dial_the_login_node_alias(self):
         with marlowe_site(on_cluster=False):
             control, data = self.detect(config.defaults(sites.site("marlowe")), hostname="lab")
-            self.assertEqual(
+            self.assertEqual(  # one alias for both roles: no ssh -fN hint for the data role
                 (control.kind, control.host, control.data, data.kind, data.host, data.data),
-                ("ssh", "marlowe-plain", False, "ssh", "marlowe-plain", True),
+                ("ssh", "marlowe-plain", False, "ssh", "marlowe-plain", False),
             )
             self.assertEqual(control.site.name, "marlowe")
             # Sherlock's detection facts identify nothing for Marlowe.

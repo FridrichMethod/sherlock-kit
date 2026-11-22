@@ -8,9 +8,10 @@ and a timeout or an interrupt kills the child's whole process group.
 
 Every ssh dial follows `ssh -O check -oBatchMode=yes HOST`, which only asks the local control
 socket: no master is ShkError(4, "auth_required") with the hint `ssh HOST` (`ssh -fN HOST` for
-the data host), a client config without a usable ControlPath is ShkError(4, "unavailable") with
-a ~/.ssh/config hint, and -oProxyCommand=false makes a master lost after the check fail instead
-of logging in. An ssh run sends ONE shlex-joined remote command.
+a data host other than the control host), a client config without a usable ControlPath is
+ShkError(4, "unavailable") with a ~/.ssh/config hint, and -oProxyCommand=false makes a master
+lost after the check fail instead of logging in. An ssh run sends ONE shlex-joined remote
+command.
 
 Each executor knows its site (sites.Site, Sherlock by default). run_program() sends
 ["sh", "-c", <program>, "shk-NAME", *args] for a site whose Slurm clients are on the login PATH
@@ -409,7 +410,7 @@ def detect(
         return LocalExecutor(command_timeout=settings.command_timeout, site=site)
     return SshExecutor(
         settings.data_host if data else settings.control_host,
-        data=data,
+        data=data and settings.data_host != settings.control_host,
         connect_timeout=settings.connect_timeout,
         command_timeout=settings.command_timeout,
         site=site,
