@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from importlib import resources
 from typing import TypeAlias
 
+from sherlock_kit import sites
 from sherlock_kit.config import DEFAULTS, ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNKNOWN, EXIT_UNREACHABLE, ShkError
 
@@ -337,16 +338,6 @@ def check(result: Result, action: str) -> Result:
     )
 
 
-def _on_sherlock(hostname: str, env: Mapping[str, str]) -> bool:
-    """A login node, SLURM_CLUSTER_NAME=sherlock, or an sh<N>- compute node inside a job."""
-    short = hostname.split(".")[0].lower()
-    return bool(
-        re.fullmatch(r"sh\d+-ln\d+", short)
-        or env.get("SLURM_CLUSTER_NAME") == "sherlock"
-        or (re.match(r"sh\d+-", short) and env.get("SLURM_JOB_ID"))
-    )
-
-
 def detect(
     config: ProjectConfig | None = None,
     override: str | None = None,
@@ -366,7 +357,8 @@ def detect(
             "executor_invalid",
             f"executor {choice!r} (--executor or SHK_EXECUTOR) must be auto, local or ssh",
         )
-    on_sherlock = _on_sherlock(socket.gethostname() if hostname is None else hostname, env)
+    hostname = socket.gethostname() if hostname is None else hostname
+    on_sherlock = sites.SHERLOCK.on_cluster(hostname, env)
     if choice == "local" or (on_sherlock and (data or choice == "auto")):  # no DTN from Sherlock
         return LocalExecutor(command_timeout=settings.command_timeout)
     return SshExecutor(

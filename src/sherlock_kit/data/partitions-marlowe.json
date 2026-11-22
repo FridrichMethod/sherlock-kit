@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "partitions": {
+    "preempt": {
+      "preemptible": true,
+      "requeue": true,
+      "borrowed": false,
+      "gpus_allowed": true,
+      "batch": true,
+      "courtesy": "Preempted jobs are requeued and restart from the top; scripts must checkpoint and resume. Usage is charged per GPU-hour and CPU-hour. Limits are per project account and shared."
+    }
+  }
+}
