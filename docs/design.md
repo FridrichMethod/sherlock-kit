@@ -678,9 +678,11 @@ The pull contract is payload-only:
   everything ever submitted.
 - Cost is informational: no budget, cap or reservation.
 - The 60 s cadence is advisory (`next_check_after`), enforced by the rules, not
-  by a file. `shk wait` keeps it by construction within one run, but nothing
-  stops two waits, or a wait and reads by hand, from reading the same names
-  more often.
+  by a file. `shk wait` keeps it by construction within one run and toward
+  the reply before it, since its first read comes 60 s after it starts, but
+  nothing stops two waits running at once, or reads by hand during a wait,
+  from reading the same names more often; the skills ask for at most one wait
+  at a time.
 - `wait` decides from its reads alone. A task that ran only between two reads
   counts as never running for `--max-pending`; a name that failed before the
   first read settles instead of giving `failed`; and a name that failed and was

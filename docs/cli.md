@@ -705,17 +705,24 @@ Since `wait` dispatches nothing, no outcome is ever unknown: it has no exit 5.
 
 ### Waiting from an agent
 
-An agent runs one bounded `shk wait` as a background command whose exit its
-harness reports (in Claude Code, Bash with `run_in_background`), so that it
-spends no turn while the job is queued or running, and then acts on
-`wait.outcome`; the skill says what to do after each outcome. Where a command
-cannot outlive its tool call, choose a `--timeout` within that limit: a wait
-that is killed loses its reply and nothing else. A wait belongs to the
-attended session that started it. It is never detached so that it outlives
-the session (`nohup`, `setsid`, `&` past the end of the session, a `tmux` or
-`screen` session left running, cron) and never used to prompt an agent again;
-see the rules. Inside a Sherlock allocation a bounded deterministic controller
-may run `shk --executor local wait` ([controllers inside a job](#controllers-inside-a-job)).
+An agent runs one bounded `shk wait` as a background command that its harness
+tracks and whose exit it reports (in Claude Code, Bash with
+`run_in_background`), so that it spends no turn while the job is queued or
+running, and then acts on `wait.outcome`; the skill says what to do after each
+outcome. A shell `&` is not such a command: nothing reports its exit, and it
+can outlive the session. Where the harness reports no such exit (in Codex, for
+example, nothing wakes the agent when a background command ends), the agent
+either runs the wait in the foreground with a `--timeout` within the
+tool-call limit or ends the turn and checks when the user asks; it neither
+starts the wait with `&` nor polls its output. A wait that is killed loses its
+reply and nothing else. At most one wait runs at a time, over every name to
+watch (repeat `--task`, or `--all`); after a further submit the agent lets the
+running wait end, or stops it and starts one wait over all names. A wait
+belongs to the attended session that started it. It is never detached so that
+it outlives the session (`nohup`, `setsid`, `&`, a `tmux` or `screen` session
+left running, cron) and never used to prompt an agent again; see the rules.
+Inside a Sherlock allocation a bounded deterministic controller may run
+`shk --executor local wait` ([controllers inside a job](#controllers-inside-a-job)).
 
 ## `cancel`
 

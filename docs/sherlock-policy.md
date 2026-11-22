@@ -86,9 +86,12 @@ How the rules files carry particular site rules:
   re-prompting agents. The cluster file allows `shk wait` on a login node
   only in the attended session, never detached, and inside an allocation for
   a bounded deterministic controller. The skill gives the contract, what to
-  do after each outcome and the harness note: run the wait in the background
-  so that the harness reports its exit, with a `--timeout` within any limit
-  on how long a command may run.
+  do after each outcome and the harness note: run the wait as a background
+  command that the harness tracks and whose exit it reports, never with a
+  shell `&`, which nothing reports and which can outlive the session; where
+  the harness reports no such exit, run it in the foreground with a
+  `--timeout` within the tool-call limit, or end the turn. It also asks for at
+  most one wait at a time, over every name to watch.
 - Rule 1 sends sustained computation, significant CPU or memory use, GPUs,
   intensive I/O and many processes to the scheduler and allows light editing,
   inspection and job preparation on login nodes; `software.md` (recommended
@@ -300,4 +303,4 @@ the cluster summary honors that choice and does not impose an additional ban.
 Site rule 10 sets a polling floor and minimum useful job duration, not a maximum
 bundle length. Longer jobs and periodic capacity checks still obey partition limits,
 borrowed courtesy, at least 60 seconds between checks and the ban on polling loops;
-a bounded `shk wait` keeps both by construction.
+one bounded `shk wait` at a time keeps both by construction.

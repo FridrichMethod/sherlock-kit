@@ -151,8 +151,9 @@ After every read the first matching outcome decides:
 
 Run it from an agent so that it costs no turns and still ends by itself:
 
-- Run it as a background command whose exit the harness reports, and do nothing for it until then (Claude Code: Bash with `run_in_background`; do not read its output file while it runs). Where a command cannot outlive its tool call, pick a `--timeout` safely within that limit, leaving room for one read.
-- Run one wait per set of names. Never detach it so that it outlives the session (`nohup`, `setsid`, `disown`, a `tmux` or `screen` session left running, cron), never use it to restart or re-prompt an agent, and never schedule a later agent session. On a Sherlock login node run it only in the attended session; inside an allocation a bounded deterministic controller may run `shk --executor local wait`.
+- Run it as a background command that the harness itself tracks and whose exit it reports, and do nothing for it until then (Claude Code: Bash with `run_in_background`; do not read its output file while it runs). A shell `&` is not one: nothing reports its exit, and it can outlive the session. Where the harness reports no such exit (in Codex, for example, nothing wakes you when a background command ends), either run the wait in the foreground with a `--timeout` safely within the tool-call limit, leaving room for one read, or end the turn and check when the user asks; never start it with `&` and never poll its output.
+- Run at most one wait at a time, over every name to watch (repeat `--task`, or `--all`). After a further submit, let the running wait end, or stop it (it is read-only) and start one wait over all names. A restarted wait does not report `failed` for a name that failed before its first read, so check every name's state when it ends.
+- Never detach a wait so that it outlives the session (`nohup`, a plain `&`, `setsid`, `disown`, a `tmux` or `screen` session left running, cron), never use it to restart or re-prompt an agent, and never schedule a later agent session. On a Sherlock login node run it only in the attended session; inside an allocation a bounded deterministic controller may run `shk --executor local wait`.
 - Between stages prefer `--after-ok` dependencies to waiting.
 
 ## Controller evidence and exact mutations
