@@ -3,7 +3,8 @@
 # sherlock-kit
 
 **Slurm jobs, verified transfers and capacity snapshots on Stanford's
-[Sherlock](https://www.sherlock.stanford.edu) cluster, built for coding agents.**
+[Sherlock](https://www.sherlock.stanford.edu) and
+[Marlowe](https://marlowe-research.stanford.edu) clusters, built for coding agents.**
 
 [![CI](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/FridrichMethod/sherlock-kit/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/FridrichMethod/sherlock-kit?sort=semver)](https://github.com/FridrichMethod/sherlock-kit/releases/latest)
@@ -11,7 +12,7 @@
 [![Runtime dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)](pyproject.toml)
 [![License](https://img.shields.io/github/license/FridrichMethod/sherlock-kit)](LICENSE)
 
-[Quick start](#quick-start) | [Commands](#commands) | [Documentation](docs/README.md) | [Changelog](CHANGELOG.md)
+[Quick start](#quick-start) | [Commands](#commands) | [Marlowe](#marlowe) | [Documentation](docs/README.md) | [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -19,7 +20,8 @@
 Slurm jobs, moves data and reads partition capacity on Sherlock, from a
 workstation over OpenSSH or on Sherlock itself. Every operational command
 prints one JSON document and a meaningful exit code, so an agent can act on the
-result without parsing prose.
+result without parsing prose. Sherlock is the default site; `--site marlowe`
+drives Stanford's Marlowe cluster the same way ([Marlowe](#marlowe)).
 
 ## Highlights
 
@@ -39,7 +41,8 @@ result without parsing prose.
   job-shaped slots per partition, GPU model and node class; what Slurm does not
   show stays null, never 0.
 - **Agent-ready.** Operating rules and a skill for Claude Code and Codex ship
-  with the package, so each project gets the rules of the version it pins.
+  with the package for each site, so each project gets the rules of the
+  version it pins.
 - **Small and dependency-free.** One standard-library Python package plus fixed
   POSIX `sh` programs that run on the login node.
 
@@ -221,17 +224,49 @@ shk install-skill --project . --rules workstation  # skill for Claude Code and C
 script does or certify scientific results. Sherlock's own `/etc/agents/AGENTS.md`
 takes precedence over the packaged rules.
 
+## Marlowe
+
+Marlowe is the second packaged site. Every Marlowe command is
+`shk --site marlowe ...`, over the user's `marlowe-plain` master (one alias
+for commands and rsync) or locally on a Marlowe login node. A project on both
+clusters adds a Marlowe configuration in its own directory:
+
+```toml
+# <repo>/marlowe/sherlock-kit.toml
+site = "marlowe"
+project = "demo-mw"                        # distinct from the Sherlock value
+remote_root = "/scratch/m000000/USER/demo"
+account = "marlowe-m000000"                # the base project account, required
+```
+
+```sh
+shk --site marlowe --project-dir marlowe doctor
+shk --site marlowe --project-dir marlowe submit --task smoke --script job.sh --partition preempt --cpus 1 --mem 2G --time 20m --dry-run
+shk --site marlowe rules workstation
+shk --site marlowe install-skill --project . --rules workstation
+```
+
+On Marlowe `shk` passes the account to `sbatch`, lists only the partition
+`preempt`, and tests every submit with `sbatch --test-only` before staging it,
+so a request that Slurm refuses is exit 3 with nothing staged. Replies carry
+`"site": "marlowe"`. Every job there is charged per CPU-hour and GPU-hour.
+Marlowe support needs a release whose `shk --help` lists `--site`;
+[Installation and connection](docs/install.md#marlowe) covers the setup and
+[Marlowe policy](docs/marlowe-policy.md) the provenance of its rules.
+
 ## Documentation
 
 | Guide | Purpose |
 |---|---|
-| [Installation and connection](docs/install.md) | Install forms, environments on Sherlock and inside jobs, SSH control masters |
+| [Installation and connection](docs/install.md) | Install forms, environments on Sherlock and inside jobs, SSH control masters, Marlowe setup |
 | [Command reference](docs/cli.md) | Every command and its JSON reply, configuration and exit codes |
 | [GPU campaign scheduling](docs/campaign-throughput.md) | Compatible GPUs, soft preferences, partitions, resumable bundles and parallel work |
 | [Allocation proofs](docs/allocation.md) | Job, array element, process and step identity inside an allocation |
 | [CPU thread budgets](docs/cpu-threads.md) | Numerical library thread defaults on the host and in containers |
 | [Sherlock policy](docs/sherlock-policy.md) | Site-rule provenance, owner preferences and toolkit policy choices |
-| [Design](docs/design.md) | Runtime components, contracts, state resolution and accepted limitations |
+| [Marlowe policy](docs/marlowe-policy.md) | Provenance of the Marlowe rules: documentation pages, owner choices and toolkit choices |
+| [Observed Marlowe behavior](docs/validation/observed-marlowe.md) | Slurm 25.05.2 on Marlowe and `shk`'s own commands there, as seen live |
+| [Design](docs/design.md) | Runtime components, sites, contracts, state resolution and accepted limitations |
 
 The [documentation index](docs/README.md) also lists the observed Slurm
 behavior that the parsers rest on.
