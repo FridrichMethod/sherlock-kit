@@ -73,6 +73,14 @@ Documentation:
   command; install forms, environments on Sherlock and the SSH setup are in
   `docs/install.md`. Documentation only; no CLI change.
 
+- `shk update` is observed on Sherlock (Slurm 25.11.9) with held pending jobs:
+  time, features and throttle updates, the `unchanged` replies, the refusals,
+  and two updates that Slurm rejected, which kept the record and read as exit
+  5 followed by a status read. `docs/validation/observed-slurm.md` records
+  them, and the design guide and the skill say what is still not observed live:
+  a partition move that Slurm accepts and an update of an array with a started
+  task. No CLI change.
+
 ## 0.8.0
 
 Additions. Without the new options, replies, frozen specs and `sbatch` argv

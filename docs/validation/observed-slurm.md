@@ -7,8 +7,10 @@ observations, not site guarantees; re-check a fact before building on it.
 behavior on Sherlock; changes made between that tree and the release, and later
 releases, have not been run live. 0.5.0 has two such trees: the 0.5.0
 candidate and a later pre-release tree with fixes, the 0.5.0 fix tree. Sample
-records that show job ids come from Slurm 25.11.8. User names, UIDs, private
-configuration, paths, specs, receipts and bundles are not reproduced here;
+records that show job ids come from Slurm 25.11.8; the observations under
+[job updates in place](#job-updates-in-place) come from Slurm 25.11.9. User
+names, UIDs, private configuration, paths, specs, receipts and bundles are not
+reproduced here;
 `<token>`, `<uid>`, `<dbindex>` and `<name>` stand for the values seen.
 
 ## How the observations were made
@@ -30,6 +32,9 @@ configuration, paths, specs, receipts and bundles are not reproduced here;
   and cancelled while held. With the 0.5.0 fix tree, a second 2-task array on
   `owners`, submitted with `--requeue` and a token, ran `shk` inside its
   elements.
+- With 0.9.0, `shk update` ran from a workstation over the control master
+  against a held 1-CPU job and a held 3-task array on `normal`, both cancelled
+  while held; nothing ran.
 - A job pattern that worked: `#!/bin/bash -l`, no `#SBATCH` lines,
   `module load ...`, the toolkit wheel unzipped into `$L_SCRATCH_JOB` and put
   on `PYTHONPATH`, thread variables set to 1, results written into the run
@@ -187,6 +192,53 @@ configuration, paths, specs, receipts and bundles are not reproduced here;
   task 0, and `shk status` reported no anomaly on `owners` (verified live with
   the 0.5.0 fix tree).
 
+## Job updates in place
+
+`shk update` ran on Slurm 25.11.9 against two held jobs on `normal`: a 1-CPU,
+1 GB job with a 20-minute limit and a 3-task array submitted with
+`--array 3%1`, both pending throughout (verified live with 0.9.0).
+
+- `--time 10m` on the job with `TimeLimit=00:20:00` (`TimeMin=N/A`):
+  `scontrol update` exited 0, the record showed `TimeLimit=00:10:00`, and the
+  reply was `updated` with the records `before` and `after` and
+  `slurm_messages` null. The same call again was `unchanged`: `after` was `[]`
+  and nothing was dispatched.
+- Refusals before any dispatch, all exit 3: `--time 30m` (an increase) was
+  `remote_refused` with the message `update: SHK_REFUSED time`, a wrong
+  `--expect-token` `update: SHK_REFUSED token`, `--partition owners` (the other
+  requeue class) `update: SHK_REFUSED requeue` and `--throttle 2` on the job
+  that is not an array `update: SHK_REFUSED array`. `--partition btrippe` was
+  `borrowed_not_allowed`, offline.
+- `--partition normal` on the job already there was `unchanged`.
+- Slurm itself refused two updates. `--partition normal,bigmem` for the 1 GB
+  job: `scontrol update` exited 1 with
+  `Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)`,
+  and the record kept `Partition=normal`. `--constraint NOT_A_FEATURE_XYZ`:
+  `scontrol update` exited 1 with `Invalid feature specification`, and the
+  record was unchanged. Both replies were exit 5 with `action: unknown`, a
+  `detail` that named the `scontrol` exit, Slurm's text and the records that
+  did not show the value, and the `next` command
+  `shk status --job-id N --details`; run after the partition refusal, it showed
+  the unchanged job. An update that Slurm rejects is therefore exit 5 followed
+  by a read, never a silent success.
+- After the time update and the refused partition move, `status --details`
+  still showed `Reason=JobHeldUser` and `Priority=0`: the job stayed held.
+- Before any features update the record showed `Features=(null)` and no
+  `Prefer` field (null in the reply).
+  `--constraint CPU_MNF:AMD --prefer CPU_GEN:GEN` gave `updated`, with
+  `Features=CPU_MNF:AMD` and `Prefer=CPU_GEN:GEN` in the record.
+  `--constraint 'CPU_MNF:AMD|CPU_MNF:INTEL'` alone afterwards gave `updated`:
+  Features showed the OR expression as given, and the earlier Prefer value
+  stayed.
+- The held array was fully pending: one meta record with
+  `ArrayTaskId=0-2%1` and `ArrayTaskThrottle=1`. `--throttle 2` gave
+  `updated`, and the record showed `ArrayTaskId=0-2%2` and
+  `ArrayTaskThrottle=2`; the same call again was `unchanged`. `--time 15m` on
+  the array gave `updated`, from `00:20:00` to `00:15:00`.
+- Sherlock's job_submit modify hook let the time, features and throttle
+  updates pass: each record showed the requested value, and no `updated`
+  reply carried a Slurm message.
+
 ## Array and step identity inside a job
 
 The Slurm records below come from the 0.5.0 candidate's 2-task array on
@@ -295,9 +347,10 @@ live with the 0.5.0 fix tree).
 Lost ssh replies, duplicate submissions racing each other, natural preemption
 by a node owner, an unexpected preemption on a non-preemptible partition, and
 jobs on `possu`. Also not observed: `sbatch --prefer` (`shk submit --prefer`),
-OR feature expressions in `--constraint` or `--prefer`, and the `env`-prefixed
-`sbatch` of the CPU thread budget (`shk submit --cpu-thread-budget`). Those
-rest on offline tests with fake `ssh` and Slurm binaries.
+OR feature expressions in the `--constraint` or `--prefer` of `sbatch`, and
+the `env`-prefixed `sbatch` of the CPU thread budget
+(`shk submit --cpu-thread-budget`). Those rest on offline tests with fake
+`ssh` and Slurm binaries.
 
 Also not observed live, and resting on the Slurm source below and on offline
 tests:
@@ -339,37 +392,18 @@ so both stay unverified-live after this check. A real submission that Slurm
 rejects is exit 5 (outcome unknown) in `shk submit`, as for any `sbatch`
 error.
 
-`shk update` has not run live either. It rests on the Slurm source at tag
-`slurm-25-11-9-1` ([job updates](#job-updates)) and on offline tests with a
-fake `scontrol`, while Sherlock runs Slurm 25.11.8. The 25.11.9 changelog lists
-no change on the job update paths read there
-([`CHANGELOG/slurm-25.11.md`, lines 1-7](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/CHANGELOG/slurm-25.11.md#L1)),
-so 25.11.8 most likely behaves the same (inferred from the changelog, not from
-a diff; line numbers in `job_mgr.c` can differ by a few lines). Not
-determinable from the source: what the modify hook of Sherlock's job_submit
-plugin does with an update (pass, reject or rewrite it), and the
-`EnforcePartLimits`, `AccountingStorageEnforce` and `PriorityFlags` values and
-accrue limits (`MaxJobsAccrue`, `GrpJobsAccrue`) that decide whether a
+`shk update` is observed live only as recorded under
+[job updates in place](#job-updates-in-place). Not observed: a partition move
+that Slurm accepts, and what it does to the job's accrue time and age factor,
+and an update of an array with a started task (its split records and the
+throttle reply while finished ones remain in the controller). These rest on the
+Slurm source at tag `slurm-25-11-9-1` ([job updates](#job-updates)) and on
+offline tests with a fake `scontrol`. Not determinable from the source: what
+the modify hook of Sherlock's job_submit plugin does with a partition move, and
+the `EnforcePartLimits`, `AccountingStorageEnforce` and `PriorityFlags` values
+and accrue limits (`MaxJobsAccrue`, `GrpJobsAccrue`) that decide whether a
 partition move is checked against partition limits and whether it resets the
-age factor. The attended check that would confirm them needs the owner's
-approval: a held CPU job on `normal`, here a 2-task array so that the
-throttle can be tried too, each field updated and re-read.
-
-```sh
-shk submit --task update-probe --script job.sh --partition normal --cpus 1 --mem 2G --time 20m --array 2%1 --submission-token update-probe-1 --hold
-shk update --job-id N --expect-name NAME --expect-token update-probe-1 --time 10m
-shk update --job-id N --expect-name NAME --expect-token update-probe-1 --throttle 2
-shk status --job-id N --details
-shk cancel --task update-probe
-```
-
-The hold keeps the 2-task array pending, so nothing runs and no GPU is
-involved. The partition and features steps follow the same pattern, with a
-second listed partition of the same class that the job may use and a feature
-name discovered on `normal` nodes at the time. Each reply's `before`, `after`
-and `slurm_messages`, and the control records of `status --details`, show what
-Slurm stored, whether the plugin added a message, and whether a held job keeps
-`Reason=JobHeldUser`.
+age factor.
 
 The following are confirmed in the official Slurm source at tag
 `slurm-25-11-9-1` and are likewise not observed live:
@@ -603,7 +637,8 @@ and not observed live:
 ### Job updates
 
 `shk update` depends on these. Confirmed in the source at the same tag, or
-inferred from it where a statement says so, and not observed live:
+inferred from it where a statement says so, and not observed live apart from
+what [job updates in place](#job-updates-in-place) records:
 
 - One update is not atomic. The controller commits the keys of a request one
   at a time, in a fixed order whatever their order on the command line:

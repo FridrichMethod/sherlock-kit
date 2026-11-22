@@ -562,9 +562,12 @@ The pull contract is payload-only:
   dispatch would add a failure mode. Slurm's records carry the current request
   and the reply carries the records before and after. `current.ran_on`
   therefore still follows the spec's partition list.
-- What Sherlock's job_submit plugin does with an update is unknown. Its modify
-  hook runs on every update, once per array record, and can reject the update
-  or rewrite the values; a rewritten value reads as exit 5.
+- Sherlock's job_submit modify hook let time, features and throttle updates
+  pass with the requested values
+  ([observed live](validation/observed-slurm.md#job-updates-in-place)); what it
+  does with a partition move is unknown. The hook runs on every update, once
+  per array record, and can reject the update or rewrite the values; a
+  rewritten value reads as exit 5.
 - Slurm validates feature names against the union of the features of every
   node in the cluster, not per partition, so a `--constraint` or `--prefer`
   that no node of the job's partitions has is accepted and the job never
@@ -575,8 +578,14 @@ The pull contract is payload-only:
   time: the age factor of its priority dips until the next scheduler pass, and
   restarts from the move where accrue limits (`MaxJobsAccrue`,
   `GrpJobsAccrue`) apply. Sherlock's settings are not known.
-- The update facts above are source-confirmed at Slurm 25.11.9 and not observed
-  live on Sherlock, which runs 25.11.8.
+- The update facts above are source-confirmed at Slurm 25.11.9. On Sherlock,
+  with 25.11.9, time, features and throttle updates of held pending jobs, the
+  `unchanged` replies and the refusals were observed live, and so were two
+  updates that Slurm rejected (a partition set, an unknown feature): each kept
+  the record and read as exit 5
+  ([observed live](validation/observed-slurm.md#job-updates-in-place)). A
+  partition move that Slurm accepts, with its effect on the age factor, and an
+  update of an array with a started task are not observed live.
 
 ## Rules, skill and delivery
 
