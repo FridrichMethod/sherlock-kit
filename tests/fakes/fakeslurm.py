@@ -33,6 +33,14 @@ can print non-ASCII bytes whatever its own locale), FAKE_SBATCH_QUEUED_RC (queue
 either stdout knob printed, exit that code: the sbatch --wait shape), FAKE_SCANCEL_RC. Every
 call is recorded with the SBATCH_/SLURM_/SQUEUE_/SACCT_/SCANCEL_ variables it saw. FakeSlurm is
 the test-side API.
+
+sbatch whose last argument is --test-only (preflight.sh: the script on stdin, no path) queues
+nothing and has its own knobs, which the knobs above never touch. By default it accepts and
+prints Slurm's estimate line on stderr, "sbatch: Job <next id> to start at TEST_START using
+<cpus> processors on nodes n01 in partition <first listed partition>", without the " a" of Slurm
+25.11 (the line of Slurm 25.05 is not observed; the parser takes both). FAKE_SBATCH_TEST_RC
+refuses with that exit code; FAKE_SBATCH_TEST_ERR, when set, replaces the stderr text of either
+verdict and may be empty.
 """
 
 import fcntl
@@ -50,6 +58,8 @@ VALUE_FLAGS = ("-u", "-t", "-p", "-o", "-O", "-S", "-E")
 MIN_JOB_AGE = 300  # seconds slurmctld keeps a finished job (counted from submission here)
 MAX_WINDOW_DAYS = 31  # Sherlock's slurmdbd: "Too wide of a date range in query" beyond this
 RECORDED_ENV = ("SBATCH_", "SLURM_", "SQUEUE_", "SACCT_", "SCANCEL_")
+TEST_START = "2026-11-23T01:34:08"  # far ahead, as test-only estimates on Marlowe were
+TEST_REFUSAL = "allocation failure: Requested node configuration is not available\n"
 
 
 def _user():
@@ -345,6 +355,21 @@ def sbatch(state, options, script):
     return os.environ.get("FAKE_SBATCH_STDOUT", out), "", code
 
 
+def test_only(state, options):
+    """sbatch --test-only: Slurm's verdict on the request; no job, no state change."""
+    sys.stdin.read()  # the script, which sbatch reads from stdin when no path is given
+    if os.environ.get("FAKE_SBATCH_TEST_RC"):
+        message = os.environ.get("FAKE_SBATCH_TEST_ERR", TEST_REFUSAL)
+        return "", message, int(os.environ["FAKE_SBATCH_TEST_RC"])
+    cpus = int(options.get("cpus-per-task", "1")) * int(options.get("ntasks", "1"))
+    partition = options.get("partition", "").split(",")[0]
+    line = (
+        f"sbatch: Job {state['next']} to start at {TEST_START} using {cpus} processors"
+        f" on nodes n01 in partition {partition}\n"
+    )
+    return "", os.environ.get("FAKE_SBATCH_TEST_ERR", line), 0
+
+
 def scancel(state, options):
     if os.environ.get("FAKE_SCANCEL_RC"):
         return "", "scancel: error: Kill job error on job id\n", int(os.environ["FAKE_SCANCEL_RC"])
@@ -359,6 +384,8 @@ def main(tool, args):
     def run(state):
         seen = {key: value for key, value in os.environ.items() if key.startswith(RECORDED_ENV)}
         state["calls"].append({"tool": tool, "argv": args, "env": seen})
+        if tool == "sbatch" and args[-1:] == ["--test-only"]:
+            return test_only(state, _options(args[:-1]))
         if tool == "sbatch":  # the staged script path comes last
             return sbatch(state, _options(args[:-1]), args[-1])
         return {"squeue": squeue, "sacct": sacct, "scancel": scancel}[tool](state, _options(args))
