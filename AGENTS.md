@@ -6,7 +6,7 @@ uses a separate branch and worktree; reviewers are read-only. Preserve user chan
 Use Python 3.11+ and standard-library mechanisms where sufficient. Run
 `pre-commit run --all-files` (ruff, mypy, shellcheck, shfmt, mdformat),
 the development environment's `python -B tests/run_suite.py` (authoritative: unlike `python -m unittest discover -s tests -v`
-it fails a run that reached the Slurm tripwire) and isolated installation checks.
+it fails a run that reached the Slurm or ssh tripwire) and isolated installation checks.
 Prepare the build interpreter and per-Python wheelhouse as described in
 CONTRIBUTING.md; set `SHK_BUILD_PYTHON`, `SHK_TEST_WHEELHOUSE` and `SHK_REQUIRE_ALL=1`
 for required checks. Test both Python 3.11 and 3.14 from committed HEAD.
@@ -17,6 +17,11 @@ the source of truth; the remote programs are fixed POSIX sh.
 Doctor is read-only; mutation ambiguity stays unknown until Slurm accounting resolves it.
 Never submit GPU work while developing or testing this repository, operate
 historical campaigns, or infer borrowed access.
+Marlowe is the second site: its partition table is `partitions-marlowe.json`,
+its rules provenance `docs/marlowe-policy.md`. Every Marlowe job is billed:
+develop and test there with `--dry-run`, `--preflight` and held jobs, never a
+job that runs, unless the owner authorizes it. Tracked files name a Marlowe
+project only as `m000000` (`marlowe-m000000`, `USER`); a test guards this.
 Only the lead merges to main and tags.
 
 Keep `docs/` as maintained user/developer reference and necessary compatibility

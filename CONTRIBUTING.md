@@ -31,14 +31,17 @@ with no exceptions; [AGENTS.md](AGENTS.md) defines the covered filenames. The
 English documentation hook rejects non-ASCII characters and other control
 characters. The language requirement is also checked during review.
 
-Ordinary tests need no credentials, no Sherlock connection and no GPU. They run
+Ordinary tests need no credentials, no Sherlock or Marlowe connection and no
+GPU. They run
 the real remote `sh` programs locally through a fake `ssh`, fake Slurm binaries
 and real `rsync`. The suite stays hermetic even inside a Slurm job: importing
 `tests/fakes` (both `tests/run_suite.py` and `python3 -m unittest discover -s tests`
 do) removes inherited `SLURM_*`, `SBATCH_*`, `SQUEUE_*`, `SACCT_*`, `SCANCEL_*`,
 `SHK_*` (except `SHK_BUILD_PYTHON`, `SHK_TEST_WHEELHOUSE` and `SHK_REQUIRE_ALL`) and `SHERLOCK_KIT_*`
 variables and exported shell functions, and puts blocking stubs for every Slurm
-client on `PATH` behind each test's fakes and ahead of the system ones. A stub
+client on `PATH` behind each test's fakes and ahead of the system ones. The
+tripwire also blocks a real `ssh`, so a test that misses its fake cannot reach a
+cluster through an open control master. A stub
 blocks the call (exit 97, a message on stderr) and logs it. `tests/run_suite.py`,
 which CI and the checks below use, fails a run in which any test reached a stub;
 under `unittest discover` only the test's own assertions decide the result. A
@@ -121,22 +124,44 @@ git diff --check
   100755). Package consumers may reference them directly; renaming one is a
   breaking change that needs coordination with those consumers. Symlinks in the
   repository are relative.
-- The rules files start with an H2, have no front matter, HTML comments, `@`
-  imports or relative links, stay within 7 KiB, and mention only released CLI.
-  The skill's front matter holds `name` and `description` only.
-- `partitions.json` is the only partition source. After changing it, paste the
-  output of
+  The Marlowe rules and skill
+  (`src/sherlock_kit/data/rules/marlowe-workstation.md`,
+  `src/sherlock_kit/data/rules/marlowe-cluster.md`,
+  `src/sherlock_kit/data/skills/sherlock-kit-marlowe/SKILL.md`) are package
+  data with provisional paths, not contract paths.
+- The rules files of both sites start with an H2, have no front matter, HTML
+  comments, `@` imports or relative links, stay within 7 KiB, and mention only
+  released CLI. Each skill's front matter holds `name` and `description` only.
+- Each site has one partition source: `partitions.json` for Sherlock and
+  `partitions-marlowe.json` for Marlowe. After changing `partitions.json`,
+  paste the output of
   `PYTHONPATH=src python3 -B -c "from sherlock_kit.partitions import markdown; print(markdown(), end='')"`
-  over the `### Partition profiles` block at the end of both rules files.
+  over the `### Partition profiles` block at the end of both Sherlock rules
+  files; after changing `partitions-marlowe.json`, paste the output of
+  `PYTHONPATH=src python3 -B -c "from sherlock_kit import partitions, sites; print(partitions.markdown(sites.MARLOWE), end='')"`
+  over that block at the end of both Marlowe rules files.
 - Re-read Sherlock's `/etc/agents/*.md` before changing the rules, update the
   "Reviewed" date and [docs/sherlock-policy.md](docs/sherlock-policy.md).
+  Marlowe has no such files: before a change to the Marlowe rules that touches
+  site policy, re-read the documentation pages that
+  [docs/marlowe-policy.md](docs/marlowe-policy.md) lists, update the
+  "Reviewed" date of both Marlowe rules files and that guide, which records
+  the source of every Marlowe rules sentence.
 - Never commit runtime state, private configuration, credentials, research code
-  or data. Public examples use synthetic paths and names.
+  or data. Public examples use synthetic paths and names. Marlowe examples
+  write the project id as `m000000`, its account as `marlowe-m000000` and the
+  user as `USER`; a test in `tests/test_release_metadata.py` fails when a
+  tracked file or path holds any other Marlowe project id (`m` and six or more
+  digits), naming only the file and lines.
 - `docs/` and `tests/` ship in the sdist, so task files never go there, and
   release artifacts are built from a clean committed export (`git archive`),
   not from a working tree.
 - Live work on Sherlock needs explicit authorization, a named workload and CPU
   only: never submit GPU work while developing or testing this repository.
+- Every job on Marlowe is billed, CPU-only ones included. Development and
+  tests there use `--dry-run`, `--preflight` and held jobs (submitted with
+  `--hold`, then cancelled), never a job that runs, unless the owner
+  authorizes it.
 
 Report sensitive issues privately to the repository owner; never put secrets or
 private reproductions in public issues.
