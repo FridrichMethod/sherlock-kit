@@ -138,6 +138,28 @@ class ResolutionTests(SiteCase):
         self.assertEqual((code, reply["error"]), (1, "site_mismatch"), reply)
         self.assertEqual(self.fake.calls(), [])
 
+    def test_push_and_pull_check_the_site_before_the_configuration(self):
+        (self.empty / "sherlock-kit.toml").write_text(
+            'project = "demo"\nremote_root = "/scratch/users/u/demo"\n'
+        )
+        local = self.tmp / "local"
+        local.mkdir()
+        self.knobs()
+        remote = "/scratch/m000000/USER/demo"  # outside the Sherlock remote_root
+        for argv, sherlock in (
+            (("push", str(local), remote), (3, "outside_remote_root")),
+            (
+                ("pull", "--validate", "bundle", remote, str(self.tmp / "out")),
+                (1, "validator_unknown"),
+            ),
+        ):
+            with self.subTest(command=argv[0]):
+                code, reply = self.shk(*argv, project_dir=self.empty, site="marlowe")
+                self.assertEqual((code, reply["error"]), (1, "site_mismatch"), reply)
+                code, reply = self.shk(*argv, project_dir=self.empty)
+                self.assertEqual((code, reply["error"]), sherlock, reply)
+        self.assertEqual(self.fake.calls(), [])
+
 
 class TwoClusterRepositoryTests(SiteCase):
     """A Sherlock table at the root and a Marlowe configuration in marlowe/sherlock-kit.toml."""

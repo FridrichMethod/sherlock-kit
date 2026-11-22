@@ -30,7 +30,8 @@ remote sender command. --files-from=- sends the DTN-proven list-file command.
 
 The data host is the site's: sherlock-dtn on Sherlock, the marlowe-plain login node on Marlowe,
 which has no DTN for rsync. On the cluster push and pull are refused (exit 3,
-transfer_on_<site>).
+transfer_on_<site>). A --site that names another site than the configuration is site_mismatch
+before push or pull checks anything the configuration sets (remote_root, validators).
 """
 
 from __future__ import annotations
@@ -51,7 +52,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import __version__, executor, sites
-from sherlock_kit.config import DEFAULTS, ProjectConfig
+from sherlock_kit.config import ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNREACHABLE, Outcome, ShkError
 
 if TYPE_CHECKING:
@@ -286,7 +287,8 @@ def _validate(settings: ProjectConfig, name: str, stage: Path) -> None:
 
 
 def _settings(ctx: Context) -> ProjectConfig:
-    return ctx.config or DEFAULTS
+    """The configuration or the site's defaults; a --site of another site is site_mismatch."""
+    return ctx.settings
 
 
 def _remote(path: str) -> str:
@@ -518,6 +520,7 @@ def push(args: argparse.Namespace, ctx: Context) -> Outcome:
     remote = _remote(args.remote)
     local = Path(args.local).expanduser().resolve()
     if not args.anywhere:
+        _ = ctx.site  # as in submit: a --site of another site is site_mismatch, checked first
         root = ctx.require("remote_root").remote_root
         if remote != root and not remote.startswith(root + "/"):
             raise ShkError(
