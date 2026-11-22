@@ -5,7 +5,7 @@ These guides describe the supported toolkit and its operating constraints.
 | Guide | Purpose |
 | --- | --- |
 | [Overview](../README.md) | What `shk` does, a short install and a quick start |
-| [Installation and connection](install.md) | Install forms, environments on Sherlock and inside jobs, SSH control masters, Marlowe setup |
+| [Installation and connection](install.md) | A project's pin and configuration, install forms, environments on Sherlock and inside jobs, SSH control masters, Marlowe setup |
 | [Command reference](cli.md) | Every command and its JSON reply, configuration and exit codes |
 | [GPU campaign scheduling](campaign-throughput.md) | Compatible GPUs, soft preferences, partitions, resumable bundles and parallel work |
 | [Allocation proofs](allocation.md) | Job, array element, process and step identity inside an allocation, and GPU SKU candidates |

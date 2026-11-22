@@ -9,7 +9,7 @@ description: Run, track, update and cancel Slurm jobs and job arrays on Stanford
 
 ## Setup check
 
-1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` and `python -m sherlock_kit` in the activated environment). Not `uv run shk`: it locks and syncs the project environment first. Ask before any `pip install`, upgrade or version switch.
+1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` and `python -m sherlock_kit` in the activated environment). Not `uv run shk`: it locks and syncs the project environment first. Ask before any `pip install`, upgrade or version switch. A project without `shk` gets, once the user agrees, a dependency on a release tag, never a branch: `sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@vX.Y.Z`; a separate small environment only when the project's Python is older than 3.11 or its environment must not change. An upgrade changes that tag, relocks or reinstalls, and reruns `shk install-skill` with the same options.
 2. Run `shk --version`: `sherlock-kit X.Y.Z (FORM)`. FORM is `git <commit>` (installed from a tag), `editable <path>`, `submodule <path>`, `source <path>` (a development checkout: never use it for real work) or `unknown`. The controller extensions require shk 0.5 or newer; with an older one, or when a command or flag here is missing, follow `shk <cmd> --help` instead.
 3. If no Sherlock rules are loaded in this session, read them first: `shk rules workstation` on a workstation, `shk rules cluster` on Sherlock.
 4. `shk doctor` is read-only and offline (`--remote` adds one read-only call on Sherlock).
@@ -29,7 +29,7 @@ description: Run, track, update and cancel Slurm jobs and job arrays on Stanford
 
 ## Configuration
 
-`shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or top-level keys in `sherlock-kit.toml`) in the nearest directory at or above the working directory that has one; from elsewhere pass `--project-dir DIR`. Keys: `project` (required to submit), `remote_root` (absolute Sherlock path, required to submit and, without `--anywhere`, to push), optional `control_host`, `data_host`, timeouts and `[tool.sherlock-kit.validators]`. Unknown keys are errors. Never put secrets there.
+`shk` reads `[tool.sherlock-kit]` from `pyproject.toml` (or top-level keys in `sherlock-kit.toml`) in the nearest directory at or above the working directory that has one; from elsewhere pass `--project-dir DIR`. Keys: `project` (required to submit), `remote_root` (absolute Sherlock path, required to submit and, without `--anywhere`, to push), optional `control_host`, `data_host`, timeouts and `[tool.sherlock-kit.validators]`. Unknown keys are errors. Never put secrets there. The configuration describes the project; the pin, not the configuration, decides which shk runs. Prefer the `pyproject.toml` table when the project has one: in one directory it wins over `sherlock-kit.toml`.
 
 ## Submit
 

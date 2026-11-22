@@ -1,10 +1,54 @@
 # Installation and connection
 
 `shk` is installed per project, from a pinned release, and reaches Sherlock
-through OpenSSH control masters that the user opens. This guide covers the
-install forms, environments on Sherlock and inside jobs, and the SSH setup;
-[Marlowe](#marlowe) covers the second packaged site. The
-[command reference](cli.md) describes what each command does once it runs.
+through OpenSSH control masters that the user opens. This guide covers a
+project's pin and configuration, the install forms, environments on Sherlock
+and inside jobs, and the SSH setup; [Marlowe](#marlowe) covers the second
+packaged site. The [command reference](cli.md) describes what each command does
+once it runs.
+
+## Pin and configuration
+
+A project that uses `shk` tracks two separate things: the pin decides which
+`shk` runs, and the configuration (`[tool.sherlock-kit]`, see
+[Configuration](cli.md#configuration)) tells that `shk` which project it
+serves. Neither replaces the other, and neither holds secrets.
+
+- **Pin** a release tag as a dependency of the project itself:
+
+  ```toml
+  [project]
+  dependencies = [
+      "sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.10.0",
+  ]
+  ```
+
+  pip and uv both read this line, and a lock file such as `uv.lock` records the
+  tag's commit. A uv project may instead list plain `sherlock-kit` with the
+  `[tool.uv.sources]` entry under [Install forms](#install-forms). Never pin
+  `main` or another branch. `shk` uses only the standard library, so it rarely
+  conflicts with the project's other dependencies.
+
+- **A separate environment** is for a project environment that cannot take
+  `shk`: Python older than 3.11, or a Conda or GPU stack that should not
+  change. Give `shk` its own small environment, track the same requirement
+  line in a file such as `requirements-shk.txt`, and call that environment's
+  `shk` by absolute path. On Sherlock it lives under `$GROUP_HOME`
+  ([Environments on Sherlock](#environments-on-sherlock)).
+
+- **Configure** in the project's `pyproject.toml` when it has one, else in a
+  `sherlock-kit.toml` at the repository root; in one directory the
+  `pyproject.toml` table wins. A Marlowe configuration lives in its own
+  directory ([A project on both clusters](#a-project-on-both-clusters)).
+
+- **Agent copies**: run the pinned environment's `shk install-skill --project .`,
+  with the `--rules` option the project uses; adding `--check` compares the
+  copies without writing and exits 1 when one is missing or stale.
+
+- **Upgrade** by reading the [changelog](../CHANGELOG.md) entries between the
+  two versions, changing the tag in the pin, relocking (`uv lock`) or
+  reinstalling, checking `shk --version`, and rerunning `install-skill` with
+  the same options so that the copies match the new version.
 
 ## Install forms
 

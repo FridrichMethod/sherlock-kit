@@ -70,22 +70,26 @@ flowchart LR
 
 ## Install
 
-Pin a release tag in the project that uses `shk` (Python 3.11 or newer; `main`
-can be ahead of the latest release):
+Pin a release tag as a dependency of the project that uses `shk` (Python 3.11
+or newer; `main` can be ahead of the latest release):
+
+```toml
+[project]
+dependencies = [
+    "sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.10.0",
+]
+```
+
+or install it into the project environment directly:
 
 ```sh
 pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.10.0'
 ```
 
-or, with uv:
-
-```toml
-[tool.uv.sources]
-sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.10.0" }
-```
-
-`shk --version` then prints `sherlock-kit 0.10.0 (git <commit>)`. Environments
-on Sherlock, use inside jobs, submodules and editable installs are covered in
+`shk --version` then prints `sherlock-kit 0.10.0 (git <commit>)`. The pin
+decides which `shk` runs; `[tool.sherlock-kit]` (step 2 below) describes the
+project. A separate environment for `shk`, upgrades, environments on Sherlock,
+use inside jobs, submodules and editable installs are covered in
 [Installation and connection](docs/install.md).
 
 ## Quick start

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+Documentation:
+
+- The installation guide, the README and both skills describe how a project
+  adopts `shk`: the pin, a project dependency on a release tag that a lock
+  file records as its commit (a separate small environment only when the
+  project environment cannot take `shk`), is separate from the configuration,
+  `[tool.sherlock-kit]` in `pyproject.toml` when the project has one; an
+  upgrade changes the tag, relocks or reinstalls and reruns `install-skill`
+  with the same options. Documentation only; no CLI change.
+
 ## 0.10.0
 
 Stanford's Marlowe cluster is a second packaged site. Sherlock stays the
