@@ -432,7 +432,7 @@ too.
   Marlowe; see the Marlowe rules". The start that `sbatch --test-only` prints
   there is not a queue-wait prediction
   ([observed](validation/observed-marlowe.md#test-only-estimates-and-real-starts)).
-- "Requested node configuration is not available" can also mean that no node
+- "Requested node configuration is not available" may also mean that no node
   is schedulable right now: read
   `shk --site marlowe resources --partition preempt --summary` before
   changing a request on that message.

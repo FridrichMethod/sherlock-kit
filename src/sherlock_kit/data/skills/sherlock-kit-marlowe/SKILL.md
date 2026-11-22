@@ -83,7 +83,7 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 | more jobs or array elements than the project account may have submitted | `MaxSubmitJobsPerAccount`, `Job violates accounting/QOS policy (job submit limit, user's size and/or time limits)` |
 | one job with more GPUs than the project account's cap | `MaxGRESPerAccount` |
 
-"Requested node configuration is not available" can also mean that no node is schedulable right now: read `shk --site marlowe resources --partition preempt --summary` (a snapshot of free CPUs, memory and GPUs on schedulable nodes, not a reservation; `--shape NAME:cpus=N,mem=SIZE,gpus=N` counts how many such requests fit) before changing a request on that message. `--preflight` runs the same test alone and creates no job. Its `estimate` start time is not a wait prediction on Marlowe: a job estimated more than a day out started within a minute. Never relay it as a prediction. A controller transport failure is exit 1 `malformed_read`, not a refusal.
+"Requested node configuration is not available" may also mean that no node is schedulable right now: read `shk --site marlowe resources --partition preempt --summary` (a snapshot of free CPUs, memory and GPUs on schedulable nodes, not a reservation; `--shape NAME:cpus=N,mem=SIZE,gpus=N` counts how many such requests fit) before changing a request on that message. `--preflight` runs the same test alone and creates no job. Its `estimate` start time is not a wait prediction on Marlowe: a job estimated more than a day out started within a minute. Never relay it as a prediction. A controller transport failure is exit 1 `malformed_read`, not a refusal.
 
 ## Job scripts
 

@@ -386,6 +386,10 @@ otherwise. No job that `shk` submitted ran.
   verified `pull` read a tree written on the login node.
 - `occupancy`, `release`, an `update` of the partition, the features or an
   array's throttle, and `status --details` of a queued job, on Marlowe.
+- "Requested node configuration is not available" for a request that some
+  node could hold while no node is schedulable: the message was seen only for
+  requests that no node can satisfy, and the rules say only that it may also
+  mean no schedulable node.
 - `shk` inside a Marlowe job, which this release does not support.
 - A GPU job: what a job sees with `--gpus` (`CUDA_VISIBLE_DEVICES`, CUDA MPS).
 - An agent session on a login node: `shk` ran there, but not inside an agent

@@ -21,7 +21,7 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 ### Jobs
 - Submit, update and cancel only through shk, never raw `sbatch`, `scontrol update` or `scancel`. Use `--partition preempt` with explicit CPUs, memory and walltime, GPUs with `--gpus N`. The account comes from the configuration's `account`: never `--account`, never a guess from `$PROJECT_ID`.
 - `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time`.
-- Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" can also mean that no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
+- Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" may also mean that no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
 - No GPU model `--constraint` (no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
 - Job scripts: `module` works under plain `#!/bin/bash` and the Slurm clients are on PATH. `TMPDIR` is `/tmp`; job-local space is `/local_scratch/$USER.$SLURM_JOB_ID`, wiped at job end. No GPU is visible without `--gpus`. Compute nodes reach the internet. The job environment is captured from a login shell: keep login startup files light and quiet.
 - Site: limits are per project account, shared with its members and changed with demand.
