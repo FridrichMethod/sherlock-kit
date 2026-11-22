@@ -27,6 +27,11 @@ CONTENT = (
     "rules/cluster.md",
     "skills/sherlock-kit/SKILL.md",
     "partitions.json",
+    "partitions-marlowe.json",
+    "remote/site-env.sh",
+    "rules/marlowe-workstation.md",
+    "rules/marlowe-cluster.md",
+    "skills/sherlock-kit-marlowe/SKILL.md",
 )
 VERSION = "sherlock-kit 0.9.0 "
 
@@ -141,14 +146,18 @@ class HeadCase(unittest.TestCase):
 
     def assert_cli(self, shk: Path, provenance: str):
         self.assertEqual(self.run_ok(shk, "--version"), f"{VERSION}({provenance})\n")
-        rules = (self.tree / "src" / DATA / "rules/cluster.md").read_text(encoding="utf-8")
-        self.assertEqual(self.run_ok(shk, "rules", "cluster"), rules)
         project = self.tmp / f"project-{shk.parent.parent.name}"
         project.mkdir()
-        self.run_ok(shk, "install-skill", "--project", project)
-        for rel in (".claude/skills/sherlock-kit/SKILL.md", ".agents/skills/sherlock-kit/SKILL.md"):
-            self.assertIn("via shk install-skill", (project / rel).read_text(encoding="utf-8"))
-        self.run_ok(shk, "install-skill", "--project", project, "--check")
+        for site, rules, skill in (
+            ((), "cluster.md", "sherlock-kit"),
+            (("--site", "marlowe"), "marlowe-cluster.md", "sherlock-kit-marlowe"),
+        ):
+            text = (self.tree / "src" / DATA / "rules" / rules).read_text(encoding="utf-8")
+            self.assertEqual(self.run_ok(shk, *site, "rules", "cluster"), text)
+            self.run_ok(shk, *site, "install-skill", "--project", project)
+            for rel in (f".claude/skills/{skill}/SKILL.md", f".agents/skills/{skill}/SKILL.md"):
+                self.assertIn("via shk install-skill", (project / rel).read_text(encoding="utf-8"))
+            self.run_ok(shk, *site, "install-skill", "--project", project, "--check")
 
 
 class PreparationContractTests(unittest.TestCase):
@@ -282,6 +291,8 @@ class BuildTests(HeadCase):
             "docs/cli.md",
             "docs/design.md",
             "docs/install.md",
+            "docs/marlowe-policy.md",
+            "docs/validation/observed-marlowe.md",
             *(f"src/{DATA}{c}" for c in CONTENT),
         ):
             self.assertIn(rel, members)
