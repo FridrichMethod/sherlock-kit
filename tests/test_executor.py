@@ -4,7 +4,6 @@ import io
 import json
 import os
 import shlex
-import shutil
 import signal
 import subprocess
 import sys
@@ -15,7 +14,7 @@ from contextlib import redirect_stderr, suppress
 from pathlib import Path
 from unittest.mock import patch
 
-from fakes import SRC, install_fake_ssh, marlowe_site
+from fakes import SRC, install_fake_ssh, marlowe_site, real_ssh
 from fakes.fake_ssh import BANNER
 
 sys.path.insert(0, str(SRC))
@@ -38,6 +37,7 @@ PREFIX = [
 ]
 CHECK = ["-O", "check", "-oBatchMode=yes"]
 ARGV = ["printf", "", "a b", "'quote'", "$(id)", "a;b", "new\nline", "*", "--flag"]
+SSH = real_ssh()
 
 
 class SshExecutorTests(unittest.TestCase):
@@ -173,7 +173,7 @@ class SshExecutorTests(unittest.TestCase):
         self.assertEqual(target, "sherlock-dtn:/scratch/users/u/a b")
 
 
-@unittest.skipUnless(shutil.which("ssh"), "OpenSSH client not installed")
+@unittest.skipUnless(SSH, "OpenSSH client not installed")
 class RealOpenSshTests(unittest.TestCase):
     """Real OpenSSH, no network: -F points at a temporary config whose ProxyCommand only leaves a marker."""
 
@@ -193,7 +193,7 @@ class RealOpenSshTests(unittest.TestCase):
         path = self.tmp / name
         check = 'case " $* " in *" -O check "*) exit 0;; esac\n' if claim_master else ""
         path.write_text(
-            f"#!/bin/sh\n{check}exec {shlex.quote(shutil.which('ssh'))} -F "
+            f"#!/bin/sh\n{check}exec {shlex.quote(SSH)} -F "
             f'{shlex.quote(str(self.tmp / "config"))} "$@"\n',
             encoding="utf-8",
         )

@@ -1,7 +1,7 @@
-"""The suite stays offline inside a Sherlock job: importing fakes (both entry points do) scrubs
-the inherited scheduler environment, puts blocking Slurm clients on PATH behind the per-test
-fakes, and refuses a TMPDIR that cannot execute the fakes written there; run_suite.py fails a
-run in which a test reached the tripwire."""
+"""The suite stays offline inside a Sherlock job and next to open control masters: importing
+fakes (both entry points do) scrubs the inherited scheduler environment, puts blocking Slurm
+clients and ssh on PATH behind the per-test fakes, and refuses a TMPDIR that cannot execute the
+fakes written there; run_suite.py fails a run in which a test reached the tripwire."""
 
 import json
 import os
@@ -11,8 +11,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from fakes import ROOT, SRC, TRIPWIRE
+from fakes import ROOT, SRC, TRIPWIRE, install_fake_ssh, real_ssh
 from fakes.fakeslurm import BIN, FakeSlurm
 
 TESTS = Path(__file__).resolve().parent
@@ -191,25 +192,71 @@ class HermeticSuite(unittest.TestCase):
         path = FakeSlurm(self.tmp).env()["PATH"]
         self.assertEqual(shutil.which("squeue", path=path), str(BIN / "squeue"))
         self.assertEqual(shutil.which("scontrol", path=path), str(TRIPWIRE / "scontrol"))
+        self.assertEqual(shutil.which("ssh", path=path), str(TRIPWIRE / "ssh"))
+        fake = install_fake_ssh(self.tmp)
+        self.assertEqual(shutil.which("ssh", path=fake.env()["PATH"]), str(fake.path))
+
+    def test_a_kit_call_over_ssh_without_a_fake_ssh_is_blocked(self):
+        # Hosts that are no one's alias, in case the stub ever failed; doctor only checks masters.
+        (self.tmp / "sherlock-kit.toml").write_text(
+            'control_host = "shk-test.invalid"\ndata_host = "shk-test-dtn.invalid"\n'
+        )
+        argv = ["--project-dir", str(self.tmp), "--executor", "ssh", "doctor"]
+        result = child(
+            "import contextlib, io, json, fakes\n"
+            "from sherlock_kit import cli\n"
+            "with contextlib.redirect_stdout(io.StringIO()) as out:\n"
+            f"    code = cli.main({argv!r})\n"
+            "print(json.dumps([code, json.loads(out.getvalue()), fakes.tripwire_hits()]))\n"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        code, report, hits = json.loads(result.stdout)
+        self.assertEqual(code, 4)
+        self.assertEqual(report["masters"], {"control": "unavailable", "data": "unavailable"})
+        self.assertIn("blocked the real ssh client", json.dumps(report["problems"]))
+        self.assertEqual(
+            hits,
+            [
+                "ssh -O check -oBatchMode=yes shk-test.invalid",
+                "ssh -O check -oBatchMode=yes shk-test-dtn.invalid",
+            ],
+        )
+
+    def test_the_real_ssh_helper_looks_only_behind_the_tripwire(self):
+        system = self.tmp / "system-bin"  # a stand-in for the system client; never run
+        system.mkdir()
+        (system / "ssh").write_text("#!/bin/sh\nexit 0\n")
+        (system / "ssh").chmod(0o755)
+        for path, found in (
+            (f"{TRIPWIRE}{os.pathsep}{system}", str(system / "ssh")),
+            (str(TRIPWIRE), None),
+        ):
+            with self.subTest(path=path), patch.dict(os.environ, {"PATH": path}):
+                self.assertEqual(shutil.which("ssh"), str(TRIPWIRE / "ssh"))
+                self.assertEqual(real_ssh(), found)
+        found = real_ssh()
+        self.assertTrue(found is None or Path(found).parent != TRIPWIRE, found)
 
     def test_run_suite_fails_a_run_that_reached_the_tripwire(self):
         # A fail-closed test passes on the stub's nonzero exit; only run_suite's hit check fails it.
-        code = (
-            "import subprocess, sys, unittest\n"
-            "import run_suite\n"
-            "class Leak(unittest.TestCase):\n"
-            "    def test_fail_closed(self):\n"
-            "        argv = ['sh', '-c', 'scancel -u someone --name=x']\n"
-            "        self.assertNotEqual(subprocess.run(argv, check=False).returncode, 0)\n"
-            "suite = unittest.TestSuite([Leak('test_fail_closed')])\n"
-            "unittest.defaultTestLoader.discover = lambda *args, **kwargs: suite\n"
-            "sys.exit(run_suite.main())\n"
-        )
-        result = child(code)
-        self.assertIn("OK", result.stderr)
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("reached the Slurm tripwire instead of a fake:\n", result.stderr)
-        self.assertIn("  scancel -u someone --name=x\n", result.stderr)
+        for command in ("scancel -u someone --name=x", "ssh -O check -oBatchMode=yes x.invalid"):
+            code = (
+                "import subprocess, sys, unittest\n"
+                "import run_suite\n"
+                "class Leak(unittest.TestCase):\n"
+                "    def test_fail_closed(self):\n"
+                f"        argv = ['sh', '-c', {command!r}]\n"
+                "        self.assertNotEqual(subprocess.run(argv, check=False).returncode, 0)\n"
+                "suite = unittest.TestSuite([Leak('test_fail_closed')])\n"
+                "unittest.defaultTestLoader.discover = lambda *args, **kwargs: suite\n"
+                "sys.exit(run_suite.main())\n"
+            )
+            with self.subTest(command=command):
+                result = child(code)
+                self.assertIn("OK", result.stderr)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn("reached the Slurm tripwire instead of a fake:\n", result.stderr)
+                self.assertIn(f"  {command}\n", result.stderr)
 
     def test_a_tmpdir_that_cannot_execute_is_refused(self):
         cases = [("simulated", NOEXEC, {})]

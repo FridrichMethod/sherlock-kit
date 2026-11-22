@@ -8,8 +8,9 @@ Every test module imports this package, so both entry points (``tests/run_suite.
   ``SHK_*`` (except the suite knobs ``SHK_BUILD_PYTHON``, ``SHK_TEST_WHEELHOUSE`` and ``SHK_REQUIRE_ALL``),
   ``SHERLOCK_KIT_*`` and exported shell functions (``BASH_FUNC_*``, which bash, Sherlock's
   ``sh``, runs instead of a command on PATH);
-- a tripwire of blocking stubs for every Slurm client is put first on PATH, so per-test fakes
-  (prepended later) shadow it and it shadows the system clients. A stub records its call
+- a tripwire of blocking stubs for every Slurm client and for ``ssh`` is put first on PATH, so
+  per-test fakes (prepended later) shadow it and it shadows the system clients; rsync stays
+  real, and the ssh command shk hands it through ``-e`` meets the stub. A stub records its call
   (``tripwire_hits()``) and exits ``TRIPWIRE_RC``; ``run_suite.py`` fails a run with hits
   (``unittest discover`` cannot, so a test that expects a failure still passes there);
 - the tripwire is written under TMPDIR, where the tests write their fakes too, and must run
@@ -21,7 +22,9 @@ runs ``fake_ssh.py`` with the test interpreter, and returns a ``FakeSsh``:
 ``.path`` (the wrapper), ``.bin`` (prepend to PATH), ``.env(**knobs)`` (PATH plus
 FAKE_SSH_RECORD plus knobs such as FAKE_SSH_MODE / FAKE_SSH_MASTER /
 FAKE_SSH_HANG / FAKE_SSH_BANNER, for ``unittest.mock.patch.dict(os.environ, ...)``) and
-``.calls()`` (every recorded argv[1:], in order). ``SRC`` is the package source
+``.calls()`` (every recorded argv[1:], in order). ``real_ssh()`` finds the system OpenSSH
+client behind the tripwire, for the tests that run it with their own ``-F`` configuration
+(which keeps the user's configuration and control sockets out). ``SRC`` is the package source
 root for tests that import ``sherlock_kit`` without installing it; ``in_git()`` tells
 whether ``ROOT`` is the top of a git checkout.
 
@@ -100,11 +103,12 @@ def _tripwire():
     atexit.register(shutil.rmtree, tripwire.parent, True)
     log = tripwire.with_name("tripwire.log")
     tripwire.mkdir()
-    for tool in SLURM_CLIENTS:
+    for tool in (*SLURM_CLIENTS, "ssh"):
+        client = "ssh client" if tool == "ssh" else f"Slurm client {tool}"
         (tripwire / tool).write_text(
             "#!/bin/sh\n"
             f'printf "%s\\n" "{tool} $*" >>{shlex.quote(str(log))}\n'
-            f'echo "sherlock-kit tests: blocked the real Slurm client {tool}; fake it" >&2\n'
+            f'echo "sherlock-kit tests: blocked the real {client}; fake it" >&2\n'
             f"exit {TRIPWIRE_RC}\n",
             encoding="utf-8",
         )
@@ -125,8 +129,14 @@ def _tripwire():
 
 
 def tripwire_hits() -> list:
-    """The Slurm client calls the tripwire blocked so far, as "tool args" lines."""
+    """The Slurm client and ssh calls the tripwire blocked so far, as "tool args" lines."""
     return TRIPWIRE.with_name("tripwire.log").read_text(encoding="utf-8").splitlines()
+
+
+def real_ssh():
+    """The system OpenSSH client behind the tripwire, or None, for tests that pass their own -F."""
+    path = os.environ.get("PATH", "").split(os.pathsep)
+    return shutil.which("ssh", path=os.pathsep.join(d for d in path if d != str(TRIPWIRE)))
 
 
 _scrub()

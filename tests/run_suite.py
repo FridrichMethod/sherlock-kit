@@ -10,7 +10,7 @@ from re-running the suite on import.
 
 Importing fakes makes the run hermetic (see tests/fakes/__init__.py); a TMPDIR that
 cannot execute files is refused before discovery, and a run in which a test reached
-the Slurm tripwire fails.
+the tripwire (a blocked Slurm client or ssh) fails.
 """
 
 import os
