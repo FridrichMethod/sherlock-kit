@@ -424,6 +424,11 @@ class SiteTransportTests(unittest.TestCase):
         self.assertEqual(
             executor.master_hint("none", "marlowe-plain", site=sites.MARLOWE), "ssh marlowe-plain"
         )
+        self.assertEqual(  # no ControlPersist value: the site suggests a finite one
+            executor.master_hint("not_configured", "marlowe-plain", site=sites.MARLOWE),
+            "set ControlMaster auto, ControlPersist and ControlPath ~/.ssh/%C for "
+            "marlowe-plain in ~/.ssh/config, then run: ssh marlowe-plain",
+        )
         with self.assertRaises(ShkError) as caught:
             executor.LocalExecutor(site=sites.MARLOWE).rsync_args("/scratch/m000000/x")
         self.assertEqual(

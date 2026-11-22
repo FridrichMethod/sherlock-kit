@@ -207,8 +207,9 @@ def master_hint(
             f"run {sites.command(site)} doctor; inspect the local SSH check failure before "
             "requesting a new login"
         )
-    return (
-        f"set ControlMaster auto, ControlPersist yes and ControlPath ~/.ssh/%C for {host} "
+    persist = "ControlPersist yes" if site.name == sites.SHERLOCK.name else "ControlPersist"
+    return (  # off Sherlock no value: Marlowe's Connecting page suggests a finite one
+        f"set ControlMaster auto, {persist} and ControlPath ~/.ssh/%C for {host} "
         f"in ~/.ssh/config, then run: {login}"
     )
 
