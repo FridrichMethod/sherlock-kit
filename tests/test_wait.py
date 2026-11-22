@@ -295,6 +295,8 @@ class WaitArguments(WaitFlow):
             ("--timeout", "90"),
             ("--timeout", "1h30m"),
             ("--timeout", ""),
+            ("--timeout", "99999999999999h"),
+            ("--timeout", "99999999999:00:00"),
             ("--interval", "0:00:59"),
             ("--interval", "30s"),
             ("--max-pending", "0:00:30"),
@@ -326,6 +328,10 @@ class WaitArguments(WaitFlow):
             (("--timeout", "168h"), 168 * 3600),
             (("--timeout", "168:00:00", "--interval", "1m", "--max-pending", "1m"), 168 * 3600),
             (("--timeout", "1h", "--interval", "1000h", "--max-pending", "1000h"), 3600),
+            (
+                ("--timeout", "1h", "--interval", "9" * 20 + "h", "--max-pending", "9" * 20 + "m"),
+                3600,
+            ),
         )
         for argv, seconds in cases:
             with self.subTest(argv=argv):

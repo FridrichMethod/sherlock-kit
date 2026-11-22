@@ -42,6 +42,7 @@ FORMS = "2h, 90m or H:MM:SS"  # the forms of submit --time
 LEAST = timedelta(minutes=1)
 MAX_TIMEOUT = timedelta(hours=168)
 BACKOFF_CAP = timedelta(minutes=30)
+BEYOND = MAX_TIMEOUT + LEAST  # acts as any longer --interval or --max-pending: no wait lasts longer
 
 
 def register(subparsers: Subparsers) -> None:
@@ -68,14 +69,16 @@ def register(subparsers: Subparsers) -> None:
     parser.set_defaults(handler=wait)
 
 
-def duration(
-    option: str, text: str, bounds: str, least: timedelta, most: timedelta = timedelta.max
-) -> timedelta:
-    """A DUR in the forms of submit --time, from least to most; else exit 1 spec_invalid."""
-    found = timedelta(seconds=spec._seconds(text))  # 0 for any other form
-    if not least <= found <= most:
+def duration(option: str, text: str, bounds: str, most: timedelta | None = None) -> timedelta:
+    """A DUR in the forms of submit --time, from 1m to most; else exit 1 spec_invalid.
+
+    The whole seconds are checked before a timedelta exists, so no value overflows one; without
+    most, a value above BEYOND becomes BEYOND, which behaves the same.
+    """
+    seconds = spec._seconds(text)  # 0 for any other form
+    if seconds < LEAST.total_seconds() or (most is not None and seconds > most.total_seconds()):
         raise spec._invalid(f"{option} {text!r}: use {FORMS}, {bounds}")
-    return found
+    return timedelta(seconds=min(seconds, (most or BEYOND).total_seconds()))
 
 
 @dataclass
@@ -142,12 +145,10 @@ class _Watch:
 
 def wait(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk wait`: read, decide and sleep until an outcome; the module docstring gives the order."""
-    timeout = duration("--timeout", args.timeout, "1m to 168h", LEAST, MAX_TIMEOUT)
-    interval = duration("--interval", args.interval, "at least 1m", LEAST)
+    timeout = duration("--timeout", args.timeout, "1m to 168h", MAX_TIMEOUT)
+    interval = duration("--interval", args.interval, "at least 1m")
     pending = args.max_pending
-    max_pending = (
-        None if pending is None else duration("--max-pending", pending, "at least 1m", LEAST)
-    )
+    max_pending = None if pending is None else duration("--max-pending", pending, "at least 1m")
     watch = _Watch(interval, max_pending)
     read = slurm.status_reader(args, ctx)
     started = ctx.clock()
