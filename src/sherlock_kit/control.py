@@ -137,6 +137,7 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
     """Use sbatch --test-only as a read: a Slurm refusal is exit 3, a controller failure exit 1.
 
     The estimate beside the raw evidence is advisory: no reservation, no promise, no conversion.
+    A site with an estimate_note (Marlowe) adds it as estimate.note; the fields stay as printed.
     """
     from sherlock_kit.slurm import _cadence
 
@@ -163,6 +164,7 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
     if code and (failure := transient("preflight", evidence["stderr"])):
         raise failure
     cadence = _cadence(ctx)
+    note = result.site.estimate_note
     return Outcome(
         {
             "ok": code == 0,
@@ -177,6 +179,7 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
             "estimate": {
                 **parse_estimate(evidence["stderr"], evidence["stdout"]),
                 "observed_at": cadence["queried_at"],
+                **({"note": note} if note else {}),
             },
             "executor": ctx.executor().kind,
             **sites.reply_fields(result.site),

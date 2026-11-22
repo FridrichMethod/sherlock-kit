@@ -16,7 +16,9 @@ change with demand:
   Slurm configuration file exists here (hostnames and ClusterName are vendor defaults there);
 - the site instructions file that doctor checks, or None;
 - whether submit runs sbatch --test-only before staging;
-- the packaged partition table, the rules files by kind and the skill name.
+- the packaged partition table, the rules files by kind and the skill name;
+- estimate_note: None, or the note a preflight reply carries as estimate.note where the start
+  that sbatch --test-only prints is no wait prediction (Marlowe).
 
 A reply from a site other than Sherlock carries reply_fields(site), {"site": NAME}, and the shk
 commands its hints and exit 5 follow-up name carry selector(site), ["--site", NAME]; Sherlock
@@ -57,6 +59,7 @@ class Site:
     partitions: str
     rules: Mapping[str, str]
     skill: str
+    estimate_note: str | None
 
 
 def _on_sherlock(hostname: str, env: Mapping[str, str]) -> bool:
@@ -93,6 +96,7 @@ SHERLOCK = Site(
     partitions="partitions.json",
     rules=MappingProxyType({"workstation": "workstation.md", "cluster": "cluster.md"}),
     skill="sherlock-kit",
+    estimate_note=None,
 )
 MARLOWE = Site(
     name="marlowe",
@@ -110,6 +114,8 @@ MARLOWE = Site(
         "cluster": "marlowe-cluster.md",
     }),
     skill="sherlock-kit-marlowe",
+    estimate_note="not a wait prediction on Marlowe: the observed start came much earlier; "
+    "see the Marlowe rules",
 )
 SITES: dict[str, Site] = {SHERLOCK.name: SHERLOCK, MARLOWE.name: MARLOWE}
 

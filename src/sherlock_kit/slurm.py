@@ -10,7 +10,10 @@ like new. Remote calls print next_check_after (now + 60 s); a dispatched mutatio
 confirmed result (a lost reply, sbatch without a job id, a nonzero scancel) is action "unknown"
 (exit 5); exit 6 when the newest job of a listed name has an anomaly. A site other than Sherlock
 adds sites.reply_fields() after "executor", and its selector to the exit 5 `next` and to the shk
-commands that hints name. Partitions are those of the selected site's table.
+commands that hints name. Partitions are those of the selected site's table. A site with
+test_before_submit (Marlowe) runs control.preflight (sbatch --test-only) after the duplicate read
+and before staging: when Slurm refuses, submit returns that preflight reply unchanged (exit 3,
+nothing staged), else it goes on as usual.
 """
 
 from __future__ import annotations
@@ -956,7 +959,10 @@ def _courtesy(read: Read, built: spec.Spec) -> dict[str, Any]:
 
 
 def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """`shk submit`: offline checks, one read, the local decision, then one mutation."""
+    """`shk submit`: offline checks, one read, the local decision, then one mutation.
+
+    On a site with test_before_submit the decision includes Slurm's test of the request.
+    """
     site = ctx.site
     built = spec.build(args, ctx.require("project", "remote_root"), ctx.clock(), site)
     report = {
@@ -984,6 +990,10 @@ def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
     _refuse_existing(built.name, found, args.resubmit, site)
     if borrowed:
         report.update(_courtesy(read, built))
+    if site.test_before_submit:
+        tested = control.preflight(built, ctx)
+        if tested.code:  # Slurm refused the request: nothing is staged or dispatched
+            return tested
     stamp = f"{ctx.clock():%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
     remote = [built.name, built.run_dir, stamp, built.sha256, built.text, "--", *built.argv]
     reply = _mutate(ctx, "submit", remote, ("SHK_SUBMITTED",), stdin=built.script)
