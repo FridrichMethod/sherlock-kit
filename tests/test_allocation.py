@@ -476,7 +476,9 @@ class AllocationCLI(unittest.TestCase):
     def test_scheduler_timeout_is_a_read_timeout(self):
         (self.tmp / "sherlock-kit.toml").write_text("command_timeout = 2\n")
         self.data["delay"] = {"pidinfo": 10}
-        self.assertRefused(self.run_cli(), "allocation", "timeout", 4)
+        outcome = self.run_cli()
+        self.assertRefused(outcome, "allocation", "timeout", 4)
+        self.assertEqual(outcome[1]["hint"], "run shk doctor")
 
     def test_caller_hostlists_are_expanded_without_admission_policy(self):
         overlapping = "sh03-01n01,sh03-01n[01-02]"

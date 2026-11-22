@@ -119,6 +119,10 @@ class ParsingTests(unittest.TestCase):
             with self.subTest(tools=tools), self.assertRaises(ShkError) as caught:
                 slurm.parse_read(text, tools)
             self.assertEqual((caught.exception.code, caught.exception.token), (1, "malformed_read"))
+            self.assertEqual(
+                caught.exception.hint,
+                "retry once after 60 s; shk doctor --remote checks the remote tools",
+            )
 
     def test_spec_file_keeps_the_partitions_of_a_set_only(self):
         specs = {

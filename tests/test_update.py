@@ -848,6 +848,11 @@ class UpdateOffline(UpdateFlow):
         )
         report = self.update("--time", "1h", "--partition", "bigmem")[1]
         self.assertIn("one shk update per field", report["hint"])
+        self.assertEqual(
+            report["hint"],
+            "run one shk update per field: Slurm applies the fields of one update one by one, "
+            "without rollback",
+        )
         # 1024 bytes pass the offline check; the fake then answers no read.
         code, report = self.update("--constraint", "x" * 1024)
         self.assertEqual((code, report["error"]), (3, "remote_refused"))

@@ -139,6 +139,7 @@ class ManifestParseTests(unittest.TestCase):
                 (caught.exception.code, caught.exception.token), (1, "malformed_reply")
             )
             self.assertIn("doctor --remote", caught.exception.hint)
+            self.assertEqual(caught.exception.hint, "run shk doctor --remote")
 
 
 class TransferCase(unittest.TestCase):
@@ -339,6 +340,13 @@ class PullTests(TransferCase):
         absent = self.shk("pull", str(self.root / "absent"), str(self.dest))
         self.assert_refused(absent, 1, "manifest_unavailable")
         self.assertIn("not a directory", absent[1]["message"])
+        self.assertEqual(
+            (absent[1]["message"], absent[1]["hint"]),
+            (
+                f"{self.root / 'absent'} is not a directory on Sherlock",
+                "check REMOTE: the absolute path of the directory the job wrote",
+            ),
+        )
         unlisted = self.shk("pull", str(self.root), str(self.dest))
         self.assert_refused(unlisted, 1, "manifest_unavailable")
         self.assertIn("SHA256SUMS is missing", unlisted[1]["message"])

@@ -252,6 +252,9 @@ class FailedReadTests(DetailsFlow):
         self.fake.update(sacct_rc=1)
         code, report = self.details("--task", "train-a")
         self.assertEqual((code, report["ok"], report["error"]), (1, False, "malformed_read"))
+        self.assertEqual(
+            report["hint"], "retry once after 60 s; shk doctor --remote checks the remote tools"
+        )
         self.assertNotIn("names", report)
         self.assertFalse(report["details"]["complete"])
         self.assertEqual(report["details"]["returncodes"], {"squeue": 0, "sacct": 1, "scontrol": 0})
@@ -599,6 +602,9 @@ class WindowTests(DetailsFlow):
                 code, report = self.shk("status", *argv, "--since", "32")
                 self.assertEqual((code, report["error"]), (1, "spec_invalid"))
                 self.assertIn("31", report["message"])
+                self.assertEqual(
+                    report["hint"], "Sherlock's slurmdbd refuses sacct windows wider than 31 days"
+                )
         self.assertEqual(self.fake.state()["calls"], [])
         self.assertEqual(self.details("--job-id", "7900", "--since", "31")[0], 0)
         self.assertIn("now-31days", self.fake.calls("sacct")[0]["argv"])

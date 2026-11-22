@@ -65,6 +65,9 @@ class ResourcesFlows(Flow):
         self.assertIn("scontrol rc=1", report["message"])
         self.assertIn("Unable to contact slurm controller", report["message"])
         self.assertIn("retry once after 60 s", report["hint"])
+        self.assertEqual(
+            report["hint"], "retry once after 60 s; shk doctor --remote checks the remote tools"
+        )
         # A failed read never passes for capacity evidence, even with some lines printed.
         self.scontrol(node("cn01", "IDLE", "gpu"), rc=1, stderr=error)
         code, report = self.shk("resources", "--partition", "gpu")

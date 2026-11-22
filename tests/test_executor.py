@@ -305,6 +305,64 @@ class LocalExecutorTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, code)
 
 
+class SherlockTextTests(unittest.TestCase):
+    """Sherlock's texts of the messages that name the site or an shk command, byte for byte."""
+
+    def test_check_texts(self):
+        unreachable = ("query: Sherlock unreachable. tail", "run shk doctor")
+        cases = {
+            "auth_required": (4, *unreachable),
+            "unavailable": (4, *unreachable),
+            "timeout": (4, *unreachable),
+            "unknown": (
+                5,
+                "query: dispatched, outcome unknown. tail",
+                "wait at least 60 s, then run shk status; never resubmit blind",
+            ),
+            "failed": (1, "query: exit 9. tail", None),
+        }
+        for status, (code, message, hint) in cases.items():
+            with self.subTest(status=status), self.assertRaises(ShkError) as caught:
+                executor.check(executor.Result(status, "", "tail\n", 9), "query")
+            error = caught.exception
+            self.assertEqual((error.code, error.message, error.hint), (code, message, hint))
+
+    def test_master_hints(self):
+        login = "ssh sherlock-plain"
+        self.assertEqual(executor.master_hint("none", "sherlock-plain"), login)
+        self.assertEqual(
+            executor.master_hint("none", "sherlock-dtn", data=True), "ssh -fN sherlock-dtn"
+        )
+        self.assertEqual(executor.master_hint("ssh_missing", "sherlock-plain"), "install OpenSSH")
+        for state in ("timeout", "unavailable"):
+            self.assertEqual(
+                executor.master_hint(state, "sherlock-plain"),
+                "run shk doctor; inspect the local SSH check failure before requesting a new login",
+            )
+        self.assertEqual(
+            executor.master_hint("not_configured", "sherlock-plain"),
+            "set ControlMaster auto, ControlPersist yes and ControlPath ~/.ssh/%C for "
+            "sherlock-plain in ~/.ssh/config, then run: ssh sherlock-plain",
+        )
+
+    def test_transfer_refusal_on_sherlock(self):
+        with self.assertRaises(ShkError) as caught:
+            executor.LocalExecutor().rsync_args("/scratch/x")
+        self.assertEqual(
+            (caught.exception.code, caught.exception.payload()),
+            (
+                3,
+                {
+                    "ok": False,
+                    "error": "transfer_on_sherlock",
+                    "message": "push and pull of /scratch/x start from the workstation; never "
+                    "ssh to a DTN from Sherlock",
+                    "hint": "the data is already here; copy large trees in a Slurm job",
+                },
+            ),
+        )
+
+
 class DetectionTests(unittest.TestCase):
     def kind(self, hostname, override=None, **env):
         return executor.detect(None, override, env, hostname).kind

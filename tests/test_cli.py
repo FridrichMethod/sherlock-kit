@@ -303,6 +303,16 @@ class DoctorTests(TempCase):
         self.assertEqual(report["remote"]["user"], pwd.getpwuid(os.getuid()).pw_name)
         self.assertEqual(self.fake.calls(), [])
 
+    def test_site_instructions_check(self):
+        code, report = self.doctor("--executor", "local", "doctor", "--remote")
+        self.assertEqual(code, 0)
+        readable = os.access("/etc/agents/AGENTS.md", os.R_OK)
+        self.assertEqual(
+            report["remote"]["site_instructions"], "readable" if readable else "missing"
+        )
+        warning = "/etc/agents/AGENTS.md is not readable where shk runs"
+        self.assertEqual(report["warnings"], [] if readable else [warning])
+
 
 if __name__ == "__main__":
     unittest.main()
