@@ -167,21 +167,27 @@ class WaitOutcomes(WaitFlow):
         self.assert_outcome(reply, "settled", reads=2)
         states = {entry["name"]: entry["state"] for entry in reply["names"]}
         self.assertEqual(states, {self.name("old"): "failed", self.name("new"): "done"})
-        later = self.slurm.add(self.name("later"), "RUNNING")
-        changes = [lambda: self.slurm.set(later, "FAILED")]
+        self.slurm.add(self.name("running"), "RUNNING")
+        later = []  # submitted while the wait runs: first live at its second read
+        changes = [
+            lambda: later.append(self.slurm.add(self.name("later"), "RUNNING")),
+            lambda: self.slurm.set(later[0], "FAILED"),
+        ]
         code, reply = self.wait("--all", "--timeout", "2h", changes=changes)
         self.assertEqual(code, 0)
-        self.assert_outcome(reply, "failed", [self.name("later")], reads=2)
+        self.assert_outcome(reply, "failed", [self.name("later")], reads=3)
         self.assert_status_reply(code, reply, "--all")
 
     def test_an_anomaly_ends_the_wait_with_exit_6(self):
         first = self.slurm.add(self.name("a"), "RUNNING")
         self.slurm.add(self.name("b"), "RUNNING")
         selection = ("--task", "a", "--task", "b")
-        changes = [lambda: self.slurm.requeue(first)]  # preempted on normal, which never preempts
+        # Preempted on normal, which never preempts, then failed: the anomaly decides, not failed.
+        changes = [lambda: (self.slurm.requeue(first), self.slurm.set(first, "FAILED"))]
         code, reply = self.wait(*selection, "--timeout", "2h", changes=changes)
         self.assertEqual((code, reply["ok"]), (6, True))
         self.assert_outcome(reply, "anomaly", [self.name("a")], reads=2)
+        self.assertEqual([entry["state"] for entry in reply["names"]], ["failed", "live"])
         anomalies = [entry["current"]["anomalies"] for entry in reply["names"]]
         self.assertEqual(anomalies, [["unexpected_preemption"], []])
         self.assert_status_reply(code, reply, *selection)
