@@ -78,7 +78,8 @@ file, "C" the cluster file.
 
 | Statement | File | Kind | Source |
 |---|---|---|---|
-| Run nothing that lets a person or a service reach Marlowe without SUNet ID, password and Duo; the examples (websocket tunnels and remote-control servers such as SSHX and Claude Remote Control/Server, userspace VPNs such as Tailscale and ZeroTier, editor web tunnels of VS Code, Cursor and Windsurf); ordinary SSH tunnels and port forwarding are fine | W, C | site | Usage Violations, "Do not provide access to Marlowe outside the authenticated login path" |
+| Run nothing that lets a person or a service reach Marlowe without SUNet ID, password and Duo; the examples (websocket tunnels and remote-control servers such as SSHX and Claude Remote Control/Server, userspace VPNs such as Tailscale and ZeroTier, editor web tunnels of VS Code, Cursor and Windsurf) | W, C | site | Usage Violations, "Do not provide access to Marlowe outside the authenticated login path" |
+| The user's own SSH forwarding through that login is fine; open no tunnel or forward yourself | W, C | site, toolkit | Usage Violations: "Ordinary SSH tunnels and port forwarding are fine, because they still require your password and Duo"; that the agent opens none itself is a toolkit rule |
 | Own code servers on login nodes are among them | W, C | site | FAQ, "What's the recommended way to use VSCode on a compute node?"; Open OnDemand, Code Server |
 | W: the open master passed that gate; never share it, credentials or this session, including through a remote-control relay | W | site | Usage Violations, the quoted provisions against enabling unauthorized access and sharing an authenticator, read with the restriction above: a relay of a session that holds the master lets a service reach Marlowe without the gate |
 | C: never start a remote-control server for this session; never share credentials or this session | C | site | as above |
