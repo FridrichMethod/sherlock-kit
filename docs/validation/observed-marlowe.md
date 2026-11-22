@@ -323,7 +323,7 @@ Same window, partition `preempt`:
 
 `shk` ran from a development tree with a throwaway Marlowe configuration, from
 the workstation over the `marlowe-plain` master unless a bullet says
-otherwise. No job that `shk` submitted ran.
+otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
 
 - `shk --site marlowe doctor`: both masters `running` from one check, and
   `"site": "marlowe"` after `executor`. With `--remote` the host was a login
@@ -369,6 +369,20 @@ otherwise. No job that `shk` submitted ran.
   `wait; check shk --site marlowe status at most once per 60 s`. `cancel`:
   `cancelled`. A later `status`: `failed`, 1 CANCELLED, zero CPU and GPU
   seconds. The job never ran.
+- A plain `submit` of a one-CPU script (1 GB, 5 minutes, no token):
+  `submitted` with a job id, the dry run's argv (`--requeue`, no `--hold`).
+  The job started 23 s later and ran 2 s. `status --task`: `done`, 1
+  COMPLETED, exit code `0:0`, `max_restart` 0, a final cost of 2 CPU seconds,
+  no anomaly; `status --job-id N --details` showed the same from the queue row
+  and the accounting row (`billing=1,cpu=1,mem=1G,node=1`). Inside, the working
+  directory was the run directory `<remote_root>/runs/<name>` (not
+  `SLURM_SUBMIT_DIR`), which held `.shk/<name>.<jobid>.sh` and `.json`;
+  `SHK_NAME`, the only `SHK_` variable, equaled the Slurm job name; `module`
+  was defined, `sbatch` was on PATH, one CPU and no GPU were visible, and
+  `scontrol show job` showed `Requeue=1`. The script's last step wrote
+  `out/SHA256SUMS` with the skill's one-liner, and `pull` of `out` gave
+  `pulled` with the one listed file under the payload-only contract (the
+  manifest is not copied).
 - Locally: `shk --site marlowe rules workstation` and
   `shk --site marlowe rules cluster` printed the Marlowe files;
   `install-skill` for both sites into one project wrote each site's skill
@@ -384,10 +398,10 @@ otherwise. No job that `shk` submitted ran.
 - The requeue-hold path: how a job reaches REQUEUE_HOLD or a launch-failure
   hold, what `squeue`, `scontrol` and `sacct` show for it, and the recovery the
   rules prescribe (cancel, then resubmit with the user's consent).
-- A job that `shk` submits and that then runs: every job on Marlowe is
-  billed, and such a job needs the owner's authorization. What a running job
-  sees comes from the observation job, which was submitted by hand, and the
-  verified `pull` read a tree written on the login node.
+- A GPU job, an array or a preempted job that `shk` submits and that then
+  runs: every job on Marlowe is billed, and such a job needs the owner's
+  authorization. The one job of `shk` that ran had one CPU and was not
+  preempted.
 - `occupancy`, `release`, an `update` of the partition, the features or an
   array's throttle, and `status --details` of a queued job, on Marlowe.
 - "Requested node configuration is not available" for a request that some
