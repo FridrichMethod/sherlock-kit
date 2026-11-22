@@ -1,14 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.10.0
 
 Stanford's Marlowe cluster is a second packaged site. Sherlock stays the
 default: its `sbatch` argv, replies, hints, exit 5 `next`, remote programs,
 rules files, skill, partition table and executor detection are unchanged,
-apart from the changes listed under "Visible on Sherlock". The Marlowe argv,
-the reply additions (`site`, `estimate.note`) and the Marlowe content paths
-(rules, skill and their project copies) are provisional and may change in a
-later release.
+apart from the version text and the changes listed under "Visible on
+Sherlock". The Marlowe argv, the reply additions (`site`, `estimate.note`)
+and the Marlowe content paths (rules, skill and their project copies) are
+provisional and may change in a later release.
 
 Sites:
 
@@ -96,10 +96,11 @@ Documentation:
 - `docs/marlowe-policy.md` records the source of every Marlowe rules sentence
   (documentation pages retrieved 2026-11-21, owner choices, toolkit choices),
   and `docs/validation/observed-marlowe.md` records Slurm 25.05.2 on Marlowe
-  and `shk`'s own commands there. The command reference, the design guide,
-  the installation guide (the `marlowe-plain` stanza, a project on both
-  clusters, the remote root, `shk` on a login node), the README and the
-  contributor guides describe the site.
+  and `shk`'s own commands there, among them one CPU-only job that `shk`
+  submitted, that ran and whose output `pull` verified. The command
+  reference, the design guide, the installation guide (the `marlowe-plain`
+  stanza, a project on both clusters, the remote root, `shk` on a login
+  node), the README and the contributor guides describe the site.
 
 ## 0.9.0
 
