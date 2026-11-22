@@ -19,25 +19,29 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 - `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time`.
 - Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" can also mean that no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
 - No GPU model `--constraint` (Marlowe has no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
-- Site: limits are per project account, shared with its members and changed with demand. Every array element counts toward the submit limit, whatever the throttle.
+- Site: limits are per project account, shared with its members and changed with demand.
+- Every array element counts toward the submit limit, whatever the throttle.
 - Reads at least 60 s apart (`shk --site marlowe status --all`), no watch or polling loops. Exit 5: run the reply's `next` no earlier than its time; never resubmit blind. Exit 6: stop and report.
 - Cancel only exact verified own jobs and say why. Never cancel and resubmit to adjust a queued job; `shk --site marlowe update` lowers its walltime or an array's throttle.
 
 ### Cost and waiting
-- Site: usage is charged to the PI per GPU-hour and per CPU-hour, CPU-only jobs included. Treat every attempt as billed, failed and requeued ones too.
+- Site: usage is charged to the PI per GPU-hour and per CPU-hour, CPU-only jobs included.
+- Treat every attempt as billed, failed and requeued ones too.
 - Owner: a real submit or allocation needs the user's authorization of that campaign. State the upper bound you ask for, tasks x GPUs and CPUs x walltime x (1 + retries); the yes covers exactly that.
 - Owner: CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock.
 - The start time in a preflight or test-only reply is not a prediction on Marlowe; never relay it as one. Observed: small GPU requests usually start within hours, requests near a whole node can wait days, and shorter limits start sooner.
 - After a submit, report the job id and end the wait; check again when the user asks.
 
 ### Preemption
-- Site: batch or hero work can preempt a `preempt` job at any time; it is requeued and restarts from the top of its script. This is routine, not an anomaly.
+- Site: batch or hero work can preempt a `preempt` job at any time; it is requeued and restarts from the top of its script.
+- Preemption is routine, not an anomaly.
 - Owner: requeue stays on (the `preempt` default; no `--no-requeue`).
 - Scripts write atomic checkpoints (write, then rename) on scratch every few minutes, since the protected window is short, resume from the newest one, never rely on a signal, and stop when `SLURM_RESTART_COUNT` passes the authorized retry bound.
 - A job in REQUEUE_HOLD (`current.tasks.by_state`) or held after a failed launch (its reason in `status --details`) is reported with its job id and restart count (`current.max_restart`). Recover it only with the user's consent: `shk --site marlowe cancel`, then `shk --site marlowe submit --resubmit REASON`; never `shk release`.
 
 ### Data
-- `remote_root` lies under `/scratch/PROJECT/USER`. Site: scratch is shared by the project, not backed up and "may be purged"; `/projects` is backed up and billed; home is small. Keep what must last in `/projects` or on the workstation.
+- `remote_root` lies under `/scratch/PROJECT/USER`.
+- Site: scratch is shared by the project, not backed up and "may be purged"; `/projects` is backed up and billed; home is small. Keep what must last in `/projects` or on the workstation.
 - `shk --site marlowe push` and `pull` copy small and medium trees over the login-node master; large data goes through Globus, outside shk. Pull verifies the job output's `SHA256SUMS`.
 - Site: access only your own or explicitly shared files and jobs; visibility is not authorization.
 - Site: Low and Moderate Risk data only; ask when unclear.

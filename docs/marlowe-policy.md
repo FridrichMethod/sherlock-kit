@@ -143,7 +143,7 @@ file, "C" the cluster file.
 | Statement | File | Kind | Source |
 |---|---|---|---|
 | Batch or hero work can preempt a `preempt` job at any time; it is requeued and restarts from the top of its script | W, C | site | SLURM on Marlowe; FAQ, "My preempt job keeps stopping and restarting"; Saving Checkpoints |
-| This is routine, not an anomaly | W, C | observed | [preemption](validation/observed-marlowe.md#preemption-and-requeue) |
+| Preemption is routine, not an anomaly | W, C | observed | [preemption](validation/observed-marlowe.md#preemption-and-requeue) |
 | Requeue stays on | W, C | owner, site | owner decision 3 below; Saving Checkpoints calls requeue the default on Marlowe |
 | Atomic checkpoints on scratch every few minutes, resume from the newest | W, C | site | Saving Checkpoints (write to scratch, replace atomically, load the newest on restart); FAQ |
 | The protected window is short | W, C | observed | a job becomes preemptible a few minutes after it starts ([preemption](validation/observed-marlowe.md#preemption-and-requeue)) |
