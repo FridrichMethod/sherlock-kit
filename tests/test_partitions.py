@@ -1,4 +1,4 @@
-"""Packaged partition table (schema 1, 6-key profiles) and the generated rules block."""
+"""Packaged partition tables per site (schema 1, 6-key profiles) and the generated rules blocks."""
 
 import json
 import sys
@@ -7,11 +7,19 @@ import unittest
 from fakes import SRC
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import partitions
+from sherlock_kit import partitions, sites
 from sherlock_kit.errors import ShkError
 
 NAMES = ["normal", "bigmem", "dev", "service", "gpu", "owners", "bioe", "stat", "btrippe", "possu"]
 KEYS = {"preemptible", "requeue", "borrowed", "gpus_allowed", "batch", "courtesy"}
+RULES = SRC / "sherlock_kit" / "data" / "rules"
+MARLOWE_BLOCK = (
+    "### Partition profiles\n"
+    "`shk` refuses partitions not listed here. Requeue only where `requeue=yes`.\n"
+    "- `preempt`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Preempted jobs are "
+    "requeued and restart from the top; scripts must checkpoint and resume. Usage is charged per "
+    "GPU-hour and CPU-hour. Limits are per project account and shared.\n"
+)
 
 
 class PartitionTableTests(unittest.TestCase):
@@ -75,6 +83,59 @@ class MarkdownTests(unittest.TestCase):
         )
         self.assertEqual(lines[7], owners_line)
         self.assertNotIn("\n\n", text)
+        self.assertEqual(text, partitions.markdown(sites.SHERLOCK))
+
+
+class MarloweTableTests(unittest.TestCase):
+    """The Marlowe table is its own: one profile, never merged with Sherlock's."""
+
+    def test_one_profile_preempt(self):
+        table = partitions.profiles(sites.MARLOWE)
+        self.assertEqual(list(table), ["preempt"])
+        preempt = partitions.profile("preempt", sites.MARLOWE)
+        self.assertEqual(
+            (preempt.preemptible, preempt.requeue, preempt.borrowed, preempt.gpus_allowed),
+            (True, True, False, True),
+        )
+        self.assertTrue(preempt.batch)
+        with self.assertRaises(TypeError):
+            table["normal"] = None
+
+    def test_the_tables_never_merge(self):
+        for name in ("batch", "hero", "normal", "owners"):
+            with self.subTest(name=name), self.assertRaises(ShkError) as caught:
+                partitions.profile(name, sites.MARLOWE)
+            error = caught.exception
+            self.assertEqual((error.code, error.token), (3, "unknown_partition"))
+            self.assertEqual(error.message, f"partition {name!r} is not listed; listed: preempt")
+        with self.assertRaises(ShkError) as caught:
+            partitions.profile("preempt")
+        self.assertEqual(
+            caught.exception.message,
+            f"partition 'preempt' is not listed; listed: {', '.join(NAMES)}",
+        )
+        self.assertNotIn("preempt", partitions.profiles(sites.SHERLOCK))
+
+    def test_block(self):
+        self.assertEqual(partitions.markdown(sites.MARLOWE), MARLOWE_BLOCK)
+        self.assertEqual(
+            MARLOWE_BLOCK.splitlines()[2].removeprefix(
+                "- `preempt`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. "
+            ),
+            partitions.profile("preempt", sites.MARLOWE).courtesy,
+        )
+
+    def test_both_marlowe_rules_files_end_with_the_generated_block(self):
+        block = partitions.markdown(sites.MARLOWE)
+        for name in sites.MARLOWE.rules.values():
+            with self.subTest(name=name):
+                text = (RULES / name).read_text(encoding="utf-8")
+                self.assertEqual(
+                    text.count(block),
+                    1,
+                    "paste the output of partitions.markdown(sites.MARLOWE) unchanged",
+                )
+                self.assertTrue(text.endswith(block), "the partition block closes the file")
 
 
 if __name__ == "__main__":

@@ -10,7 +10,7 @@ like new. Remote calls print next_check_after (now + 60 s); a dispatched mutatio
 confirmed result (a lost reply, sbatch without a job id, a nonzero scancel) is action "unknown"
 (exit 5); exit 6 when the newest job of a listed name has an anomaly. A site other than Sherlock
 adds sites.reply_fields() after "executor", and its selector to the exit 5 `next` and to the shk
-commands that hints name.
+commands that hints name. Partitions are those of the selected site's table.
 """
 
 from __future__ import annotations
@@ -521,14 +521,16 @@ def _non_preemptible(text: str, profiles: Mapping[str, partitions.Profile]) -> b
     return all(name in profiles and not profiles[name].preemptible for name in text.split(","))
 
 
-def _anomalies(job: Job, live_jobs: int, malformed: int, invariants: bool) -> list[str]:
-    """invariants: shk names, where one name is one task on packaged partitions.
+def _anomalies(
+    job: Job, live_jobs: int, malformed: int, invariants: bool, site: sites.Site
+) -> list[str]:
+    """invariants: shk names, where one name is one task on partitions the site's table lists.
 
     A preemption or restart is unexpected on the packaged non-preemptible partition it happened
     on; a list counts when all its members are (a compatible set shares one value). A partition
     list on any row of the job is split on "," before the lookup.
     """
-    profiles = partitions.profiles()
+    profiles = partitions.profiles(site)
     found = []
     if invariants and live_jobs > 1:
         found.append("duplicate_live")
@@ -549,12 +551,14 @@ def resolve_name(
     newest_spec: SpecFile | None = None,
     malformed: int = 0,
     invariants: bool = True,
+    site: sites.Site = sites.SHERLOCK,
 ) -> dict[str, Any]:
     """Pure: one name's rows give {state, current, history, spec_files}.
 
     The largest base id is the current attempt, and any live job makes the name live.
     Without invariants (a legacy name) duplicate_live and unknown_partition do not apply.
     current.ran_on appears only when newest_spec is the current job's and froze a partition set.
+    The anomalies read the site's partition table.
     """
     jobs: dict[int, list[Row]] = {}
     for row in {row.key: row for row in rows}.values():
@@ -573,15 +577,16 @@ def resolve_name(
         newest_spec is not None and newest_spec.job_id == base and len(newest_spec.partitions) > 1
     )
     ran_on = _ran_on(jobs[base]) if in_set else None
+    anomalies = _anomalies(newest, len(live), malformed, invariants, site)
     return {
         "state": "live" if live else newest.state,
-        "current": newest.current(_anomalies(newest, len(live), malformed, invariants), ran_on),
+        "current": newest.current(anomalies, ran_on),
         "history": [job.history() for job in summaries.values() if job is not newest],
         "spec_files": spec_files,
     }
 
 
-def _resolve(read: Read, rows: Rows, name: str) -> dict[str, Any]:
+def _resolve(read: Read, rows: Rows, name: str, site: sites.Site) -> dict[str, Any]:
     """resolve_name() for one listed name, or exit 1 when Slurm has rows of it but none parse.
 
     Such a name is neither new nor anything shk can show (for example hetjob ids N+k).
@@ -596,7 +601,8 @@ def _resolve(read: Read, rows: Rows, name: str) -> dict[str, Any]:
             "look once with sacct --name and report it",
         )
     malformed = rows.malformed[name] + rows.malformed[None]
-    return resolve_name(found, read.spec_files.get(name, 0), read.specs.get(name), malformed)
+    spec_files, newest = read.spec_files.get(name, 0), read.specs.get(name)
+    return resolve_name(found, spec_files, newest, malformed, site=site)
 
 
 # ---------------------------------------------------------------- occupancy
@@ -951,7 +957,8 @@ def _courtesy(read: Read, built: spec.Spec) -> dict[str, Any]:
 
 def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk submit`: offline checks, one read, the local decision, then one mutation."""
-    built = spec.build(args, ctx.require("project", "remote_root"), ctx.clock())
+    site = ctx.site
+    built = spec.build(args, ctx.require("project", "remote_root"), ctx.clock(), site)
     report = {
         "name": built.name,
         "run_dir": built.run_dir,
@@ -972,10 +979,9 @@ def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
     ]
     tools = ("squeue", "sacct", "occupancy") if borrowed else ("squeue", "sacct")
     read, meta = _read(ctx, query, tools)
-    found = _resolve(
-        read, parse_rows(read.queue, read.acct, lambda name: name == built.name), built.name
-    )
-    _refuse_existing(built.name, found, args.resubmit, ctx.site)
+    rows = parse_rows(read.queue, read.acct, lambda name: name == built.name)
+    found = _resolve(read, rows, built.name, site)
+    _refuse_existing(built.name, found, args.resubmit, site)
     if borrowed:
         report.update(_courtesy(read, built))
     stamp = f"{ctx.clock():%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
@@ -1024,16 +1030,19 @@ def _selection(args: argparse.Namespace, ctx: Context) -> list[Selected]:
     return selected
 
 
-def _since(args: argparse.Namespace) -> int:
+def _since(args: argparse.Namespace, site: sites.Site = sites.SHERLOCK) -> int:
+    """The sacct window in days; the bound holds on every site, and Sherlock's slurmdbd sets it."""
     if args.since is None:
         return SINCE_DAYS_ALL if args.all else SINCE_DAYS
     since: int = args.since
     if not 1 <= since <= MAX_SINCE_DAYS:
+        reason = (
+            f"Sherlock's slurmdbd refuses sacct windows wider than {MAX_SINCE_DAYS} days"
+            if site.name == sites.SHERLOCK.name
+            else f"shk reads at most {MAX_SINCE_DAYS} days of accounting on every site"
+        )
         raise ShkError(
-            EXIT_LOCAL,
-            "spec_invalid",
-            f"--since must be 1 to {MAX_SINCE_DAYS} days",
-            hint=f"Sherlock's slurmdbd refuses sacct windows wider than {MAX_SINCE_DAYS} days",
+            EXIT_LOCAL, "spec_invalid", f"--since must be 1 to {MAX_SINCE_DAYS} days", hint=reason
         )
     return since
 
@@ -1053,7 +1062,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk status`: one read for every selected name; exit 6 on an anomaly."""
     if args.job_id or args.details:
         return details.status(args, ctx)
-    since, selected = _since(args), _selection(args, ctx)
+    since, selected = _since(args, ctx.site), _selection(args, ctx)
     query = ["all" if args.all else "names", str(since), "-"]
     for item in selected:
         query += [item.name, item.run_dir or "-"]
@@ -1064,7 +1073,8 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     )
     listed = selected or [Selected(name) for name in sorted(rows.by_name)]
     names = [
-        {"name": item.name, **item.labels, **_resolve(read, rows, item.name)} for item in listed
+        {"name": item.name, **item.labels, **_resolve(read, rows, item.name, ctx.site)}
+        for item in listed
     ]
     anomalous = any(entry["current"] and entry["current"]["anomalies"] for entry in names)
     return Outcome(
@@ -1098,7 +1108,7 @@ def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
 
 def occupancy(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk occupancy`: running and pending jobs per user on listed partitions."""
-    profiles = {name: partitions.profile(name) for name in args.partition}
+    profiles = {name: partitions.profile(name, ctx.site) for name in args.partition}
     read, meta = _read(ctx, ["occupancy", "-", "-", *profiles], ("occupancy",))
     report = {}
     for name, profile in profiles.items():

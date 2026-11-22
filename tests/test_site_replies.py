@@ -23,6 +23,7 @@ class SherlockReplies(Flow):
     site = sites.SHERLOCK
     flag = None
     project = "demo"
+    partition = "normal"
     shk_prefix = "shk"
 
     def shk(self, *argv):
@@ -64,7 +65,9 @@ class SherlockReplies(Flow):
                 code, reply = self.shk(*argv)
                 self.assertEqual(code, 0, reply)
                 self.assert_site(reply)
-        self.slurm.add(spec.job_name(self.project, "default", "a"), "RUNNING")
+        self.slurm.add(
+            spec.job_name(self.project, "default", "a"), "RUNNING", partition=self.partition
+        )
         code, reply = self.shk("cancel", "--task", "a")
         self.assertEqual((code, reply["action"]), (0, "cancelled"))
         self.assert_site(reply)
@@ -95,7 +98,9 @@ class SherlockReplies(Flow):
         self.assertEqual(env.get("SLURM_CONF"), self.site.slurm and self.site.slurm.conf)
 
     def test_exit_5_next_is_one_replayable_argv(self):
-        self.slurm.add(spec.job_name(self.project, "default", "k"), "RUNNING")
+        self.slurm.add(
+            spec.job_name(self.project, "default", "k"), "RUNNING", partition=self.partition
+        )
         with patch.dict(os.environ, FAKE_SCANCEL_RC="1"):
             code, reply = self.shk("cancel", "--task", "k")
         self.assertEqual((code, reply["action"]), (5, "unknown"), reply)
@@ -151,6 +156,7 @@ class MarloweReplies(SherlockReplies):
     site = sites.MARLOWE
     flag = "marlowe"
     project = "demo-mw"
+    partition = "preempt"
     shk_prefix = "shk --site marlowe"
 
     def config(self, **extra):

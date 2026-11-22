@@ -324,8 +324,11 @@ def _summary(
 
 
 def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """Read the partitions' Slurm node facts once; a failed read is exit 1, missing facts null."""
-    wanted = {partitions.profile(name).name for name in args.partition}
+    """Read the partitions' Slurm node facts once; a failed read is exit 1, missing facts null.
+
+    Each --partition must be listed in the selected site's table.
+    """
+    wanted = {partitions.profile(name, ctx.site).name for name in args.partition}
     shapes = _shapes(args)
     program = executor.run_program(ctx.executor(), "resources", sorted(wanted))
     result = executor.check(program, "resources")

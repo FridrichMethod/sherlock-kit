@@ -239,7 +239,8 @@ def requeue(args: argparse.Namespace, ctx: Context) -> Outcome:
     physical = os.environ.get("SLURM_JOB_ID", "")
     if "_" in physical or not spec.JOB_ID.fullmatch(physical):
         raise ShkError(EXIT_REFUSED, "self_only", "no physical current allocation id")
-    allowed = ",".join(name for name, found in partitions.profiles().items() if found.requeue)
+    table = partitions.profiles(ctx.site)
+    allowed = ",".join(name for name, found in table.items() if found.requeue)
     return _change("requeue", physical, args, ctx, allowed)
 
 
@@ -254,7 +255,10 @@ def _bit(flag: bool) -> str:
 def _request(
     args: argparse.Namespace, site: sites.Site = sites.SHERLOCK
 ) -> tuple[str, list[str], dict[str, str]]:
-    """The field, its update.sh arguments and the Slurm KEY=VALUE pairs, checked offline."""
+    """The field, its update.sh arguments and the Slurm KEY=VALUE pairs, checked offline.
+
+    Partitions and their classes are those of the site's table.
+    """
     given = {
         "time": args.time is not None,
         "partition": args.partition is not None,
@@ -273,7 +277,7 @@ def _request(
         minutes = str(spec.minutes(args.time))
         return field, [minutes], {"TimeLimit": minutes}
     if field == "partition":
-        profile, _members = spec.partition_request(args.partition)
+        profile, _members = spec.partition_request(args.partition, site)
         if profile.borrowed:
             raise ShkError(
                 EXIT_REFUSED,
@@ -283,7 +287,7 @@ def _request(
             )
         same = [
             name
-            for name, found in partitions.profiles().items()
+            for name, found in partitions.profiles(site).items()
             if found.preemptible == profile.preemptible
         ]
         remote = [
@@ -318,7 +322,7 @@ def _request(
             f"--throttle {args.throttle!r}: a whole number from 1 to {spec.ARRAY_MAX_TASKS} "
             "(0, no limit, is not accepted)"
         )
-    borrowed = [name for name, found in partitions.profiles().items() if found.borrowed]
+    borrowed = [name for name, found in partitions.profiles(site).items() if found.borrowed]
     return field, [args.throttle, ",".join(borrowed)], {"ArrayTaskThrottle": args.throttle}
 
 

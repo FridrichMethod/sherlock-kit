@@ -1,6 +1,7 @@
 """Offline submit checks, the job name, the sbatch argv and the frozen job spec.
 
-Nothing here touches the network. build() raises ShkError with exit 3 for an unlisted
+Nothing here touches the network. build() looks partitions up in the table of the site it gets
+(Sherlock by default), and raises ShkError with exit 3 for an unlisted
 partition or one without batch jobs (dev), an incompatible partition set
 (partitions_incompatible), GPUs or requeue its profile forbids, a denylisted
 option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
@@ -27,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sherlock_kit import cpu_threads, partitions, version_line
+from sherlock_kit import cpu_threads, partitions, sites, version_line
 from sherlock_kit.config import ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, ShkError
 
@@ -221,7 +222,7 @@ def denied(word: str, owned: tuple[str, ...] = DENIED_LONG) -> bool:
     return False
 
 
-def read_script(path: str, owns_comment: bool = False) -> bytes:
+def read_script(path: str, owns_comment: bool = False, site: sites.Site = sites.SHERLOCK) -> bytes:
     """The job script bytes: at most 1 MiB, without a denylisted #SBATCH option."""
     try:
         with open(path, "rb") as stream:
@@ -237,8 +238,8 @@ def read_script(path: str, owns_comment: bool = False) -> bytes:
             EXIT_REFUSED,
             "sbatch_directive",
             f"{path}: #SBATCH {' '.join(refused)} is reserved to shk",
-            hint="remove it from the script and use the shk submit command line instead "
-            "(--submission-token sets Comment; heterogeneous jobs are not supported)",
+            hint=f"remove it from the script and use the {sites.command(site)} submit command "
+            "line instead (--submission-token sets Comment; heterogeneous jobs are not supported)",
         )
     return data
 
@@ -281,20 +282,21 @@ def _yes(flag: bool) -> str:
 
 
 def partition_request(
-    value: str,
+    value: str, site: sites.Site = sites.SHERLOCK
 ) -> tuple[partitions.Profile, tuple[partitions.Profile, ...] | None]:
     """The profile of --partition and, for a set P,P, its member profiles in the order given.
 
-    A value without a comma is one listed partition that accepts batch jobs. A set is checked in
-    this order: every member listed (the empty one included), none repeated, each accepting
-    batch jobs, then compatible: no borrowed member and one common preemptible and requeue
-    value. Its combined profile is named by the value as given, has those common values,
-    gpus_allowed only when every member allows GPUs, and no courtesy text.
+    Partitions are looked up in the site's table. A value without a comma is one listed
+    partition that accepts batch jobs. A set is checked in this order: every member listed (the
+    empty one included), none repeated, each accepting batch jobs, then compatible: no borrowed
+    member and one common preemptible and requeue value. Its combined profile is named by the
+    value as given, has those common values, gpus_allowed only when every member allows GPUs,
+    and no courtesy text.
     """
     if "," not in value:
-        return _batch(partitions.profile(value)), None
+        return _batch(partitions.profile(value, site)), None
     names = value.split(",")
-    members = tuple(partitions.profile(name) for name in names)
+    members = tuple(partitions.profile(name, site) for name in names)
     repeated = [name for index, name in enumerate(names) if name in names[:index]]
     if repeated:
         raise _invalid(f"--partition {value!r} names {repeated[0]} twice: give each member once")
@@ -441,19 +443,24 @@ def git_state(root: Path | None) -> dict[str, Any] | None:
     }
 
 
-def build(args: argparse.Namespace, config: ProjectConfig, now: datetime) -> Spec:
-    """All offline checks of shk submit, then the sbatch argv and the frozen spec document."""
+def build(
+    args: argparse.Namespace,
+    config: ProjectConfig,
+    now: datetime,
+    site: sites.Site = sites.SHERLOCK,
+) -> Spec:
+    """All offline checks of shk submit on site, then the sbatch argv and the frozen spec."""
     project = config.project
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
-    profile, members = partition_request(args.partition)
+    profile, members = partition_request(args.partition, site)
     wanted = resources(args, profile, members)
     thread_budget = getattr(args, "cpu_thread_budget", None)
     thread_policy = cpu_threads.policy(
         config.cpu_thread_budget if thread_budget is None else thread_budget, wanted.cpus
     )
     run = run_directory(args.run_dir, config, name)
-    script = read_script(args.script, owns_comment=args.submission_token is not None)
+    script = read_script(args.script, owns_comment=args.submission_token is not None, site=site)
     if profile.borrowed and not args.courtesy_ack:
         raise ShkError(
             EXIT_REFUSED,

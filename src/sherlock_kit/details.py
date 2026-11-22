@@ -303,8 +303,8 @@ def _summary_evidence(
         current["cost"]["final"] = current["cost"]["final"] and current["evidence_complete"]
 
 
-def _by_job(rows: Rows) -> list[dict[str, Any]]:
-    """--job-id: one entry per base job, in job id order.
+def _by_job(rows: Rows, site: sites.Site) -> list[dict[str, Any]]:
+    """--job-id: one entry per base job, in job id order, against the site's partition table.
 
     Legacy jobs often share a script name, so a name is no task identity there: only shk
     names keep the duplicate_live (across the selected jobs) and unknown_partition checks.
@@ -319,7 +319,10 @@ def _by_job(rows: Rows) -> list[dict[str, Any]]:
         shk = spec.NAME.fullmatch(name) is not None
         malformed = rows.malformed[name] + rows.malformed[None]
         resolved = [
-            {"name": name, **slurm.resolve_name(group, malformed=malformed, invariants=shk)}
+            {
+                "name": name,
+                **slurm.resolve_name(group, malformed=malformed, invariants=shk, site=site),
+            }
             for group in jobs.values()
         ]
         live = [entry["current"] for entry in resolved if entry["state"] == "live"]
@@ -345,7 +348,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     from sherlock_kit import slurm
 
     ids = [control.checked_id(value) for value in args.job_id or []]
-    since = slurm._since(args)
+    since = slurm._since(args, ctx.site)
     selected = slurm._selection(args, ctx)
     mode = "ids" if ids else ("all" if args.all else "names")
     query = [mode, str(since), *ids]
@@ -383,12 +386,16 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     report.update(queried_at=meta["queried_at"], history_window_days=since)
     unreadable: ShkError | None = None
     if ids:
-        names = _by_job(rows)
+        names = _by_job(rows, ctx.site)
     else:
         listed = selected or [slurm.Selected(name) for name in sorted(rows.by_name)]
         try:
             names = [
-                {"name": item.name, **item.labels, **slurm._resolve(read, rows, item.name)}
+                {
+                    "name": item.name,
+                    **item.labels,
+                    **slurm._resolve(read, rows, item.name, ctx.site),
+                }
                 for item in listed
             ]
         except ShkError as exc:  # a name with rows but none readable, as in plain status
