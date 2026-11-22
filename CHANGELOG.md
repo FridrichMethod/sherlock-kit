@@ -37,7 +37,7 @@ Marlowe:
   which appends `/cm/shared/apps/slurm/current/bin` to `PATH` and exports
   `SLURM_CONF`: Marlowe's Slurm clients are not on the login `PATH`.
 - `submit` requires `account`, dry run included (exit 1 `config_required`,
-  with a hint that reads `marlowe-$PROJECT_ID` over the open master), and
+  with a hint to ask the user which base project account to charge), and
   passes `--account=<account>` directly after `--partition=`; the frozen spec
   gains no key.
 - A plain `submit` runs Slurm's test (`sbatch --test-only`) after the

@@ -404,9 +404,10 @@ too.
 - `account` is required, dry run included, and never guessed. Without it
   `submit` is exit 1 `config_required`, message "PATH: missing account:
   every Marlowe job names its project account, and shk never guesses it",
-  with a hint that reads the value over the open master,
-  `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain 'echo marlowe-$PROJECT_ID'`
-  (with the configured `control_host`), and adds `account = "<that value>"`.
+  with the hint to ask the user which base project account to charge
+  (`sacctmgr show assoc user=$USER format=Account%30,QOS` on Marlowe lists
+  the user's accounts), then add `account = "..."` to the named
+  configuration file.
 - The argv adds `--account=<account>` directly after `--partition=` and is
   otherwise built as on Sherlock. The frozen spec gains no key; its `argv`
   holds the account.

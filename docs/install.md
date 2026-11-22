@@ -152,9 +152,9 @@ account = "marlowe-m000000"
 ```
 
 `m000000` stands for the project id and USER for the user name. `account` is
-the base project account, `marlowe-<project id>`; read it over the open
-master with
-`ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain 'echo marlowe-$PROJECT_ID'`.
+the base project account, `marlowe-<project id>`;
+`sacctmgr show assoc user=$USER format=Account%30,QOS` on Marlowe lists your
+accounts.
 The distinct `project` gives the two clusters distinct job names.
 
 From `<repo>/marlowe` or below, `shk --site marlowe ...` finds that

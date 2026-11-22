@@ -219,9 +219,9 @@ class MarloweAccount(OnMarlowe, Flow):
                 )
                 self.assertEqual(
                     out["hint"],
-                    "read it over the open master with ssh -oBatchMode=yes "
-                    "-oProxyCommand=false marlowe-plain 'echo marlowe-$PROJECT_ID', then add "
-                    f'account = "<that value>" to {path}',
+                    "ask the user which base project account to charge (on Marlowe, sacctmgr "
+                    "show assoc user=$USER format=Account%30,QOS lists their accounts), then "
+                    f'add account = "..." to {path}',
                 )
         self.assertEqual(self.slurm.calls(), [])
         self.assertFalse(self.remote.exists())
@@ -232,13 +232,15 @@ class MarloweAccount(OnMarlowe, Flow):
             code, out = self.submit("--dry-run")
         self.assertEqual((code, out["error"]), (1, "config_required"))
 
-    def test_the_hint_names_the_configured_control_host(self):
+    def test_the_hint_derives_no_account(self):
         self.without_account()
         path = self.tmp / "sherlock-kit.toml"
         path.write_text(path.read_text() + 'control_host = "mw-login"\ndata_host = "mw-login"\n')
         code, out = self.submit("--dry-run")
         self.assertEqual((code, out["error"]), (1, "config_required"))
-        self.assertIn("-oProxyCommand=false mw-login 'echo marlowe-$PROJECT_ID'", out["hint"])
+        self.assertTrue(out["hint"].startswith("ask the user which base project account"))
+        for derived in ("PROJECT_ID", "mw-login", "ssh"):
+            self.assertNotIn(derived, out["hint"])
 
 
 class SherlockArgv(Flow):

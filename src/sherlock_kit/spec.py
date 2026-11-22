@@ -459,7 +459,7 @@ def account(config: ProjectConfig, site: sites.Site) -> str | None:
     """The configured account of a site with an account rule, None for a site without one.
 
     config parsing has checked a set account against the rule; a missing one is exit 1
-    config_required, with a hint that reads it over the open master instead of guessing it.
+    config_required, with a hint to ask the user which account to charge instead of guessing it.
     """
     if site.account is None:
         return None
@@ -469,9 +469,9 @@ def account(config: ProjectConfig, site: sites.Site) -> str | None:
             "config_required",
             f"{config.path}: missing account: every {site.display} job names its project "
             "account, and shk never guesses it",
-            hint=f"read it over the open master with ssh -oBatchMode=yes -oProxyCommand=false "
-            f"{config.control_host} 'echo {site.name}-$PROJECT_ID', then add "
-            f'account = "<that value>" to {config.path}',
+            hint="ask the user which base project account to charge (on "
+            f"{site.display}, sacctmgr show assoc user=$USER format=Account%30,QOS lists "
+            f'their accounts), then add account = "..." to {config.path}',
         )
     return config.account
 
