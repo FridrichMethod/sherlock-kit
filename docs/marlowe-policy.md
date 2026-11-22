@@ -149,7 +149,7 @@ file, "C" the cluster file.
 | The protected window is short | W, C | observed | a job becomes preemptible a few minutes after it starts ([preemption](validation/observed-marlowe.md#preemption-and-requeue)) |
 | Never rely on a signal | W, C | toolkit | the signal sequence of a real preemption is not observed on Marlowe, and no usable signal window was seen on Sherlock |
 | Stop when `SLURM_RESTART_COUNT` passes the authorized retry bound | W, C | toolkit, owner | preemption requeues a job many times ([preemption](validation/observed-marlowe.md#preemption-and-requeue)); the retry bound is part of the authorization (owner decision 2) |
-| A job in REQUEUE_HOLD or held after a failed launch is reported with its job id and restart count and recovered only with the user's consent by `cancel` then `submit --resubmit REASON`, never `shk release` | W, C | toolkit | such holds occur ([queue](validation/observed-marlowe.md#preemption-and-requeue)); `shk release` releases only holds that `submit --hold` set |
+| A job in REQUEUE_HOLD or held after a failed launch is reported with its job id and restart count and recovered only with the user's consent by `cancel` then `submit --resubmit REASON`, never `shk release` | W, C | toolkit | such holds occur ([queue](validation/observed-marlowe.md#partitions-qos-and-accounts)); `shk release` releases only holds that `submit --hold` set |
 
 ### Data
 
