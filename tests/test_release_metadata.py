@@ -1,4 +1,8 @@
-"""Release metadata: contract paths C1-C4, one version, rules format, mentioned CLI, removed terms, HOME."""
+"""Release metadata: contract paths C1-C4, one version, rules format, mentioned CLI, removed terms, HOME.
+
+The rules, skill and mention checks cover both sites' content; tracked files name a Marlowe project
+only by the synthetic id m000000.
+"""
 
 import hashlib
 import json
@@ -26,12 +30,23 @@ CONTRACT = {
     "C4": "bin/shk",
 }
 RULES = (ROOT / CONTRACT["C1"], ROOT / CONTRACT["C2"])
+MARLOWE_RULES = (
+    ROOT / "src/sherlock_kit/data/rules/marlowe-workstation.md",
+    ROOT / "src/sherlock_kit/data/rules/marlowe-cluster.md",
+)
+MARLOWE_SKILL = ROOT / "src/sherlock_kit/data/skills/sherlock-kit-marlowe/SKILL.md"
+SITE_RULES = {"Sherlock": RULES, "Marlowe": MARLOWE_RULES}
+SKILLS = {"sherlock-kit": ROOT / CONTRACT["C3"], "sherlock-kit-marlowe": MARLOWE_SKILL}
 MENTIONING = (
     *RULES,
     ROOT / CONTRACT["C3"],
     ROOT / "README.md",
     ROOT / "docs/cli.md",
     ROOT / "docs/install.md",
+    *MARLOWE_RULES,
+    MARLOWE_SKILL,
+    ROOT / "docs/marlowe-policy.md",
+    ROOT / "docs/validation/observed-marlowe.md",
 )
 REMOVED = (
     "policy --identity",
@@ -42,9 +57,13 @@ REMOVED = (
     "registry_root",
     "SHERLOCK.md",
 )
-GLOBAL_VALUE = ("--project-dir", "--executor")
+GLOBAL_VALUE = ("--project-dir", "--executor", "--site")
 FENCE = re.compile(r"^```[^\n]*\n(.*?)^```", re.M | re.S)
 SPAN = re.compile(r"`([^`\n]+)`")
+# A Marlowe project id is m and six digits (alone, in marlowe-m..., /scratch/m..., /projects/m...).
+# The pattern holds no id and SYNTHETIC_ID is the only one allowed; a finding names lines, not ids.
+PROJECT_ID = re.compile(rb"m[0-9]{6,}")
+SYNTHETIC_ID = b"m000000"
 
 
 def git(*args) -> str:
@@ -93,6 +112,15 @@ def mentions(text: str) -> list[tuple[str, list[str]]]:
     return found
 
 
+def foreign_id_lines(data: bytes) -> list[int]:
+    """The 1-based lines of data that hold a Marlowe project id other than SYNTHETIC_ID."""
+    return sorted({
+        data.count(b"\n", 0, found.start()) + 1
+        for found in PROJECT_ID.finditer(data)
+        if found.group() != SYNTHETIC_ID
+    })
+
+
 class ContractTests(unittest.TestCase):
     def test_contract_paths_exist(self):
         for name, rel in CONTRACT.items():
@@ -117,6 +145,28 @@ class ContractTests(unittest.TestCase):
             self.assertFalse(
                 git("cat-file", "-p", blob).startswith("/"), f"{path} is an absolute symlink"
             )
+
+    @unittest.skipUnless(in_git(), "needs a git checkout")
+    def test_tracked_files_name_only_the_synthetic_marlowe_project(self):
+        for rel in filter(None, git("ls-files", "-z").split("\0")):
+            for where, data in (("path", rel.encode()), ("lines", (ROOT / rel).read_bytes())):
+                lines = foreign_id_lines(data)
+                self.assertTrue(
+                    not lines,  # never print the id itself
+                    f"{rel}: {where} {lines} name a Marlowe project id other than m000000",
+                )
+
+    def test_foreign_project_ids_are_found_in_every_form(self):
+        digits = "".join(map(str, range(1, 7)))  # built at run time: this file holds no such id
+        for text, lines in (
+            ("m000000 marlowe-m000000 /scratch/m000000/USER /projects/m000000\n", []),
+            (f"m{digits}", [1]),
+            (f"a\naccount = marlowe-m{digits}\n", [2]),
+            (f"/scratch/m{digits}/USER\n/projects/m{digits}\n", [1, 2]),
+            (f"x_m{digits} m000000{digits}\n", [1]),
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(foreign_id_lines(text.encode()), lines)
 
     def test_one_version(self):
         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
@@ -170,20 +220,21 @@ class RulesFormatTests(unittest.TestCase):
                 self.assertTrue(text.endswith(block), "the partition block closes the file")
 
     def test_rules_format(self):
-        for path in RULES:
-            with self.subTest(path=path.name):
-                raw = path.read_bytes()
-                text = raw.decode("ascii")
-                self.assertLessEqual(len(raw), 7 * 1024)
-                self.assertTrue(
-                    text.startswith("## Sherlock"), "starts with an H2, no front matter"
-                )
-                self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"))
-                self.assertNotIn("<!--", text)
-                self.assertNotIn("@", text)
-                self.assertNotRegex(text, r"\]\((?!https://)", "no relative links")
-                reviewed = "2026-11-21"
-                self.assertIn(f"Reviewed {reviewed}", text)
+        for display, paths in SITE_RULES.items():
+            for path in paths:
+                with self.subTest(path=path.name):
+                    raw = path.read_bytes()
+                    text = raw.decode("ascii")
+                    self.assertLessEqual(len(raw), 7 * 1024)
+                    self.assertTrue(
+                        text.startswith(f"## {display}"), "starts with an H2, no front matter"
+                    )
+                    self.assertTrue(text.endswith("\n") and not text.endswith("\n\n"))
+                    self.assertNotIn("<!--", text)
+                    self.assertNotIn("@", text)
+                    self.assertNotRegex(text, r"\]\((?!https://)", "no relative links")
+                    reviewed = "2026-11-21"
+                    self.assertIn(f"Reviewed {reviewed}", text)
 
     def test_rules_headings(self):
         expected = {
@@ -202,8 +253,27 @@ class RulesFormatTests(unittest.TestCase):
                 "GPU scheduling defaults",
                 "Partition profiles",
             ],
+            "marlowe-workstation.md": [
+                "Site rules",
+                "Connection",
+                "Jobs",
+                "Cost and waiting",
+                "Preemption",
+                "Data",
+                "Partition profiles",
+            ],
+            "marlowe-cluster.md": [
+                "Site rules",
+                "Where you are",
+                "Login nodes and software",
+                "Jobs",
+                "Cost and waiting",
+                "Preemption",
+                "Data",
+                "Partition profiles",
+            ],
         }
-        for path in RULES:
+        for path in (*RULES, *MARLOWE_RULES):
             with self.subTest(path=path.name):
                 headings = re.findall(r"^### (.+)$", path.read_text(encoding="utf-8"), re.M)
                 self.assertEqual(headings, expected[path.name])
@@ -211,10 +281,12 @@ class RulesFormatTests(unittest.TestCase):
     def test_agent_ssh_commands_cannot_log_in(self):
         """An ssh line that runs a remote command must ride the master only: never a fresh login."""
         checked = 0
-        for path in (*RULES, ROOT / CONTRACT["C3"]):
+        for path in (*RULES, *MARLOWE_RULES, *SKILLS.values()):
             for snippet in snippets(path.read_text(encoding="utf-8")):
                 tokens = snippet.split()
-                hosts = [i for i, token in enumerate(tokens) if token.startswith("sherlock")]
+                hosts = [
+                    i for i, token in enumerate(tokens) if token.startswith(("sherlock", "marlowe"))
+                ]
                 if tokens[:1] != ["ssh"] or not hosts or hosts[0] == len(tokens) - 1:
                     continue
                 checked += 1
@@ -224,13 +296,15 @@ class RulesFormatTests(unittest.TestCase):
         self.assertGreater(checked, 0)
 
     def test_skill_front_matter(self):
-        text = (ROOT / CONTRACT["C3"]).read_text(encoding="ascii")
-        front = re.match(r"---\n(.*?)\n---\n", text, re.S)
-        self.assertIsNotNone(front)
-        keys = [line.split(":", 1)[0] for line in front.group(1).splitlines()]
-        self.assertEqual(keys, ["name", "description"])
-        self.assertIn("name: sherlock-kit\n", front.group(0))
-        self.assertNotIn(": ", front.group(1).split("description:", 1)[1].strip())
+        for name, path in SKILLS.items():
+            with self.subTest(skill=name):
+                text = path.read_text(encoding="ascii")
+                front = re.match(r"---\n(.*?)\n---\n", text, re.S)
+                self.assertIsNotNone(front)
+                keys = [line.split(":", 1)[0] for line in front.group(1).splitlines()]
+                self.assertEqual(keys, ["name", "description"])
+                self.assertIn(f"name: {name}\n", front.group(0))
+                self.assertNotIn(": ", front.group(1).split("description:", 1)[1].strip())
 
 
 class MentionedCliTests(unittest.TestCase):
@@ -246,6 +320,15 @@ class MentionedCliTests(unittest.TestCase):
                 ("status", ["--all"]),
                 ("rules", []),
             ],
+        )
+
+    def test_site_is_a_global_option_with_a_value(self):
+        self.assertEqual(
+            mentions(
+                "`shk --site marlowe submit --task t` and "
+                "`shk --site=marlowe --project-dir marlowe status --all`"
+            ),
+            [("submit", ["--task"]), ("status", ["--all"])],
         )
 
     def test_every_mentioned_command_and_option_exists(self):
@@ -264,7 +347,7 @@ class MentionedCliTests(unittest.TestCase):
 
 
 class ManifestOneLinerTests(unittest.TestCase):
-    """The skill's sha256sum fallback must write what `shk pull` accepts, like `shk manifest`."""
+    """Each skill's sha256sum fallback must write what `shk pull` accepts, like `shk manifest`."""
 
     FILES: ClassVar[dict[str, bytes]] = {
         "a.txt": b"a\n",
@@ -287,14 +370,14 @@ class ManifestOneLinerTests(unittest.TestCase):
         (self.out / "sub/SHA256SUMS").write_text("nested\n")
         (self.out / "SHA256SUMS").write_text("old\n")
 
-    def one_liner(self) -> str:
-        text = (ROOT / CONTRACT["C3"]).read_text(encoding="utf-8")
+    def one_liner(self, skill: Path) -> str:
+        text = skill.read_text(encoding="utf-8")
         found = [span for span in SPAN.findall(text) if "sha256sum" in span and "find" in span]
         self.assertEqual(len(found), 1, "one sha256sum one-liner in the skill")
         return found[0]
 
-    def written(self) -> str:
-        command = self.one_liner().replace("DIR", shlex.quote(str(self.out)))
+    def written(self, skill: Path) -> str:
+        command = self.one_liner(skill).replace("DIR", shlex.quote(str(self.out)))
         subprocess.run(["sh", "-c", command], cwd=self.out.parent, check=True, timeout=60)
         return (self.out / "SHA256SUMS").read_text(encoding="utf-8")
 
@@ -302,24 +385,29 @@ class ManifestOneLinerTests(unittest.TestCase):
         return {rel: hashlib.sha256(data).hexdigest() for rel, data in self.FILES.items()}
 
     def test_one_liner_lists_every_file_except_shk_entries(self):
-        lines = self.written().splitlines()
-        self.assertEqual(
-            sorted(lines), sorted(f"{digest}  {rel}" for rel, digest in self.expected().items())
-        )
+        for name, skill in SKILLS.items():
+            with self.subTest(skill=name):
+                lines = self.written(skill).splitlines()
+                self.assertEqual(
+                    sorted(lines),
+                    sorted(f"{digest}  {rel}" for rel, digest in self.expected().items()),
+                )
 
     def test_shk_pull_accepts_the_one_liner(self):
         from sherlock_kit import transfer
 
-        self.assertEqual(transfer.parse_manifest(self.written()), self.expected())
         program = SRC / "sherlock_kit/data/remote/manifest.sh"
-        reply = subprocess.run(
-            ["sh", str(program), str(self.out)],
-            capture_output=True,
-            text=True,
-            check=True,
-            timeout=60,
-        ).stdout
-        self.assertIn(f"SHK_COUNT {len(self.FILES)}\n", reply)
+        for name, skill in SKILLS.items():
+            with self.subTest(skill=name):
+                self.assertEqual(transfer.parse_manifest(self.written(skill)), self.expected())
+                reply = subprocess.run(
+                    ["sh", str(program), str(self.out)],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=60,
+                ).stdout
+                self.assertIn(f"SHK_COUNT {len(self.FILES)}\n", reply)
 
 
 class RemovedTermTests(unittest.TestCase):
