@@ -109,6 +109,7 @@ file, "C" the cluster file.
 | Large environments go under `/projects` or scratch, not the small home | C | site | Filesystems ("For any large files or conda installs, we recommend using a different filesystem"), Conda, FAQ |
 | shk needs Python 3.11 or newer; the system `python3` is older; use the `uv` module or a micromamba or conda environment | C | toolkit, observed | [hosts](validation/observed-marlowe.md#hosts-shells-and-identity); Conda |
 | Nothing unattended or outliving the session: no servers, daemons, sync loops or background agents | C | toolkit | a reading of the site's login-node rule: long-running and server-like work belongs on compute nodes |
+| `shk --site marlowe wait` only in the attended session, never detached | C | toolkit | a bounded wait makes one short, light read at least 60 s apart and exits by itself; detached, it would outlive the session |
 
 ### Jobs
 
@@ -124,7 +125,7 @@ file, "C" the cluster file.
 | Job scripts: `module` under plain `#!/bin/bash`, Slurm clients on PATH, `TMPDIR` is `/tmp`, job-local space wiped at job end, no GPU without `--gpus`, internet from compute nodes, login-shell environment capture | C | observed, site | [inside a batch job](validation/observed-marlowe.md#inside-a-batch-job); FAQ (node-local scratch wiped at job end, GPUs only when requested) |
 | Limits are per project account, shared with its members and changed with demand | W, C | site, observed | SLURM on Marlowe and FAQ (the per-project GPU cap and time limit change with demand); [QOS limits](validation/observed-marlowe.md#partitions-qos-and-accounts) |
 | Every array element counts toward the submit limit, whatever the throttle | W, C | observed | an array larger than the account's submit limit was refused ([submission](validation/observed-marlowe.md#submission-verdicts)); a throttle limits running elements, not the elements submitted |
-| Reads at least 60 s apart, no polling loops; exit 5 runs `next`; exit 6 stops; C: a Slurm timeout is retried once after a minute | W, C | toolkit | as on Sherlock |
+| Reads by hand only when needed (a wait exited, the user asks, an exit 5 `next`), at least 60 s apart and otherwise rare; no `watch`, loop of `shk status`, detached wait, or scheduled or re-prompted agents; prefer `--after-ok`; exit 5 runs `next`; exit 6 stops; C: a Slurm timeout is retried once after a minute | W, C | toolkit | as on Sherlock, where the cadence, the ban on polling loops and the bounded wait rest on site rules 1 and 10 and the unattended-sessions policy ([Sherlock policy](sherlock-policy.md#where-each-site-rule-lands)); the Marlowe documentation states no cadence |
 | Cancel only exact verified own jobs; never cancel and resubmit to adjust a queued job; `update` lowers walltime or an array's throttle | W, C | toolkit | a resubmission loses the queued job's age, the largest priority weight ([scheduler](validation/observed-marlowe.md#partitions-qos-and-accounts)) |
 
 ### Cost and waiting
@@ -137,7 +138,7 @@ file, "C" the cluster file.
 | CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock | W, C | owner | owner decision 2 below |
 | The start time of a preflight or test-only reply is not a prediction; never relay it as one | W, C | observed | [test-only estimates](validation/observed-marlowe.md#test-only-estimates-and-real-starts) |
 | Small GPU requests usually start within hours, requests near a whole node can wait days, shorter limits tend to start sooner | W, C | observed | [queue waits](validation/observed-marlowe.md#queue-waits) |
-| After a submit report the job id and end the wait; check again when the user asks | W, C | toolkit | waits of hours to days make waiting in the session wasteful |
+| After a submit report the job id, then end the turn and check again when the user asks, or run one bounded `shk --site marlowe wait --task T --timeout DUR` as a background command whose exit the agent is told of, and act on `wait.outcome` | W, C | toolkit | waits of hours to days make checking in the session by hand wasteful; a bounded wait wakes the agent only for its outcome |
 
 ### Preemption
 
@@ -230,7 +231,11 @@ These are `shk` decisions, not site requirements:
 - Partition, CPUs, memory and walltime are explicit; Marlowe has no default
   partition or time, and the partition's default memory is not relied on.
 - No GPU model constraint, typed GRES, `--tmp` or `#SBATCH --exclusive`.
-- Reads at least 60 s apart and no polling loops; the site states no cadence.
+- Reads at least 60 s apart and otherwise rare, and no polling loops; the
+  site states no cadence. The one repeated read is a bounded
+  `shk --site marlowe wait`: `--timeout` is required (at most 168 hours), it
+  reads every 5 minutes by default and backs off to 30 minutes while nothing
+  runs or changes, and it runs in the attended session, never detached.
 - A queued job is changed with `shk update`, never cancelled and resubmitted;
   a job held after a requeue is recovered by cancel and resubmit with the
   user's consent, never released.

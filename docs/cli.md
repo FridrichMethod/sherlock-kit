@@ -10,8 +10,8 @@ flag list. [Installation and connection](install.md) covers setup; the
 - [Exit codes](#exit-codes)
 - [Configuration](#configuration)
 - [Sites](#sites): Sherlock and Marlowe
-- Jobs: [submit](#submit), [status](#status), [cancel](#cancel),
-  [update](#update), [occupancy](#occupancy)
+- Jobs: [submit](#submit), [status](#status), [wait](#wait),
+  [cancel](#cancel), [update](#update), [occupancy](#occupancy)
 - Capacity: [resources](#resources), [resource summary](#resource-summary)
 - Inside a job: [allocation](#allocation),
   [release and requeue](#release-and-requeue),
@@ -41,6 +41,8 @@ shk update --job-id N --expect-name NAME [--expect-token TOKEN]
 shk status (--task T [--task T ...] [--campaign C [--campaign C ...]] [--run-dir PATH [--run-dir PATH ...]] | --name NAME [--name NAME ...] | --all | --job-id ID [--job-id ID ...])
            [--since DAYS] [--details]
            (--campaign once for every --task, or once per --task; --run-dir once per --task, or not at all)
+shk wait (--task T [--task T ...] [--campaign C [--campaign C ...]] [--run-dir PATH [--run-dir PATH ...]] | --name NAME [--name NAME ...] | --all)
+         [--since DAYS] --timeout DUR [--interval DUR] [--max-pending DUR]
 shk cancel (--task T [--campaign C] | --name NAME)
 shk push LOCAL REMOTE [--anywhere]
 shk pull REMOTE LOCAL [--validate NAME] [--replace]
@@ -53,7 +55,8 @@ shk manifest DIR
   stdout; `rules`, `--version` and help print text, and usage errors print
   text on stderr (exit 2).
 - `submit`, `status`, `cancel`, `occupancy` and `resources` report
-  `next_check_after`, 60 s after they ran.
+  `next_check_after`, 60 s after they ran; `wait` reports that of its last
+  read.
 - Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
 - A reply from a site other than Sherlock adds `"site": NAME` directly after
   `executor`; see [replies and hints off Sherlock](#replies-and-hints-off-sherlock).
@@ -72,7 +75,7 @@ shk manifest DIR
 | 3 | refused, and nothing was submitted, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, an incompatible partition list (`partitions_incompatible`), an `update` to a borrowed partition (`borrowed_not_allowed`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock; on Marlowe also a plain `submit` that Slurm's test rejects (the preflight reply, nothing staged) and push or pull on Marlowe (`transfer_on_marlowe`) |
 | 4 | SSH transport or master check unavailable: `auth_required` (ask the user to open the master); `unavailable` with a local permission denial (check the sandbox; request per-command approval in Codex); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop), on Marlowe `run shk --site marlowe doctor` |
 | 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, `scontrol` exited nonzero in `release` or `requeue`, the re-read after `scontrol update` in `update` failed or does not show the requested value on every record (whatever `scontrol` returned), or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
-| 6 | status ok, but the newest job of a requested name has an anomaly |
+| 6 | status ok, but the newest job of a requested name has an anomaly; `wait` ends there with outcome `anomaly` |
 
 ## Configuration
 
@@ -175,10 +178,11 @@ alias, a project on both clusters and `shk` on a Marlowe login node.
 For a site other than Sherlock:
 
 - Every reply that prints `executor` adds `"site": "marlowe"` directly after
-  it: both `status` forms, the `submitted` and preflight replies of `submit`,
-  `cancel`, `occupancy`, `resources`, `release`, `requeue`, `update` and
-  `allocation`; `doctor` adds it after `executor` at the top level and in
-  `remote`. A reply that prints `executor` without `site` came from Sherlock.
+  it: both `status` forms, `wait`, the `submitted` and preflight replies of
+  `submit`, `cancel`, `occupancy`, `resources`, `release`, `requeue`,
+  `update` and `allocation`; `doctor` adds it after `executor` at the top
+  level and in `remote`. A reply that prints `executor` without `site` came
+  from Sherlock.
 - The `dry_run`, `pushed`, `pulled` and `already_present` replies and the
   exit 5 reply print neither. Error replies carry no `site` either, except
   the errors of `status --details` (a failed read, a selected name none of
@@ -581,6 +585,122 @@ count one task; `--job-id` reads the accounting aggregate.
 **History bound.** A complete query does not establish unlimited historical
 coverage: it is bounded by `history_window_days`, and array cardinality without
 provenance is inferred.
+
+## `wait`
+
+`wait` repeats the read that `status` makes for the same selection until the
+selected names settle, one of them fails or a bound is reached, and prints one
+reply at the end. It lets an agent wait for a job without spending a turn on
+each check. It is read-only: it dispatches no mutation and writes nothing,
+locally or remotely.
+
+### Options
+
+- The selection (`--task`, `--name` or `--all`), `--campaign`, `--run-dir` and
+  `--since` have the meaning, defaults and checks of [status](#status):
+  `--since` defaults to 30 days (7 with `--all`) and accepts 1 to 31. `wait`
+  has no `--job-id` and no `--details`.
+- The global options apply as for `status`. `wait` runs with the ssh and the
+  local executor, on Sherlock and on Marlowe (`shk --site marlowe wait`).
+- DUR takes the forms of `submit --time`: `2h`, `90m` or `H:MM:SS`. Another
+  form, or a value outside its range, is exit 1 `spec_invalid` (the token
+  `--time` uses), before the first read:
+  - `--timeout DUR` is required, from 1 minute to 168 hours (7 days), both
+    included; without it the command is a usage error (exit 2).
+  - `--interval DUR` defaults to `5m` and is at least 1 minute, with no upper
+    bound.
+  - `--max-pending DUR` is optional and off by default; when given it is at
+    least 1 minute.
+
+### Loop
+
+The wait takes its start time from the clock and sets `timeout_at` to the
+start plus `--timeout`. Then:
+
+1. It reads: exactly the read that `shk status` makes for the selection, one
+   remote call with one `squeue` and one `sacct`.
+2. It decides, in this order; the first case that applies ends the wait:
+   1. `anomaly`: the read is exit 6, an anomaly on the newest job of a listed
+      name;
+   2. `failed`: a listed name is `failed` now and was `live` at an earlier
+      read of this wait;
+   3. `settled`: no listed name is `live`;
+   4. `max_pending`, only with `--max-pending`: the current job of a live name
+      has shown no running task (`current.tasks.running` 0) at every read
+      since the first read that showed it so, for at least `--max-pending`
+      measured from that read; a read that shows a running task starts that
+      name's count again;
+   5. `timeout`: less than 60 s remain before `timeout_at`.
+3. Otherwise it sleeps for the current delay, or until `timeout_at` when that
+   comes sooner, and reads again.
+
+The delay starts at `--interval`. After a read in which no listed name has a
+running task and every name shows the state, current job id and task counts
+of the previous read, the delay doubles, up to 30 minutes or `--interval` when
+that is longer; after any other read it returns to `--interval`. With the
+default interval, reads of a job that pends unchanged are 5, 10, 20 and then 30
+minutes apart, and reads of a running job 5 minutes apart. The wait ends
+before it would sleep less than 60 s, so consecutive reads are always at least
+60 s apart, and it ends no later than `--timeout` plus one read.
+
+- `settled` means only that no listed name is `live`. A name that is `done`,
+  or already `failed` at the first read, is not live, and neither is a `new`
+  or `stale` name, which has no Slurm rows: a wait on such names alone
+  settles at the first read. Start a wait once `submit` has returned the job
+  id, and read each name's `state` in the reply.
+- With `--all` the names are those the read lists, so an old failed job never
+  gives `failed`: only a job that the wait saw live does. An anomaly on any
+  listed name, an old one included, ends the wait at the first read.
+- Pending time before the wait started does not count toward
+  `--max-pending`, and neither does pending time before the last read that
+  showed a running task.
+- An error of a read (exit 1 `malformed_read` or a configuration error, exit 4
+  `auth_required`, `unavailable` or `timeout`) ends the wait with that error
+  reply and exit code, without a retry; the error reply has no `wait` object.
+- Nothing is printed while it waits: stdout carries one JSON reply at the end.
+  `wait` writes nothing to stderr itself; the Sherlock login banner reminder
+  goes there once per process, as for every command.
+
+### Reply
+
+The reply is the last read's `status` reply, unchanged (`executor`, the site
+fields, `user`, `host`, `queried_at`, `next_check_after`, `names` and
+`truncated`), with `wait` added:
+
+```text
+"wait": {"outcome": "settled" | "failed" | "anomaly" | "max_pending" | "timeout",
+         "names": [NAME, ...], "reads": N, "started_at": ISO-UTC, "timeout_at": ISO-UTC}
+```
+
+- `reads` counts the reads of this wait, the last one included.
+- `started_at` and `timeout_at` have the format of `queried_at`
+  (`YYYY-MM-DDTHH:MM:SSZ`, UTC).
+- `next_check_after`, 60 s after the last read, is the earliest time for a
+  `status` read by hand.
+
+| Outcome | Ends the wait when | `wait.names` | Exit |
+|---|---|---|---|
+| `anomaly` | the read is exit 6 | the names whose current job has anomalies | 6 |
+| `failed` | a name that the wait saw `live` is `failed` | those names | 0 |
+| `settled` | no listed name is `live` | `[]` | 0 |
+| `max_pending` | a live name has had no running task for `--max-pending` | those names | 0 |
+| `timeout` | less than 60 s remain before `timeout_at` | `[]` | 0 |
+
+Since `wait` dispatches nothing, no outcome is ever unknown: it has no exit 5.
+
+### Waiting from an agent
+
+An agent runs one bounded `shk wait` as a background command whose exit its
+harness reports (in Claude Code, Bash with `run_in_background`), so that it
+spends no turn while the job is queued or running, and then acts on
+`wait.outcome`; the skill says what to do after each outcome. Where a command
+cannot outlive its tool call, choose a `--timeout` within that limit: a wait
+that is killed loses its reply and nothing else. A wait belongs to the
+attended session that started it. It is never detached so that it outlives
+the session (`nohup`, `setsid`, `&` past the end of the session, a `tmux` or
+`screen` session left running, cron) and never used to prompt an agent again;
+see the rules. Inside a Sherlock allocation a bounded deterministic controller
+may run `shk --executor local wait` ([controllers inside a job](#controllers-inside-a-job)).
 
 ## `cancel`
 
@@ -1002,9 +1122,10 @@ partially. For these, cancel the job (`shk cancel`) and submit it again with
 
 A bounded deterministic workflow manager may run inside its allocated Slurm
 job and call `shk --executor local` to submit/poll authorized later compute
-stages at intervals of at least 60 seconds, with no workstation dependency.
-This does not authorize scheduling future agent or LLM sessions. Controllers
-own their bounded retries, checkpointing, scientific validation and accounting.
+stages at intervals of at least 60 seconds, with no workstation dependency;
+`shk --executor local wait` is such a poll. This does not authorize
+scheduling future agent or LLM sessions. Controllers own their bounded
+retries, checkpointing, scientific validation and accounting.
 Call the project's pinned install by its absolute path, as
 [inside jobs and controllers](install.md#inside-jobs-and-controllers) shows.
 Controllers inside Marlowe jobs are not supported in this release: `shk`

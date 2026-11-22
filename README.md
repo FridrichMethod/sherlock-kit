@@ -159,6 +159,7 @@ shk doctor                  # offline: Python, ssh, rsync, config, both ssh mast
 shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m --dry-run
 shk submit --task smoke --script job.sh --partition normal --cpus 1 --mem 2G --time 20m
 shk status --task smoke     # at least 60 s apart; the reply says when (next_check_after)
+shk wait --task smoke --timeout 2h  # one reply when the task settles, fails or the timeout comes
 mkdir -p results            # pull creates LOCAL, never its parent
 shk pull /scratch/users/USER/demo/runs/shk.demo.smoke.4a30f57203/out results/smoke --validate bundle
 ```
@@ -186,6 +187,7 @@ how `shk` finds the task in Slurm.
 |---|---|---|
 | Jobs | `shk submit` | Submit one logical task: offline `--dry-run`, Slurm's verdict with `--preflight` |
 | | `shk status` | State, anomalies and cost of tasks from one `squeue` and one `sacct` call |
+| | `shk wait` | Repeat the status read, at least 60 s apart and bounded by `--timeout`, until the tasks settle or one fails; one reply at the end |
 | | `shk cancel` | Cancel the live jobs of one task or name |
 | | `shk release` | Release an identity-verified user hold |
 | | `shk update` | Change one field of an identity-verified job in place: a shorter time limit, the partition or the features while it pends, or an array's throttle |
@@ -223,6 +225,10 @@ skill are package data, delivered by the installed version:
 shk rules workstation                              # or: shk rules cluster
 shk install-skill --project . --rules workstation  # skill for Claude Code and Codex, plus rules
 ```
+
+After a submit, an agent ends its turn, or runs one bounded `shk wait` in the
+background, whose exit its harness reports, instead of checking the job by
+hand; a wait never outlives the session that started it.
 
 `shk` does not authorize resources, infer borrowed access, police what a job
 script does or certify scientific results. Sherlock's own `/etc/agents/AGENTS.md`

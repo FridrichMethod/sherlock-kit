@@ -2,6 +2,49 @@
 
 ## Unreleased
 
+Additions. The other commands are unchanged apart from `shk --help`, which
+lists the new command.
+
+- `shk wait (--task T ... | --name NAME ... | --all) --timeout DUR [--interval DUR] [--max-pending DUR]`
+  repeats the read that `shk status` makes for the same selection
+  (`--campaign`, `--run-dir` and `--since` as for `status`; no `--job-id` and
+  no `--details`) and prints one reply at the end: the last read's status
+  reply with a `wait` object of `outcome`, `names`, `reads`, `started_at` and
+  `timeout_at`. It ends at the first of, in this order: an anomaly
+  (`anomaly`, exit 6), a name that is `failed` after the wait saw it `live`
+  (`failed`), no live name (`settled`), a live name whose current job has had
+  no running task for `--max-pending` (`max_pending`), and less than 60 s
+  left before the timeout (`timeout`), each exit 0. DUR takes the forms of
+  `submit --time`; `--timeout` is required, from 1 minute to 168 hours,
+  `--interval` defaults to 5 minutes and is at least 1 minute, and
+  `--max-pending` is off by default and at least 1 minute when given; any
+  other value is exit 1 `spec_invalid`. The delay doubles after a read in
+  which nothing runs and nothing changed, up to 30 minutes or the interval,
+  and returns to the interval otherwise, so reads are always at least 60 s
+  apart. A read error ends the wait with that error and exit code, without a
+  retry. It is read-only, writes nothing, and works on Sherlock and Marlowe
+  with the ssh and the local executor.
+
+Guidance:
+
+- The rules files of both sites and both skills: after a submit, an agent
+  ends the turn and checks when the user asks, or runs one bounded
+  `shk wait` as a background command whose exit its harness reports and acts
+  on `wait.outcome`, instead of checking by hand. Reads by hand are for when
+  they are needed, at least 60 s apart and otherwise rare; `watch`, a loop of
+  `shk status`, a detached wait and scheduling or re-prompting agents are
+  forbidden. The skills say what to do after each outcome. The rules files
+  and the skills changed, so `shk install-skill --check` reports installed
+  copies as stale; run `shk install-skill` again, with the same `--rules`, to
+  refresh them.
+
+Documentation:
+
+- The command reference describes `shk wait`, and the design guide, the
+  README and both policy guides describe it as a bounded read loop over the
+  status read and record how the rules carry Sherlock's site rules 1 and 10
+  and its unattended-sessions policy for it.
+
 Documentation:
 
 - The installation guide, the README and both skills describe how a project

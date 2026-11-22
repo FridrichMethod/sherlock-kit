@@ -14,7 +14,7 @@ default site.
 
 | Module | Role |
 |---|---|
-| `cli.py` | argparse frame, `Context` (lazy config, site, executors, clock), JSON output, exit codes |
+| `cli.py` | argparse frame, `Context` (lazy config, site, executors, clock, sleep), JSON output, exit codes |
 | `errors.py` | exit codes, `ShkError(code, token, message, hint)`, `Outcome(payload, code)` |
 | `config.py` | `[tool.sherlock-kit]` discovery and validation |
 | `sites.py` | the packaged site records (Sherlock, Marlowe) and the helpers that add a site to replies, hints and `next` |
@@ -22,6 +22,7 @@ default site.
 | `partitions.py` | the packaged partition table of each site and the generated rules block |
 | `doctor.py` | read-only checks |
 | `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources (one partition or a compatible partition list), job name, sbatch argv and its optional thread-budget `env` prefix; `submit` (with the `--preflight` estimate), `status`, `cancel`, `occupancy`, `resources` (per node or `--summary`), `release`, `requeue`, `update` |
+| `wait.py` | `wait`: a bounded loop over the `status` read, with the outcome decision and the backoff |
 | `allocation.py` | local worker PID and allocation/step evidence, strict field parsing, actual resources and GPU SKU candidates of the node records |
 | `transfer.py` | `push`, payload-only `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
@@ -425,7 +426,7 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    the check-then-submit race described below prevents an exactly-once
    guarantee.
 
-## Status, cancel and occupancy
+## Status, wait, cancel and occupancy
 
 `status` batches every selected name into one read call. Per name it reports the
 state, the current job (partition, array size, task counts by state, exit codes,
@@ -468,6 +469,28 @@ which for an array whose tasks started on different members names only one of
 them or the pending list. The per-row partition of `status --details`, or
 `--task`, tells where each ran. The cost arithmetic is the same for a list, and
 every detail row keeps its partition text as Slurm printed it.
+
+`wait` is a bounded loop over that read, not a second reader: each iteration
+is the read that `status` makes for the same selection, and the last read's
+status reply, with a `wait` object added, is its one reply
+([command reference](cli.md#wait)). It exists so that an agent can wait for a
+job without spending a turn on each check: the harness runs the wait in the
+background and reports its exit, and the agent acts once, on the outcome. It
+keeps no state beyond one run: in memory it holds the names it saw live, since
+when each live name has shown no running task, the previous read's state,
+current job id and task counts per name, and the current delay; nothing is
+written. The loop ends by itself, at the first of an anomaly (exit 6), a
+failure of a name it saw live, no live name, the optional `--max-pending`
+bound and the required `--timeout` of at most 168 hours. Its reads are at
+least 60 s apart by construction: the delay starts at `--interval` (5 minutes
+by default, at least 1 minute) and doubles, up to 30 minutes or the interval,
+while nothing runs and nothing changes, and the wait ends before a sleep
+shorter than 60 s. The decision order wakes the agent as soon as it is
+needed: an anomaly first, then a failure, which ends the wait even while other
+names are still live, then the settled case and the two bounds. A read error
+ends the wait with that error and exit code, never retried, as for
+`status`. The clock and the sleep come from `Context`, so tests drive the loop
+without waiting.
 
 `cancel` resolves one name and cancels only its live jobs (`scancel` scoped by
 user and name), reporting the job ids and `next_check_after`. A guard that
@@ -652,7 +675,13 @@ The pull contract is payload-only:
   everything ever submitted.
 - Cost is informational: no budget, cap or reservation.
 - The 60 s cadence is advisory (`next_check_after`), enforced by the rules, not
-  by a file.
+  by a file. `shk wait` keeps it by construction within one run, but nothing
+  stops two waits, or a wait and reads by hand, from reading the same names
+  more often.
+- `wait` decides from its reads alone. A task that ran only between two reads
+  counts as never running for `--max-pending`; a name that failed before the
+  first read settles instead of giving `failed`; and a name that failed and was
+  resubmitted between two reads reads as live.
 - A master can die between the check and the dial; `-oProxyCommand=false` makes
   that dial fail instead of logging in, at most once per command.
 - The remote side trusts `sh`, `sha256sum` and the Slurm clients (`squeue`,

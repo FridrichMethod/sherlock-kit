@@ -60,6 +60,35 @@ How the rules files carry particular site rules:
   `--executor local` without a workstation dependency, and forbid agent or LLM
   rescheduling. Site limits, login-node restrictions, the 60 s cadence and
   access controls still bind.
+- Waiting for a job rests on three site texts. Rule 1 says that "workflow
+  managers that only submit and poll jobs are fine". Rule 10 asks for at
+  least 60 s between status checks, prefers dependencies to polling, says to
+  "never leave `watch` or a shell loop polling the scheduler, a filesystem or
+  a log file", and forbids scheduling an agent session to run on its own
+  later (`scrontab`, `--begin`, self-resubmitting jobs). The "Unattended agent
+  sessions" section of `policy.md` allows a bounded task that waits for a
+  job, fixes and resubmits, then stops, and forbids supervisors, watchdogs,
+  cron-like loops or scripts that keep agent sessions alive, restart them or
+  feed them new prompts, and sessions designed to run indefinitely. The
+  owner's reading, which the rules apply: a bounded `shk wait`, which must
+  end (`--timeout` is required, at most 168 hours), reads at least 60 s
+  apart, belongs to the attended session and exits by itself, is such a
+  workflow manager poll, not a loop left behind; detaching it (`nohup`, `&`
+  past the session, `setsid`, `tmux` or `screen` left running, cron) or
+  using it to re-prompt an agent is not.
+- The workstation file therefore offers two ways to wait after a submit: end
+  the turn and check when the user asks, or run one bounded `shk wait` as a
+  background command whose exit the agent is told of, and act on its
+  outcome. It keeps reads by hand for
+  when they are needed (a wait exited, the user asks, an exit 5 `next`),
+  never under 60 s apart and otherwise rare, prefers `--after-ok`, and
+  forbids `watch`, a loop of `shk status`, a detached wait and scheduling or
+  re-prompting agents. The cluster file allows `shk wait` on a login node
+  only in the attended session, never detached, and inside an allocation for
+  a bounded deterministic controller. The skill gives the contract, what to
+  do after each outcome and the harness note: run the wait in the background
+  so that the harness reports its exit, with a `--timeout` within any limit
+  on how long a command may run.
 - Rule 1 sends sustained computation, significant CPU or memory use, GPUs,
   intensive I/O and many processes to the scheduler and allows light editing,
   inspection and job preparation on login nodes; `software.md` (recommended
@@ -215,6 +244,10 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Jobs on `owners` must checkpoint periodically (the site accepts checkpoint or
   requeue); live requeues gave no usable SIGTERM window
   (docs/validation/observed-slurm.md).
+- Status reads are rarer than the site's 60 s floor: `shk wait` reads every 5
+  minutes by default and backs off to 30 minutes while nothing runs or
+  changes, and reads by hand outside a wait are rare, ideally 10 minutes or
+  more apart. These are owner-approved defaults.
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.
@@ -259,4 +292,5 @@ Site rule 8 permits explicitly requested scratch environments with a purge warni
 the cluster summary honors that choice and does not impose an additional ban.
 Site rule 10 sets a polling floor and minimum useful job duration, not a maximum
 bundle length. Longer jobs and periodic capacity checks still obey partition limits,
-borrowed courtesy, at least 60 seconds between checks and the ban on polling loops.
+borrowed courtesy, at least 60 seconds between checks and the ban on polling loops;
+a bounded `shk wait` keeps both by construction.
