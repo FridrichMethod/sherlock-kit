@@ -199,10 +199,10 @@ class MarloweArgv(OnMarlowe, Flow):
         self.assertEqual(self.slurm.calls(), [])
 
     def test_an_account_directive_stays_reserved(self):
-        (self.tmp / "job.sh").write_text("#!/bin/bash\n#SBATCH --account=marlowe-m000001\necho\n")
+        (self.tmp / "job.sh").write_text("#!/bin/bash\n#SBATCH --account=marlowe-m000000\necho\n")
         code, out = self.submit("--dry-run")
         self.assertEqual((code, out["error"]), (3, "sbatch_directive"))
-        self.assertIn("#SBATCH --account=marlowe-m000001 is reserved to shk", out["message"])
+        self.assertIn("#SBATCH --account=marlowe-m000000 is reserved to shk", out["message"])
         self.assertIn("use the shk --site marlowe submit command line", out["hint"])
 
 
