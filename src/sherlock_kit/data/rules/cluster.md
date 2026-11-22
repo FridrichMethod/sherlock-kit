@@ -1,9 +1,9 @@
 ## Sherlock: agent running on Sherlock
 
-At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant `storage.md`, `slurm.md`, `software.md`, `policy.md` beside it. They take precedence; only numbered rules are mandatory. Keep this in handoffs; memory is no substitute and reminders must not be filtered. Reviewed 2026-11-21 against the site files.
+At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant `storage.md`, `slurm.md`, `software.md`, `policy.md` beside it. They take precedence; only numbered rules are mandatory. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-21.
 
 ### Where you are
-- Run `hostname`/check `$SLURM_JOB_ID`: login names contain `-ln`, no job id. Use allocations fully; prefer agents there. Check limits with `scontrol show job $SLURM_JOB_ID`.
+- `hostname`/`$SLURM_JOB_ID`: login names contain `-ln`, no job id. Use allocations fully; prefer agents there. Limits: `scontrol show job $SLURM_JOB_ID`.
 - Codex sandbox failure is expected: request per-command approval, never disable it. Honor Claude's managed restrictions/confirmations. No authentication/MFA/limit/permission bypass, relays, reverse shells, alternate login services, unattended tunnels or stored second factors; never share credentials/sessions (account termination). No SSH server, even attended or inside a job/container (suspension).
 - Do not contact support. Stop affected work if infrastructure seems broken; draft symptoms/host/time/job id for the user. Slurm timeout: retry once after a minute, then stop.
 
@@ -19,9 +19,9 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 - Use `#!/bin/bash -l`, `ml purge`, explicit modules/environment; record versions. Set `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` unless `--cpu-thread-budget` overrides it. No probing/changing system configuration/infrastructure or slow shell startup.
 
 ### Slurm
-- Use local `shk submit`/`status`/`cancel`/`update`, explicit resources/profiles, no `--account`/`--exclude`. Discover limits/features. Checks at least 60 s apart; no watch/polling loops; prefer dependencies. Jobs need 10 useful minutes, no padding. Diagnose failures; no pending duplicates. Exit 5: obey `next` time; exit 6: stop/report.
-- Update a pending job's walltime (decrease only), partition (compatible, non-borrowed) or constraint/prefer, or an array's throttle, one field group per call; never raw `scontrol update`.
-- Bounded deterministic controllers may use `shk --executor local` inside allocations; never schedule future agent/LLM sessions (scrontab, begin, self-resubmission). Never submit GPU work while developing/testing sherlock-kit.
+- Use local shk, explicit resources/profiles, no `--account`/`--exclude`; change pending jobs/array throttles only with `shk update`, never raw `scontrol update`. Discover limits/features. Jobs need 10 useful minutes, no padding. Diagnose failures; no pending duplicates. Exit 5: obey `next` time; exit 6: stop/report.
+- To be woken, run one bounded `shk wait --task T --timeout DUR` in the attended session's background, never detached; act on `wait.outcome`. Otherwise check only when needed, at least 60 s apart, ideally 10+ min; no watch/polling loops; prefer dependencies.
+- Bounded deterministic controllers may use `shk --executor local` inside allocations; never schedule or re-prompt agent/LLM sessions (scrontab, begin, self-resubmission). Never submit GPU work while developing/testing sherlock-kit.
 - Cancel exact verified own jobs and explain why. Ask for unclear scope/ownership, unrelated/broad cancellation or material irreversible loss. Never cancel all user jobs or kill compute processes instead; inspect only own processes.
 
 ### GPU scheduling defaults

@@ -1,6 +1,6 @@
 ## Marlowe: agent running on Marlowe
 
-These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlock work follows the Sherlock rules, and a task lives on one cluster. Marlowe has no `/etc/agents`: its documentation is the policy and takes precedence, above all the Usage Violations page. Do not carry over Sherlock practice: `/etc/agents`, `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs. Site marks the documentation's rules, owner the user's choices; the rest are toolkit rules or observed facts. Keep this in handoffs. Reviewed 2026-11-21 against https://marlowe-research.stanford.edu/documentation/ .
+These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlock work follows the Sherlock rules, and a task lives on one cluster. Marlowe has no `/etc/agents`: its documentation is the policy and takes precedence, above all the Usage Violations page. Do not carry over Sherlock practice: `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs. Site marks the documentation's rules, owner the user's choices; the rest are toolkit rules or observed facts. Keep this in handoffs. Reviewed 2026-11-21 against https://marlowe-research.stanford.edu/documentation/ .
 
 ### Site rules
 - Site: run nothing that lets a person or a service reach Marlowe without SUNet ID, password and Duo: websocket tunnels and remote-control servers (SSHX, Claude Remote Control/Server: never start one for this session), userspace VPNs (Tailscale, ZeroTier), editor web tunnels (VS Code, Cursor, Windsurf), own code servers on login nodes. The user's own SSH forwarding through that login is fine; open no tunnel or forward yourself. Never share credentials or this session.
@@ -9,7 +9,7 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 - Never contact Marlowe staff or post in their channels. Stop affected work and draft the message (symptoms, host, time, job id) for the user.
 
 ### Where you are
-- `hostname` and `$SLURM_JOB_ID` tell a login node (`login-NN`, no job id, no GPUs) from a job (`nNN`). The names are generic vendor defaults and do not prove Marlowe.
+- `hostname` and `$SLURM_JOB_ID` tell a login node (`login-NN`, no job id, no GPUs) from a job (`nNN`). The names are generic vendor defaults, no proof of Marlowe.
 - Owner: agent sessions on login nodes are allowed.
 - Every Marlowe command is `shk --site marlowe ...`, plus `--project-dir DIR` when the Marlowe configuration is not the nearest one; here shk then runs Slurm locally by itself. A reply that names its `executor` without `"site": "marlowe"` came from Sherlock: stop and check.
 
@@ -26,7 +26,7 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 - Job scripts: `module` works under plain `#!/bin/bash` and the Slurm clients are on PATH. `TMPDIR` is `/tmp`; job-local space is `/local_scratch/$USER.$SLURM_JOB_ID`, wiped at job end. No GPU is visible without `--gpus`. Compute nodes reach the internet. The job environment is captured from a login shell: keep login startup files light and quiet.
 - Site: limits are per project account, shared with its members and changed with demand.
 - Every array element counts toward the submit limit, whatever the throttle.
-- Reads at least 60 s apart, no watch or polling loops. A Slurm timeout: retry once after a minute, then stop and report. Exit 5: run the reply's `next` no earlier than its time; never resubmit blind. Exit 6: stop and report.
+- Read status only when needed (wait exited, user asks, exit 5 `next` due; never resubmit blind), at least 60 s apart, ideally 10+ min; no watch or polling loops. Retry a Slurm timeout once after a minute; then, or on exit 6, stop and report.
 - Cancel only exact verified own jobs and say why. Never cancel and resubmit to adjust a queued job; `shk --site marlowe update` lowers its walltime or an array's throttle.
 
 ### Cost and waiting
@@ -35,7 +35,7 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 - Owner: a real submit or allocation needs the user's authorization of that campaign. State the upper bound you ask for, tasks x GPUs and CPUs x walltime x (1 + retries); the yes covers exactly that.
 - Owner: CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the user's workstation or on Sherlock.
 - The start time in a preflight or test-only reply is not a prediction on Marlowe; never relay it as one. Observed: small GPU requests usually start within hours, requests near a whole node can wait days, and shorter limits tend to start sooner.
-- After a submit, report the job id and end the wait; check again when the user asks.
+- After a submit, report the job id; end the turn or, to be woken, run one bounded `shk --site marlowe wait --task T --timeout DUR` in this attended session's background; act on `wait.outcome`; never detach it, schedule or re-prompt agents.
 
 ### Preemption
 - Site: batch or hero work can preempt a `preempt` job at any time; it is requeued and restarts from the top of its script.

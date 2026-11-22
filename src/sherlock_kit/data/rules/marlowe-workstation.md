@@ -11,18 +11,18 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 
 ### Connection
 - Owner: agent sessions here may drive Marlowe over the user's open `marlowe-plain` master, as a session on Marlowe would.
-- Every Marlowe command is `shk --site marlowe ...`, plus `--project-dir DIR` when the Marlowe configuration (such as `<repo>/marlowe/sherlock-kit.toml`) is not the nearest one; exit 1 `site_mismatch` means the nearest one is another cluster's. A reply that names its `executor` without `"site": "marlowe"` came from Sherlock: stop and check.
+- Every Marlowe command is `shk --site marlowe ...`, plus `--project-dir DIR` when the Marlowe configuration is not the nearest one; exit 1 `site_mismatch` means the nearest one is another cluster's. A reply that names its `executor` without `"site": "marlowe"` came from Sherlock: stop and check.
 - Light reads may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`. That PATH has no Slurm clients: Slurm work goes through shk.
-- Exit 4 `auth_required`: ask the user to run the hint (`ssh marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the user fixes what it names; logging in again will not help. A sandbox startup failure or local socket permission denial is not a missing master: request per-command approval and retry once; never disable the sandbox. Other exit 4: run `shk --site marlowe doctor`, retry once after a minute, then stop and report.
+- Exit 4 `auth_required`: ask the user to run the hint (`ssh marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the user fixes what it names; a new login will not help. A sandbox startup failure or local socket permission denial is not a missing master: request per-command approval and retry once; never disable the sandbox. Other exit 4: run `shk --site marlowe doctor`, retry once after a minute, then stop and report.
 
 ### Jobs
 - Submit, update and cancel only through shk, never raw `sbatch`, `scontrol update` or `scancel`. Use `--partition preempt` with explicit CPUs, memory and walltime, GPUs with `--gpus N`. The account comes from the configuration's `account`: never `--account`, never a guess from `$PROJECT_ID`.
 - `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time`.
 - Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" may also mean that no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
-- No GPU model `--constraint` (Marlowe has no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
+- No GPU model `--constraint` (no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
 - Site: limits are per project account, shared with its members and changed with demand.
 - Every array element counts toward the submit limit, whatever the throttle.
-- Reads at least 60 s apart (`shk --site marlowe status --all`), no watch or polling loops. Exit 5: run the reply's `next` no earlier than its time; never resubmit blind. Exit 6: stop and report.
+- Read status only when needed (a wait exited, the user asks, exit 5 `next` due; never resubmit blind), batched (`--all`), at least 60 s apart, ideally 10+ min; no watch or polling loops. Prefer `--after-ok`. Exit 6: stop and report.
 - Cancel only exact verified own jobs and say why. Never cancel and resubmit to adjust a queued job; `shk --site marlowe update` lowers its walltime or an array's throttle.
 
 ### Cost and waiting
@@ -31,7 +31,7 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 - Owner: a real submit or allocation needs the user's authorization of that campaign. State the upper bound you ask for, tasks x GPUs and CPUs x walltime x (1 + retries); the yes covers exactly that.
 - Owner: CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock.
 - The start time in a preflight or test-only reply is not a prediction on Marlowe; never relay it as one. Observed: small GPU requests usually start within hours, requests near a whole node can wait days, and shorter limits tend to start sooner.
-- After a submit, report the job id and end the wait; check again when the user asks.
+- After a submit, report the job id and end the turn or, to be woken, run one bounded `shk --site marlowe wait --task T --timeout DUR` in the background and act on `wait.outcome`. Never detach it, schedule or re-prompt agents.
 
 ### Preemption
 - Site: batch or hero work can preempt a `preempt` job at any time; it is requeued and restarts from the top of its script.

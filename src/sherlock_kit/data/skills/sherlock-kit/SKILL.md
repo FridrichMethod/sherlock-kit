@@ -98,7 +98,7 @@ These are project-controller responsibilities; Kit keeps no campaign ledger and 
 - Queue CPU-ready independent first pilots as they become ready, without waiting for another lane's pilot or all CPU preparation to finish. Block only lanes sharing the failed dependency. Do not prevalidate every model/GPU combination; add hardware admission when ready work needs it.
 - Before scaling a lane, validate a complete production-sized unit through the real launcher/container, actual worker, native model, output checks and verified export/ingestion. Record resolved settings, source/checkpoint, actual GPU feature, full output count/hashes, walltime and peak memory. Connection, preflight, imports and allocation proof are not model runtime acceptance. A passed pilot admits its configuration over the compatible OR set already narrowed by hard requirements; validate a member separately only for a concrete open uncertainty there (less memory headroom than the pilot's GPU, or kernel, dtype or CUDA-architecture support actually in doubt for that member; a different SKU or architecture alone is no such doubt), since a pass on one GPU does not prove headroom on a smaller one.
 - Use `--after-ok` as an admission gate only when predecessor success includes the required validation; an entire bundle dependency waits for its last unit. A project can gate continuation inside its bundle or release a verified held successor, within the existing release rules. Bundle sequential units to amortize queue waits and setup; recovery units need not be individual scheduler jobs. Prefer longer useful, resumable allocations when repeated queueing dominates. Do not fragment every sample into a job or inherit a two-hour cap from examples; respect actual partition/courtesy limits and measured runtime.
-- At bounded decision points, follow Status below, batch due reads at least 60 seconds apart, resolve unknown outcomes from Slurm evidence first and collect immutable completed-unit exports promptly. Fill idle compatible local capacity with independently owned ready work and refill admitted remote lanes toward the authorized live-bundle target. Below target, report ready-but-unsubmitted count, age and reason; queued reservations are not running GPUs. Periodically inspect batched status/resources evidence, measured runtime and frozen requests at bounded decision points (at least 60 seconds apart) before a queue/resource-based rebalance; free-looking resources are not a start-time guarantee. A pending job moves to another compatible partition with `shk update --partition`, without a cancel and resubmit. Preserve scientific budgets.
+- At bounded decision points, follow Status and Wait below, batch due reads at least 60 seconds apart, resolve unknown outcomes from Slurm evidence first and collect immutable completed-unit exports promptly. Fill idle compatible local capacity with independently owned ready work and refill admitted remote lanes toward the authorized live-bundle target. Below target, report ready-but-unsubmitted count, age and reason; queued reservations are not running GPUs. Periodically inspect batched status/resources evidence, measured runtime and frozen requests at bounded decision points (at least 60 seconds apart) before a queue/resource-based rebalance; free-looking resources are not a start-time guarantee. A pending job moves to another compatible partition with `shk update --partition`, without a cancel and resubmit. Preserve scientific budgets.
 - Transfer ownership only after complete terminal/nonrestartable evidence or a durable project revocation ACK that stops old claims/writes and survives requeue. A cancellation ACK alone is insufficient. Publish the new epoch before dispatch; reject stale claims and accepted-result writes. Pending jobs and unresolved dependencies still own their units.
 - Resume the same bundle command. For fixed-size seed units, skip only complete verified outputs; rerun an interrupted unit with the same seed and full budget in a new attempt, without merging partial samples. Complete low-quality predictions are not technical failures to retry for a better score.
 - Give delegated work a writer, deliverable and explicit wake-up action; a message to an idle agent may not start it. Report actual running/queued/ready/blocked counts and their full denominator. Separate coordination delay from scheduler wait, and native walltime from allocation GPU-seconds; neither proves measured GPU utilization. Do not schedule future agent/LLM sessions in Slurm.
@@ -114,11 +114,46 @@ shk status --task train-a
 shk status --all
 ```
 
-- At least 60 s between checks; respect `next_check_after` in every submit, status, cancel, occupancy and resources reply. Read the local UTC clock before the next check instead of estimating elapsed time. One `shk status --all` (or several `--task` in one call) instead of a loop per task. Never `watch` or poll in a loop.
+- At least 60 s between checks; respect `next_check_after` in every submit, status, cancel, occupancy and resources reply. Read the local UTC clock before the next check instead of estimating elapsed time. One `shk status --all` (or several `--task` in one call) instead of a loop per task. Read status by hand only when needed (a wait exited, the user asks, an exit 5 `next` is due) and otherwise rarely, ideally 10 minutes or more apart. Never `watch` or loop `shk status`: to be woken when jobs end, run one `shk wait` (see Wait below).
 - `--since DAYS` sets the `sacct` window, 1 to 31 days (default 30, 7 with `--all`; Sherlock refuses wider windows). With several `--task`, give `--campaign` once for all of them or once per `--task`.
 - States: `new` (no job), `live` (pending, running or completing; throttle-held array tasks count as pending), `done` (all tasks completed), `failed` (finished, at least one task not completed), `stale` (provenance files but no Slurm rows in the window; treated as `new`). Without a spec file (`--all`, `--name`, `--job-id`) an array whose seen tasks are not exactly 0..max has null task counts, and `done`/`failed` describe only the seen tasks.
 - `current` describes the newest job of the name (tasks, exit codes, restarts, cost); older jobs are in `history`. An anomaly such as `unexpected_preemption` or `duplicate_live` gives exit 6: stop and report.
 - `current.partition` is Slurm's partition text of the job's first row (queue rows before accounting rows, in Slurm's order). For a single job submitted with a partition list it is the list while pending, in an order Slurm may change, and the run partition once started; a job cancelled while pending shows one member in `squeue` and the list in `sacct`. For an array, or a requeued job read from accounting only, it is one row's text, can change between reads and says nothing about the other tasks or attempts. `status --task` reads the job's frozen spec from its run directory (plain or with `--details`); when that spec lists several partitions, `current` adds `ran_on` directly after `partition`: the sorted distinct partitions in which a task or attempt started, `[]` while no row shows a start. Without a spec (`--all`, `--name`, `--job-id`) there is no `ran_on`: `current.partition` is the first row's text, which for an array whose tasks started on different members names only one of them or the pending list. The per-row partition of `status --details`, or `--task`, tells where each ran. `unknown_partition` checks every member of a list on every row of the job, and an interrupted attempt on a list of listed, non-preemptible members is `unexpected_preemption`. What `squeue` and `sacct` print for a job submitted with a list is source-confirmed Slurm behavior, not observed live.
+
+## Wait
+
+```sh
+shk wait --task train-a --timeout 12h
+shk wait --task train-a --task train-b --timeout 24h --interval 10m --max-pending 6h
+```
+
+`shk wait` watches jobs so that an agent spends no turns on queued work: after a submit, either end the turn and check when the user asks, or run one bounded wait and act on its outcome. It is read-only: it dispatches no mutation and writes nothing, locally or on Sherlock.
+
+- Selection is that of `shk status`: `--task` or `--name` (both repeatable) or `--all`, with `--campaign`, `--run-dir` and `--since` as there; there is no `--job-id` and no `--details`. The global options apply as for status, with either executor.
+- `--timeout DUR` is required, from 1 minute to 168 hours. `--interval DUR` (default 5m, at least 1m) is the delay between reads; `--max-pending DUR` (at least 1m) is off unless given. DUR takes the forms of `submit --time` (`2h`, `90m`, `H:MM:SS`); any other form or an out-of-range value is exit 1 `spec_invalid`.
+- Each read is exactly the read `shk status` makes for the same selection, and consecutive reads are always at least 60 s apart. While no selected name has a running task and the state is unchanged since the previous read (per name: state, current job id, task counts), the delay doubles, up to the larger of 30 minutes and `--interval`; a running task or any change resets it to `--interval`.
+- Nothing is printed until the end, also not on stderr. The reply is the last read's status payload unchanged plus `wait`: `outcome`, `names` (the names that decided it; `[]` for `settled` and `timeout`), `reads`, `started_at` and `timeout_at` (UTC, in the format of `queried_at`).
+- A read that fails (exit 1 `malformed_read` or a configuration error, exit 4, ...) ends the wait with that error reply and exit code; it does not retry.
+
+After every read the first matching outcome decides:
+
+| `wait.outcome` | Exit | Meaning | Do |
+|---|---|---|---|
+| `anomaly` | 6 | the current job of a name in `wait.names` has an anomaly | stop and report it to the user |
+| `failed` | 0 | a name that this wait saw `live` is now `failed`; the wait ends at the first failure, so other names may still be live | diagnose first (`shk status --task T --details`, the Slurm logs in the run directory); resubmit with `--resubmit "reason"` only once a cause is found, then wait again for the rest |
+| `settled` | 0 | no selected name is `live` | check that every name is `done` (one that was already `done`, `failed` or `new` at the first read settles at once), then pull its outputs |
+| `max_pending` | 0 | with `--max-pending`, a live name's current job showed no running task at every read for at least that long | consider `shk resources --partition P --summary` and `shk update` (a compatible partition, constraint or prefer, a shorter walltime), or another wait |
+| `timeout` | 0 | none of the above before `--timeout` (the wait ends once less than 60 s of it remains) | run another wait, or end the turn and report the state |
+| (error) | 1, 4, ... | the read failed | act as the exit code table says |
+
+- With `--all`, a job that had already failed before the wait started does not give `failed`; only a job that the wait saw live does.
+- A held job (`submit --hold`, or a requeue hold) stays `live`: without `--max-pending` the wait runs until its timeout.
+
+Run it from an agent so that it costs no turns and still ends by itself:
+
+- Run it as a background command whose exit the harness reports, and do nothing for it until then (Claude Code: Bash with `run_in_background`; do not read its output file while it runs). Where a command cannot outlive its tool call, pick a `--timeout` safely within that limit, leaving room for one read.
+- Run one wait per set of names. Never detach it so that it outlives the session (`nohup`, `setsid`, `disown`, a `tmux` or `screen` session left running, cron), never use it to restart or re-prompt an agent, and never schedule a later agent session. On a Sherlock login node run it only in the attended session; inside an allocation a bounded deterministic controller may run `shk --executor local wait`.
+- Between stages prefer `--after-ok` dependencies to waiting.
 
 ## Controller evidence and exact mutations
 
@@ -172,6 +207,7 @@ On a login node or inside an allocation `shk` uses the local executor (no ssh); 
 
 - Authenticate for the user, retry a login in a loop, or store passwords or MFA secrets.
 - Run raw `sbatch`, `scancel` or `squeue` loops over ssh when `shk` covers the task, or `scancel -u $USER`.
+- Poll with `watch` or a `shk status` loop, detach `shk wait` so that it outlives the session, or use a wait to re-prompt an agent.
 - Change a job with raw `scontrol update`, over ssh or on Sherlock, instead of `shk update`.
 - Resubmit after exit 5 or a failure without checking `shk status` and finding the cause.
 - Wrap `shk` in an outer timeout shorter than its own: if `shk` itself is killed, a mutation in flight is outcome unknown and a transfer may still be running.
