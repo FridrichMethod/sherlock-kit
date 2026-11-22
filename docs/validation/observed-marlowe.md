@@ -14,10 +14,11 @@ reproduced; other users' jobs appear only as counts and percentages.
 
 ## How the observations were made
 
-- `shk` itself has not run on Marlowe. Every observation used the user's
-  existing `marlowe-plain` OpenSSH master with
+- The cluster facts were read over the user's existing `marlowe-plain`
+  OpenSSH master with
   `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain ...`, which cannot
-  log in.
+  log in. `shk`'s own commands ran afterwards, from a development tree
+  ([shk on Marlowe](#shk-on-marlowe)).
 - Read-only commands: `scontrol show config`, `partition`, `node` and `job`,
   `sacctmgr show qos`, `assoc` and `user`, `sinfo`, `squeue`, `sacct`,
   `sshare`, `module`, environment and filesystem reads.
@@ -314,6 +315,64 @@ Same window, partition `preempt`:
 - Billing TRES equals the CPU count for CPU-only jobs, and no partition sets
   TRESBillingWeights.
 
+## shk on Marlowe
+
+`shk` ran from a development tree with a throwaway Marlowe configuration, from
+the workstation over the `marlowe-plain` master unless a bullet says
+otherwise. No job that `shk` submitted ran.
+
+- `shk --site marlowe doctor`: both masters `running` from one check, and
+  `"site": "marlowe"` after `executor`. With `--remote` the host was a login
+  node, `sbatch`, `squeue` and `sacct` resolved under
+  `/cm/shared/apps/slurm/current/bin` through the prelude and `sha256sum` under
+  `/usr/bin`, and the reply had no `site_instructions` key.
+- `status --job-id N --details` of the finished observation job: state
+  `done`, its accounting row parsed, a cost of 7 CPU seconds, times converted
+  to UTC. `status --all` listed no names: the throwaway project had no jobs
+  yet.
+- `push` of a three-file tree into a REMOTE whose parent did not exist failed
+  with rsync exit 11 (`transfer_failed`, rsync's `mkdir ... failed: No such file or directory`). Once the parent existed, `push` and a repeated `push`
+  succeeded, and after `SHA256SUMS` was written with the skill's one-liner on
+  the login node, `pull` fetched a tree equal to the pushed one.
+- On a login node (the source tree pushed to scratch, Python 3.14 from a
+  micromamba environment, a Marlowe configuration in the working directory,
+  no flags): `doctor --remote` chose the local executor by itself
+  (`"executor": "local"`, `"site": "marlowe"`, `masters` `{}`),
+  `status --job-id N` worked, and `push` was refused with exit 3
+  `transfer_on_marlowe`.
+- `resources --partition preempt --summary`: complete, 31 nodes of which 30
+  schedulable, with CPU, memory and GPU sums; without `--by` or `--shape`,
+  `by` was `[]` and `slots` `{}`.
+- `submit --dry-run` printed the argv
+  `sbatch --parsable --job-name=... --partition=preempt --account=marlowe-m000000 --cpus-per-task=1 --requeue --open-mode=append --ntasks=1 --mem=1024M --time=10 --chdir=... --output=... --error=... --export=ALL,SHK_NAME=...,SHK_SUBMISSION_TOKEN=... --dependency=singleton --comment=... --hold`.
+- `submit --preflight` for 1 CPU and for `--gpus 1`: exit 0, `job_submitted`
+  false, and the line
+  `sbatch: Job N to start at <time> a using 1 processors on nodes nNN in partition preempt`
+  (Slurm 25.05.2 prints the word `a` after the time), parsed into `estimate`
+  with `status` `parsed` and `note` "not a wait prediction on Marlowe: the
+  observed start came much earlier; see the Marlowe rules". With
+  `--partition batch` it was exit 3 `unknown_partition` ("listed: preempt"),
+  offline.
+- A real `submit` with a `--constraint` that no node has, plus `--hold` and a
+  token: exit 3 with the preflight reply (`"action": "preflight"`,
+  `"ok": false`, `"job_submitted": false`, `preflight.stderr`
+  `allocation failure: Invalid feature specification`), and no `runs`
+  directory under `remote_root`: nothing was staged.
+- A held `submit` (1 CPU, 1 GB, 10 minutes, a token) gave `submitted` with a
+  job id and `"site": "marlowe"`. Then `status --task`: `live`, 1 PENDING, no
+  anomaly. `update --time 5m`: `updated`, TimeLimit 00:10:00 to 00:05:00.
+  `update --time 20m`: exit 3 `remote_refused`, `update: SHK_REFUSED time`.
+  The same `submit` again: exit 3 `live`, with the hint
+  `wait; check shk --site marlowe status at most once per 60 s`. `cancel`:
+  `cancelled`. A later `status`: `failed`, 1 CANCELLED, zero CPU and GPU
+  seconds. The job never ran.
+- Locally: `shk --site marlowe rules workstation` and
+  `shk --site marlowe rules cluster` printed the Marlowe files;
+  `install-skill` for both sites into one project wrote each site's skill
+  under `.claude/skills/` and `.agents/skills/` and each site's rules under
+  `.claude/rules/`; `--site marlowe` in a Sherlock project was exit 1
+  `site_mismatch`.
+
 ## Not observed
 
 - The signal sequence of a real preemption: whether and when a preempted job
@@ -322,12 +381,15 @@ Same window, partition `preempt`:
 - The requeue-hold path: how a job reaches REQUEUE_HOLD or a launch-failure
   hold, what `squeue`, `scontrol` and `sacct` show for it, and the recovery the
   rules prescribe (cancel, then resubmit with the user's consent).
-- `shk`'s own path on Marlowe: no `shk` command has run there, so
-  `doctor --remote`, `status`, `resources`, the test before submit, `submit`,
-  `update`, `cancel`, `push` and `pull` through the prelude are not observed,
-  nor the full text of a test-only estimate line that `shk`'s preflight
-  parses.
+- A job that `shk` submits and that then runs: every job on Marlowe is
+  billed, and such a job needs the owner's authorization. What a running job
+  sees comes from the observation job, which was submitted by hand, and the
+  verified `pull` read a tree written on the login node.
+- `occupancy`, `release`, an `update` of the partition, the features or an
+  array's throttle, and `status --details` of a queued job, on Marlowe.
+- `shk` inside a Marlowe job, which this release does not support.
 - A GPU job: what a job sees with `--gpus` (`CUDA_VISIBLE_DEVICES`, CUDA MPS).
-- An agent session on a login node.
+- An agent session on a login node: `shk` ran there, but not inside an agent
+  session on that node.
 - The source of `PROJECT_ID`, `SCRATCH` and `PROJECTS` in non-login shells, the
   lua job-submit plugin, the sshd configuration and the transfer node.
