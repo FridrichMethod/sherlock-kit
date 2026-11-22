@@ -43,7 +43,8 @@ Marlowe:
 - A plain `submit` runs Slurm's test (`sbatch --test-only`) after the
   duplicate read and before staging, and returns the preflight reply
   unchanged when Slurm refuses: exit 3, nothing staged.
-- Every Marlowe preflight reply ends `estimate` with `note`: the start that
+- Every Marlowe preflight reply ends `estimate` with the provisional `note`
+  "not a wait prediction on Marlowe; see the Marlowe rules": the start that
   the test prints is no wait prediction there.
 - `data/partitions-marlowe.json` lists `preempt` alone (preemptible, requeue,
   GPUs). `unknown_partition` names the selected site's partitions, and the

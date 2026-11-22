@@ -349,10 +349,9 @@ otherwise. No job that `shk` submitted ran.
   false, and the line
   `sbatch: Job N to start at <time> a using 1 processors on nodes nNN in partition preempt`
   (Slurm 25.05.2 prints the word `a` after the time), parsed into `estimate`
-  with `status` `parsed` and `note` "not a wait prediction on Marlowe: the
-  observed start came much earlier; see the Marlowe rules". With
-  `--partition batch` it was exit 3 `unknown_partition` ("listed: preempt"),
-  offline.
+  with `status` `parsed` and a `note` saying that it is not a wait prediction
+  on Marlowe. With `--partition batch` it was exit 3 `unknown_partition`
+  ("listed: preempt"), offline.
 - A real `submit` with a `--constraint` that no node has, plus `--hold` and a
   token: exit 3 with the preflight reply (`"action": "preflight"`,
   `"ok": false`, `"job_submitted": false`, `preflight.stderr`

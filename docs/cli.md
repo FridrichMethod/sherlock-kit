@@ -428,8 +428,8 @@ too.
   `--preflight`.
 - Every Marlowe preflight reply, plain `--preflight` and the refusal of a
   submit alike, ends `estimate` with `note`: "not a wait prediction on
-  Marlowe: the observed start came much earlier; see the Marlowe rules". The
-  start that `sbatch --test-only` prints there is not a queue-wait prediction
+  Marlowe; see the Marlowe rules". The start that `sbatch --test-only` prints
+  there is not a queue-wait prediction
   ([observed](validation/observed-marlowe.md#test-only-estimates-and-real-starts)).
 - "Requested node configuration is not available" can also mean that no node
   is schedulable right now: read

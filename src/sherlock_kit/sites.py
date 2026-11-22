@@ -114,8 +114,7 @@ MARLOWE = Site(
         "cluster": "marlowe-cluster.md",
     }),
     skill="sherlock-kit-marlowe",
-    estimate_note="not a wait prediction on Marlowe: the observed start came much earlier; "
-    "see the Marlowe rules",
+    estimate_note="not a wait prediction on Marlowe; see the Marlowe rules",
 )
 SITES: dict[str, Site] = {SHERLOCK.name: SHERLOCK, MARLOWE.name: MARLOWE}
 

@@ -37,9 +37,7 @@ REFUSALS = (  # what Marlowe printed for a refused sbatch --test-only
     "sbatch: error: MaxGRESPerAccount\n" + POLICY,
     "allocation failure: Invalid account or account/partition combination specified\n",
 )
-NOTE = (
-    "not a wait prediction on Marlowe: the observed start came much earlier; see the Marlowe rules"
-)
+NOTE = "not a wait prediction on Marlowe; see the Marlowe rules"
 PREFLIGHT_KEYS = [
     "schema_version",
     "ok",
