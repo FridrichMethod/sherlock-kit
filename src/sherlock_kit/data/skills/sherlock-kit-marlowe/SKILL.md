@@ -107,7 +107,7 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 ## Never
 
 - Authenticate for the user, retry a login in a loop, or store passwords or Duo secrets.
-- Start or use a tunnel, VPN, relay or code server that reaches Marlowe without SUNet ID, password and Duo.
+- Start a tunnel, VPN, relay or code server that reaches Marlowe without SUNet ID, password and Duo, or run one on Marlowe.
 - Run raw `sbatch`, `scancel`, `squeue` loops or `scontrol update` when shk covers the task, or `scancel -u $USER`.
 - Release a job held after a requeue (`shk release` is only for holds that `submit --hold` set); report it and recover it with the user's consent by `shk --site marlowe cancel` and `shk --site marlowe submit --resubmit REASON`.
 - Resubmit after exit 5 or a failure without checking status and finding the cause.

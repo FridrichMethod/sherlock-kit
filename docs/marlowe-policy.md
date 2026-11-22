@@ -81,7 +81,8 @@ file, "C" the cluster file.
 | Run nothing that lets a person or a service reach Marlowe without SUNet ID, password and Duo; the examples (websocket tunnels and remote-control servers such as SSHX and Claude Remote Control/Server, userspace VPNs such as Tailscale and ZeroTier, editor web tunnels of VS Code, Cursor and Windsurf) | W, C | site | Usage Violations, "Do not provide access to Marlowe outside the authenticated login path" |
 | The user's own SSH forwarding through that login is fine; open no tunnel or forward yourself | W, C | site, toolkit | Usage Violations: "Ordinary SSH tunnels and port forwarding are fine, because they still require your password and Duo"; that the agent opens none itself is a toolkit rule |
 | Own code servers on login nodes are among them | W, C | site | FAQ, "What's the recommended way to use VSCode on a compute node?"; Open OnDemand, Code Server |
-| W: the open master passed that gate; never share it, credentials or this session, including through a remote-control relay | W | site | Usage Violations, the quoted provisions against enabling unauthorized access and sharing an authenticator, read with the restriction above: a relay of a session that holds the master lets a service reach Marlowe without the gate |
+| W: the user may drive the workstation session remotely, also through a remote-control relay, and it may then still use the open master | W | owner choice | The owner reads the restriction above as covering tools that run on Marlowe and access by other people. The documentation does not say where the tool runs and names Claude Remote Control among its examples, so a stricter reading would forbid a relay of a session that holds the master; the page sends questions about the policy to the Marlowe team, and asking is the user's step |
+| W: start no relay yourself; never share the master, credentials or this session with anyone else | W | site, toolkit | Usage Violations, the quoted provisions against enabling unauthorized access and sharing an authenticator; that the agent starts no relay itself is a toolkit rule |
 | C: never start a remote-control server for this session; never share credentials or this session | C | site | as above |
 | Login nodes are shared, for editing, compiling, submitting jobs and moving data, with short, light commands; sustained, server-like or CPU- or memory-heavy work runs on a compute node through Slurm | W, C | site | Usage Violations, "Do not degrade the shared nodes" (it names inference servers among its examples) |
 | Never authenticate, retry a login or store passwords or Duo secrets | W, C | toolkit | `shk` never logs in; the reason, that repeated failed logins can block the client address on the login nodes, is from Connecting |
@@ -254,3 +255,10 @@ Decisions of the toolkit's owner, labeled `Owner:` in the rules:
 3. Requeue is the default on `preempt`.
 4. Agent sessions on Marlowe login nodes are allowed, and environments may be
    built there.
+5. The user may drive a workstation session remotely, also through a
+   remote-control relay, and that session may still use the open master. The
+   owner reads the access-path restriction as covering tools that run on
+   Marlowe and access by other people; the documentation does not scope it by
+   where a tool runs, so this is the owner's reading and not a site statement.
+   Nothing changes on Marlowe itself: an agent there never starts a
+   remote-control server.
