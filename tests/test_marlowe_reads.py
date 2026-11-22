@@ -133,8 +133,8 @@ class MarloweDetails(OnMarlowe, DetailsFlow):
         self.assertEqual(details["accounting"][0]["allocated_tres"], GPU_TRES)
 
     def test_a_completed_job_by_id(self):
-        self.canned(accounting=[account("594052", "594052", "COMPLETED", NAME)])
-        code, report = self.details("--job-id", "594052")
+        self.canned(accounting=[account("594200", "594200", "COMPLETED", NAME)])
+        code, report = self.details("--job-id", "594200")
         self.assertEqual((code, report["site"]), (0, "marlowe"), report)
         current = report["names"][0]["current"]
         self.assertEqual(report["names"][0]["state"], "done")
