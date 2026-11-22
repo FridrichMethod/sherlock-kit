@@ -96,8 +96,8 @@ bundle = ["python", "-m", "demo.validate_bundle"]
 | Key | Default | Used by |
 |---|---|---|
 | `site` | `sherlock`; `sherlock` or `marlowe` | every command that reaches a cluster; see [Sites](#sites) |
-| `project` | none; `^[a-z0-9][a-z0-9-]{0,23}$` | `submit`, `status --task`, `cancel --task`; `status --all` lists only this project's names |
-| `remote_root` | none; absolute, no `..` | `submit` (default run directories, also for `status`), `push` (unless `--anywhere`) |
+| `project` | none; `^[a-z0-9][a-z0-9-]{0,23}$` | `submit`, `status --task`, `wait --task`, `cancel --task`; `status --all` and `wait --all` list only this project's names |
+| `remote_root` | none; absolute, no `..` | `submit` (default run directories, also for `status` and `wait`), `push` (unless `--anywhere`) |
 | `account` | none; Marlowe only, fully matching `marlowe-[a-z]+[0-9]+` | `submit` on Marlowe, required there (`--account=` in the argv) |
 | `control_host` | `sherlock-plain`; on Marlowe `marlowe-plain` | every remote call |
 | `data_host` | `sherlock-dtn`; on Marlowe `marlowe-plain` | `push`, `pull` |

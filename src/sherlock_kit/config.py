@@ -6,7 +6,7 @@ path) validates: bad values and unknown keys raise ShkError(1, "config_invalid")
 ProjectConfig is frozen and DEFAULTS is the no-config value; defaults(site) is that value for a
 packaged site (DEFAULTS is Sherlock's). Keys (no secrets):
   site         a packaged site name (sites.SITES); absent means "sherlock"
-  project      ^[a-z0-9][a-z0-9-]{0,23}$ (submit, status, cancel)
+  project      ^[a-z0-9][a-z0-9-]{0,23}$ (submit, status, wait, cancel)
   remote_root  absolute [A-Za-z0-9_./-]+ without "..", trailing "/" dropped (submit and its
                default run dirs, push unless --anywhere)
   account      only for a site with an account rule, which it must fullmatch ("" when not set)
