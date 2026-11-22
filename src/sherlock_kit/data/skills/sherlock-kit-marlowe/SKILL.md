@@ -31,7 +31,7 @@ account = "marlowe-m000000"                # the base project account
 - `account` is required on Marlowe, dry run included, and never guessed from `$PROJECT_ID`. It must be the base account `marlowe-<project id>`: suffixed accounts and `marlowe-users` are refused. shk passes it to `sbatch` as `--account`; an `#SBATCH` line that sets the account is refused (exit 3).
 - A distinct `project` gives the two clusters different job names, so a command aimed at the wrong cluster finds nothing instead of the other cluster's job.
 - From the repository root, where the Sherlock table is nearest, `shk --site marlowe ...` is exit 1 `site_mismatch`: add `--project-dir marlowe`. An older shk that reads this file exits 1 `config_invalid`.
-- The configuration may set `site`, `project`, `remote_root`, `account`, `control_host` and `data_host` (both default to `marlowe-plain`), the timeouts and `[tool.sherlock-kit.validators]`; never partitions, QOS or Slurm paths. Unknown keys are errors. Never put secrets there.
+- The configuration may set `site`, `project`, `remote_root`, `account`, `control_host` and `data_host` (both default to `marlowe-plain`; a Sherlock alias is refused), the timeouts, `cpu_thread_budget` and `[tool.sherlock-kit.validators]`; never partitions, QOS or Slurm paths. Unknown keys are errors. Never put secrets there.
 
 ## Workflow
 
@@ -61,14 +61,14 @@ shk --site marlowe pull /scratch/m000000/USER/demo/runs/NAME/out results/NAME --
 | 1 | configuration (missing `account`, `site_mismatch`, `config_invalid`), spec, verification, validator, malformed reply, failed remote read | fix the input; for `site_mismatch` pass `--project-dir` to the Marlowe configuration; for `malformed_read` follow its hint (one read retry after 60 s) |
 | 2 | usage error | read `shk <cmd> --help` |
 | 3 | refused, and nothing was submitted, staged, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, an unlisted partition, an `#SBATCH` directive shk owns, a request that Slurm's test refuses (plain submit or `--preflight`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, push or pull on Marlowe | read the message; change the request, not the guard |
-| 4 | SSH transport or master check unavailable | `auth_required`: ask the user to run the hint (`ssh marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Local permission denial: Setup check 3. Other `unavailable` or `timeout`: run `shk --site marlowe doctor`, retry once after about a minute, then stop and tell the user |
+| 4 | SSH transport or master check unavailable | `auth_required`: ask the user to run the hint (`ssh marlowe-plain`, for a push `ssh -fN marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Local permission denial: Setup check 3. Other `unavailable` or `timeout`: run `shk --site marlowe doctor`, retry once after about a minute, then stop and tell the user |
 | 5 | outcome unknown after a dispatched submit, cancel, release, requeue or update: `sbatch` ran without printing a strict job id, `scancel` or `scontrol` exited nonzero, an update's re-read did not confirm it, or the reply was lost; `detail` carries the evidence | run the command in the reply's `next`, not before the time it names (at least 60 s); never resubmit or repeat a mutation blind |
 | 6 | status ok, but the newest job of a name has an anomaly | stop and report it to the user |
 
 ## Replies
 
 - Every reply that names its `executor`, and the `doctor` reply, carries `"site": "marlowe"`. Such a reply without it came from Sherlock: stop and check the command.
-- Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}` without a `site` key. Hints that name an shk command carry the selector, such as `shk --site marlowe doctor`.
+- Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}` without a `site` key, except the errors of `status --details`, which keep the read's `executor` and `site`. Hints that name an shk command carry the selector, such as `shk --site marlowe doctor`.
 - The exit 5 `next` names one replayable status command that carries the selector (`shk --project-dir DIR --site marlowe --executor KIND status ...`) and the time before which it must not run. Run it as given, at that time or later.
 
 ## What Slurm refuses on Marlowe
@@ -97,7 +97,7 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 
 ## Data
 
-- `shk --site marlowe push LOCAL REMOTE` copies over the login-node master into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. REMOTE's parent must exist; check that push exits 0 before submitting a job that reads REMOTE, since a failed push can leave a truncated file. Push and pull are for small and medium trees; large data goes through Globus, outside shk.
+- `shk --site marlowe push LOCAL REMOTE` copies over the login-node master into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. REMOTE's parent must exist (otherwise exit 1 `transfer_failed`, rsync exit 11), so create `remote_root` once before the first push: push a directory that holds `inputs/` to `remote_root` itself, whose parent `/scratch/PROJECT/USER` exists, or run `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain mkdir -p /scratch/m000000/USER/demo`. Check that push exits 0 before submitting a job that reads REMOTE, since a failed push can leave a truncated file. Push and pull are for small and medium trees; large data goes through Globus, outside shk.
 - `shk --site marlowe pull REMOTE LOCAL [--validate NAME] [--replace]` needs `REMOTE/SHA256SUMS` and an existing parent of LOCAL, copies exactly the listed files into a private stage beside LOCAL, verifies every hash, runs the validator from `[tool.sherlock-kit.validators]` (the stage is its last argument, read-only), then renames the stage onto LOCAL and writes a receipt. `already_present` rests on that receipt; LOCAL is not verified again.
 - The job writes the manifest over its output directory DIR (for example `out/` under the run directory, never the run directory itself): `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`.
 - On Marlowe itself push and pull are refused (exit 3 `transfer_on_marlowe`): transfers start outside Marlowe.
