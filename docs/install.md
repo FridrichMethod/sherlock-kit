@@ -30,11 +30,14 @@ sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "
 
 ## Environments on Sherlock
 
-On Sherlock, create the project-pinned environment under `$GROUP_HOME`, inside a
-Slurm allocation (for example an `sh_dev` session), with Python 3.11 or newer.
-Fetch sources or build artifacts beforehand if compute nodes cannot reach their
-source. Do not create the environment on a login node or under scratch.
-For example, inside the allocation, using a release wheel fetched beforehand:
+On Sherlock, create the project-pinned environment under `$GROUP_HOME` (a
+small personal one may live in `$HOME`), never under scratch, with Python 3.11
+or newer. A small pure-Python environment such as the one that holds `shk` may
+be created on a login node: that is job preparation under site rule 1.
+Compiling and heavy installs run inside a Slurm allocation, for example an
+`sh_dev` session; fetch sources or build artifacts beforehand if compute nodes
+cannot reach their source. For example, using a release wheel fetched
+beforehand:
 
 ```sh
 python3 -m venv "$GROUP_HOME/demo/.venv-shk"

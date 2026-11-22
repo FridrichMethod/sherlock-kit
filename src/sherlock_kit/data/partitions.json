@@ -23,7 +23,7 @@
       "borrowed": false,
       "gpus_allowed": true,
       "batch": false,
-      "courtesy": "Interactive only (`sh_dev`, `salloc`): Sherlock rejects batch jobs here, so `shk submit` refuses it. Debugging and short tests, never production runs."
+      "courtesy": "Interactive only (`sh_dev`, `srun`): Sherlock rejects batch jobs, so `shk submit` refuses it. Quick tests and builds, never production runs."
     },
     "service": {
       "preemptible": false,

@@ -1,9 +1,9 @@
 ## Sherlock from this workstation
 
-Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are requirements. At session start and after compaction, run `shk doctor`, then read it and the task's topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md`) through the existing master: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md`. Never authenticate. Keep this in handoffs; memory is no substitute and reminders must not be filtered. Reviewed 2026-11-20 against the site files.
+Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are requirements. At session start and after compaction, run `shk doctor`, then read it and the task's topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md`) through the existing master: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md`. Never authenticate. Keep this in handoffs; memory is no substitute and reminders must not be filtered. Reviewed 2026-11-21 against the site files.
 
 ### Connection
-- Use `shk` or bounded noninteractive OpenSSH over the user's masters: `sherlock-plain` for light commands, `sherlock-dtn` for transfers. Heavy work belongs in jobs. `shk doctor` checks local sockets without dialing.
+- Use `shk` or bounded noninteractive OpenSSH over the user's masters: `sherlock-plain` for light commands/installs, `sherlock-dtn` for transfers. Heavy work belongs in jobs. `shk doctor` checks local sockets without dialing.
 - Exit 4 `auth_required`: ask the user to open `ssh sherlock-plain` (and `ssh -fN sherlock-dtn` for transfers), then retry once. No stored passwords/MFA, relays, reverse shells, unattended tunnels, shared credentials/sessions or SSH servers, even attended or in containers.
 - Exit 4 `unavailable` with a config hint: ask the user to fix missing `ControlMaster auto`, `ControlPersist yes` or `ControlPath ~/.ssh/%C`; logging in again will not help.
 - Sandbox startup failure or local socket permission denial is not a missing master: request per-command approval and retry once. Never disable the sandbox, grant HOME-wide writes or reopen a master for this. `submit --dry-run` needs no socket.
@@ -36,7 +36,7 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
 - `normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.
 - `bigmem`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public high-memory partition: only for jobs needing more memory than normal provides. Sherlock's own limits apply.
-- `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Interactive only (`sh_dev`, `salloc`): Sherlock rejects batch jobs here, so `shk submit` refuses it. Debugging and short tests, never production runs.
+- `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Interactive only (`sh_dev`, `srun`): Sherlock rejects batch jobs, so `shk submit` refuses it. Quick tests and builds, never production runs.
 - `service`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Sherlock's own limits apply.
 - `gpu`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public GPU partition: few GPUs, long queue, never preempted. Follow Sherlock's own per-user GPU limits.
 - `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.

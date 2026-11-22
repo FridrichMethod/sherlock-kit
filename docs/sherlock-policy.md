@@ -12,7 +12,7 @@ recommended practice.
 
 The rules follow Sherlock's agent instructions, `/etc/agents/AGENTS.md` and the
 four topic files beside it, as last modified on the dates below. Both rules
-files carry `Reviewed 2026-11-20`, the date of their last comparison with those
+files carry `Reviewed 2026-11-21`, the date of their last comparison with those
 files; `tests/test_release_metadata.py` pins that date.
 
 | File | Last modified | Topics |
@@ -60,6 +60,22 @@ How the rules files carry particular site rules:
   `--executor local` without a workstation dependency, and forbid agent or LLM
   rescheduling. Site limits, login-node restrictions, the 60 s cadence and
   access controls still bind.
+- Rule 1 sends sustained computation, significant CPU or memory use, GPUs,
+  intensive I/O and many processes to the scheduler and allows light editing,
+  inspection and job preparation on login nodes; `software.md` (recommended
+  practice) runs compiling and heavy package installs inside a job (`sh_dev`
+  for an interactive session, or `sbatch`), never on a login node. Login nodes
+  have no GPUs. The rules files therefore allow light installs on a login node
+  (the workstation file's "light commands/installs" over `sherlock-plain`, the
+  cluster file's login-node list) and send heavy work to jobs, the cluster
+  file naming compiling and heavy installs. The skill draws the boundary:
+  small installs and checks that end in seconds may run on a login node;
+  compiling, heavy installs and tests that need GPUs, many cores, much memory
+  or more than about a minute run in an allocation, quickest through the
+  interactive `dev` partition (`sh_dev`, or `srun --partition=dev` with an
+  explicit `--time`), not a batch job. The installation and campaign guides
+  apply it to environments, and the `dev` profile says the same: interactive
+  only, quick tests and builds, never production runs.
 - Rule 5 forbids any SSH server on any node, login or compute, under any name
   or port, bound to localhost, inside a job or a container, or attended; a tool
   that starts one is disabled or not used, and running one can lead to

@@ -1,6 +1,6 @@
 ## Sherlock: agent running on Sherlock
 
-At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant `storage.md`, `slurm.md`, `software.md`, `policy.md` beside it. They take precedence; only numbered rules are mandatory. Keep this in handoffs; memory is no substitute and reminders must not be filtered. Reviewed 2026-11-20 against the site files.
+At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant `storage.md`, `slurm.md`, `software.md`, `policy.md` beside it. They take precedence; only numbered rules are mandatory. Keep this in handoffs; memory is no substitute and reminders must not be filtered. Reviewed 2026-11-21 against the site files.
 
 ### Where you are
 - Run `hostname`/check `$SLURM_JOB_ID`: login names contain `-ln`, no job id. Use allocations fully; prefer agents there. Check limits with `scontrol show job $SLURM_JOB_ID`.
@@ -14,7 +14,7 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 - DTN/Globus transfers start outside; no ssh to DTN here.
 
 ### Login nodes and software
-- Light editing/reads/preparation/submitting/polling only; sustained CPU/memory, GPUs, intensive I/O or many processes need jobs. No model/web/API serving; listeners only for own interactive tools. No unattended processes, keep-alive/restart loops, continuous sync or processes outliving the session. No `claude agents`/`--bg` or restarting terminated supervisors; site cleanup is expected.
+- Light editing/reads/installs/preparation/submitting/polling only; sustained CPU/memory, GPUs, intensive I/O or many processes need jobs. No model/web/API serving; listeners only for own interactive tools. No unattended processes, keep-alive/restart loops, continuous sync or processes outliving the session. No `claude agents`/`--bg` or restarting terminated supervisors; site cleanup is expected.
 - Check `ml spider NAME`; prefer modules, group installs, own builds, then containers. Large/shared environments: GROUP_HOME. Scratch only by explicit request with purge/rebuild warning. No sudo/system installs/unreviewed install scripts. Compile/heavy installs in jobs; fetch sources beforehand if needed.
 - Use `#!/bin/bash -l`, `ml purge`, explicit modules/environment; record versions. Set `OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK` unless `--cpu-thread-budget` overrides it. No probing/changing system configuration/infrastructure or slow shell startup.
 
@@ -37,7 +37,7 @@ At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`. Borrowed partitions need `shk occupancy` first and `--courtesy-ack`; releasing a job held there counts as submitting it (same occupancy check, budget and time window).
 - `normal`: preemptible=no, requeue=no, borrowed=no, gpus=no.
 - `bigmem`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public high-memory partition: only for jobs needing more memory than normal provides. Sherlock's own limits apply.
-- `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Interactive only (`sh_dev`, `salloc`): Sherlock rejects batch jobs here, so `shk submit` refuses it. Debugging and short tests, never production runs.
+- `dev`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Interactive only (`sh_dev`, `srun`): Sherlock rejects batch jobs, so `shk submit` refuses it. Quick tests and builds, never production runs.
 - `service`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Sherlock's own limits apply.
 - `gpu`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public GPU partition: few GPUs, long queue, never preempted. Follow Sherlock's own per-user GPU limits.
 - `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.

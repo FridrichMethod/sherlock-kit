@@ -198,8 +198,10 @@ an adapter-specific failure need not block another model.
 Run ordinary CPU preparation and regression tests locally, in parallel where
 independent: input parsing, feature construction, manifest validation, recovery
 fault injection and static dependency checks. Stage frozen inputs, weights and
-sources before their jobs need them. Create Sherlock environments only inside
-an allocation under the permitted persistent location. Keep necessary allocation,
+sources before their jobs need them. Create Sherlock environments under the
+permitted persistent location: a small pure-Python environment may be created
+on a login node as job preparation, while compiling and heavy installs run
+inside an allocation, such as an `sh_dev` session. Keep necessary allocation,
 environment and provenance checks in each job, but do not put a general CPU test
 suite on every GPU job's startup path.
 

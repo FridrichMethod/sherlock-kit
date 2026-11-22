@@ -4,8 +4,9 @@
 
 Additions. Nothing else changes: the replies, frozen specs, `sbatch` argv
 and remote programs of the other commands are byte-identical to 0.8.0
-(`release` and `requeue` keep `control.sh`), and `shk --help` lists the new
-command.
+(`release` and `requeue` keep `control.sh`), except that the
+`batch_not_allowed` message for `dev` quotes the new `dev` courtesy text, and
+`shk --help` lists the new command.
 
 - `shk update --job-id N --expect-name NAME [--expect-token TOKEN]` changes
   one field group of one own job in place and keeps its job id, so its
@@ -49,14 +50,28 @@ Guidance:
   accepted owner GPU defaults all stay: GPU models are scientifically
   equivalent, snapshots do not guarantee starts, the `--prefer` tier is purely
   a compute-capability ordering, so it applies across projects, and requeue
-  restarts the script, not application state. Both rules files carry
-  `Reviewed 2026-11-20`; none of the five site files changed since the last
-  review.
-- The rules files and the skill changed, for request sizing and for
+  restarts the script, not application state. None of the five site files had
+  changed at the review of 2026-11-20.
+- Login nodes follow site rule 1 and the site's `software.md`: small installs
+  and checks that end in seconds may run on a login node; compiling, heavy
+  installs and tests that need GPUs, many cores, much memory or more than
+  about a minute run in an allocation, for quick ones the interactive `dev`
+  partition (`sh_dev`, or `srun --partition=dev` with an explicit `--time`),
+  not a batch job. The `dev` courtesy text in `partitions.json`, and so the
+  generated partition block of both rules files, reads "Interactive only
+  (`sh_dev`, `srun`): Sherlock rejects batch jobs, so `shk submit` refuses
+  it. Quick tests and builds, never production runs." `workstation.md` uses
+  `sherlock-plain` for light commands and installs, `cluster.md` adds installs
+  to the light work allowed on login nodes, and both carry
+  `Reviewed 2026-11-21`. The skill states the boundary, and the skill, the
+  installation guide and the campaign guide allow a small pure-Python
+  environment, such as the one that holds `shk`, to be created on a login
+  node, with compiling and heavy installs inside an allocation.
+- The rules files and the skill changed, for request sizing, for
   `shk update` (change a pending job with it, never with raw
-  `scontrol update`), so `shk install-skill --check` reports installed copies
-  as stale; run `shk install-skill` again, with the same `--rules`, to refresh
-  them.
+  `scontrol update`) and for the login-node guidance, so
+  `shk install-skill --check` reports installed copies as stale; run
+  `shk install-skill` again, with the same `--rules`, to refresh them.
 
 Documentation:
 
