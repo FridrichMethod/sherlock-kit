@@ -2,7 +2,8 @@
 
 `shk` is installed per project, from a pinned release, and reaches Sherlock
 through OpenSSH control masters that the user opens. This guide covers the
-install forms, environments on Sherlock and inside jobs, and the SSH setup. The
+install forms, environments on Sherlock and inside jobs, and the SSH setup;
+[Marlowe](#marlowe) covers the second packaged site. The
 [command reference](cli.md) describes what each command does once it runs.
 
 ## Install forms
@@ -97,6 +98,110 @@ anything.
 
 On Sherlock itself `shk` needs no master: the same programs run locally, as
 [Configuration](cli.md#configuration) describes.
+
+## Marlowe
+
+`shk` drives Stanford's Marlowe cluster with `--site marlowe`; the
+[command reference](cli.md#sites) lists what the site changes. It needs a
+release whose `shk --help` lists `--site`.
+
+### The `marlowe-plain` master
+
+Marlowe uses one alias for both hosts: commands and rsync both go through a
+login node, since Marlowe has no transfer node for rsync. A stanza in the style
+of the Sherlock ones, with your SUNet ID in place of `SUNETID`:
+
+```sshconfig
+Host marlowe-plain
+  HostName login-01.marlowe.stanford.edu
+  User SUNETID
+  ControlMaster auto
+  ControlPersist yes
+  ControlPath ~/.ssh/%C
+```
+
+Open it yourself (`ssh marlowe-plain`, with your password and Duo), then run
+`shk --site marlowe doctor`: one `ssh -O check` serves both hosts. Another
+alias works when the Marlowe configuration sets it as `control_host` and
+`data_host`, as long as it is not one of Sherlock's defaults.
+
+Marlowe's Connecting page recommends authenticating once and reusing that
+connection. Its advice: name one login node (`login-01`, `login-02` or
+`login-03` under `marlowe.stanford.edu`) rather than the round-robin
+`login.marlowe.stanford.edu`, because a reused connection stays on the node
+that the first one reached, and keep one name per node, since two names for
+one node make two connections and two logins; its example sets
+`ControlPersist 10m`, `ServerAliveInterval 60` and `ServerAliveCountMax 3`;
+on a shared or unattended machine, close the master with
+`ssh -O exit marlowe-plain` when done, or lower `ControlPersist`. Repeated
+failed logins can block the client address on the login nodes. `shk` works
+with any `ControlPersist`: it needs a running master and a usable
+`ControlPath`, and never opens a master itself.
+
+### A project on both clusters
+
+A project that uses both clusters keeps its Sherlock table where it is and
+adds a Marlowe configuration in its own directory:
+
+```toml
+# <repo>/marlowe/sherlock-kit.toml
+site = "marlowe"
+project = "demo-mw"                        # distinct from the Sherlock value
+remote_root = "/scratch/m000000/USER/demo"
+account = "marlowe-m000000"
+```
+
+`m000000` stands for the project id and USER for the user name. `account` is
+the base project account, `marlowe-<project id>`; read it over the open
+master with
+`ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain 'echo marlowe-$PROJECT_ID'`.
+The distinct `project` gives the two clusters distinct job names.
+
+From `<repo>/marlowe` or below, `shk --site marlowe ...` finds that
+configuration. From the repository root, where the Sherlock table is the
+nearest, add `--project-dir marlowe`; without it the command is exit 1
+`site_mismatch`. A pinned release without site support exits 1
+`config_invalid` on every command that reads the Marlowe file. The Marlowe
+skill and rules install beside the Sherlock ones:
+
+```sh
+shk --site marlowe install-skill --project . --rules workstation
+```
+
+### Remote root on Marlowe
+
+`push` creates REMOTE but never its parent, so create `remote_root` once
+before the first push; a missing parent fails as `transfer_failed` (rsync
+exit 11), and Sherlock has the same rule. Either push a directory that holds `inputs/` to
+`remote_root` itself, whose parent `/scratch/PROJECT/USER` exists:
+
+```sh
+shk --site marlowe push staging/ /scratch/m000000/USER/demo
+```
+
+or create it over the open master:
+`ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain mkdir -p /scratch/m000000/USER/demo`.
+Marlowe's scratch is shared by the project, not backed up and "may be
+purged"; keep what must last in `/projects/PROJECT` or on the workstation.
+
+### `shk` on a Marlowe login node
+
+People and agent sessions may run `shk` on a Marlowe login node. The system
+`python3` there is 3.10, older than `shk` needs: create an environment with
+Python 3.11 or newer through the `uv` module (`module load uv`) or a
+micromamba or conda environment, and install the project's pinned release
+into it as in [install forms](#install-forms). Environments may be built on a
+Marlowe login node, an owner choice that the Marlowe cluster rules carry; put
+large ones under `/projects/PROJECT`, not in the small home directory.
+
+With a Marlowe configuration in reach, or with `--site marlowe`, `shk` picks
+the local executor by itself there, because Marlowe's Slurm configuration file
+exists on the machine: the programs run locally through the same prelude, and
+`doctor` reports `"executor": "local"` with no masters. `push` and `pull` are
+refused there (exit 3 `transfer_on_marlowe`): start transfers from the
+workstation, or copy with `cp` or `rsync` on Marlowe without `shk`. The rules
+for an agent session there are `shk --site marlowe rules cluster`. Do not call
+`shk` inside Marlowe jobs: this release exports no site into a job.
 
 ## Agents in a sandbox
 
