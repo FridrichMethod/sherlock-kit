@@ -653,7 +653,10 @@ before it would sleep less than 60 s, so consecutive reads are always at least
   listed name, an old one included, ends the wait at the first read.
 - Pending time before the wait started does not count toward
   `--max-pending`, and neither does pending time before the last read that
-  showed a running task.
+  showed a running task. The bound is checked only at a read, so `max_pending`
+  comes at the first read at or after it, up to one delay later: with
+  `--interval 5m`, `--max-pending 20m` ends at 35 minutes for a job that never
+  starts (reads at 0, 5, 15 and 35 minutes).
 - An error of a read (exit 1 `malformed_read` or a configuration error, exit 4
   `auth_required`, `unavailable` or `timeout`) ends the wait with that error
   reply and exit code, without a retry; the error reply has no `wait` object.

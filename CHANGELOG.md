@@ -33,10 +33,13 @@ Guidance:
   on `wait.outcome`, instead of checking by hand. Reads by hand are for when
   they are needed, at least 60 s apart and otherwise rare; `watch`, a loop of
   `shk status`, a detached wait and scheduling or re-prompting agents are
-  forbidden. The skills say what to do after each outcome. The rules files
-  and the skills changed, so `shk install-skill --check` reports installed
-  copies as stale; run `shk install-skill` again, with the same `--rules`, to
-  refresh them.
+  forbidden. The skills say what to do after each outcome. To stay within
+  the 7 KiB cap the rules files word other rules more briefly; the Sherlock
+  cluster file leaves the limits of `shk update`, which `shk` enforces, and
+  the Sherlock workstation file the note that `submit --dry-run` needs no
+  socket to the skill. The rules files and the skills changed, so
+  `shk install-skill --check` reports installed copies as stale; run
+  `shk install-skill` again, with the same `--rules`, to refresh them.
 
 Documentation:
 

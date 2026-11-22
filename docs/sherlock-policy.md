@@ -178,6 +178,12 @@ stated elsewhere:
   the `owners` profile requires scripts to checkpoint and resume instead;
 - in the cluster file, that `shk push` and `shk pull` refuse to run on
   Sherlock, which `shk` enforces (exit 3) and the skill states;
+- in the cluster file, the limits of `shk update` (one field group per call, a
+  time limit only decreased, a partition only within the job's requeue and
+  preemptible class and never a borrowed one), which `shk` enforces (exit 1
+  or 3) and the skill states;
+- in the workstation file, that `submit --dry-run` needs no socket, which the
+  skill's setup check and the [installation guide](install.md) state;
 - in the GPU scheduling defaults, the comparison of authorized partitions by
   queue, setup, compute and recovery time and the pointer to department and
   `owners` partitions, which the skill and the
