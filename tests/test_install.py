@@ -11,11 +11,11 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from fakes import SRC
+from fakes import SRC, marlowe_config
 
 sys.path.insert(0, str(SRC))
 import sherlock_kit
-from sherlock_kit import cli, install
+from sherlock_kit import cli, install, sites
 
 DATA = SRC / "sherlock_kit/data"
 SKILL = DATA / "skills/sherlock-kit/SKILL.md"
@@ -24,6 +24,16 @@ COPIES = {
     "codex": ".agents/skills/sherlock-kit/SKILL.md",
 }
 RULES_COPY = ".claude/rules/sherlock-kit.md"
+MARLOWE_SKILL = DATA / "skills/sherlock-kit-marlowe/SKILL.md"
+MARLOWE_COPIES = {
+    "claude": ".claude/skills/sherlock-kit-marlowe/SKILL.md",
+    "codex": ".agents/skills/sherlock-kit-marlowe/SKILL.md",
+}
+MARLOWE_RULES_COPY = ".claude/rules/sherlock-kit-marlowe.md"
+MARLOWE_RULES = {
+    "workstation": DATA / "rules/marlowe-workstation.md",
+    "cluster": DATA / "rules/marlowe-cluster.md",
+}
 MARKER = (
     f"<!-- installed by sherlock-kit {sherlock_kit.__version__} via shk install-skill; "
     "edits are overwritten -->\n"
@@ -49,15 +59,15 @@ class InstallCase(unittest.TestCase):
         home.start()
         self.addCleanup(home.stop)
 
-    def shk(self, *argv):
+    def shk(self, *argv, site=None):
         out = io.StringIO()
-        context = cli.Context(env={}, hostname="lab-ubuntu", cwd=self.tmp)
+        context = cli.Context(env={}, hostname="lab-ubuntu", cwd=self.tmp, site=site)
         with redirect_stdout(out), redirect_stderr(io.StringIO()):
             code = cli.main(list(argv), modules=[install], context=context)
         return code, json.loads(out.getvalue())
 
-    def skill(self, *extra):
-        return self.shk("install-skill", "--project", str(self.project), *extra)
+    def skill(self, *extra, site=None):
+        return self.shk("install-skill", "--project", str(self.project), *extra, site=site)
 
 
 class RulesTests(InstallCase):
@@ -215,6 +225,175 @@ class InstallSkillTests(InstallCase):
                 self.assertEqual((code, report["error"]), (1, "target_outside_project"))
                 self.assertIn(str(elsewhere), report["message"])
         self.assertEqual(list(elsewhere.iterdir()), [])
+
+
+class MarloweTests(InstallCase):
+    """--site marlowe: the Marlowe rules and skill under sherlock-kit-marlowe, beside Sherlock's."""
+
+    def module(self, *argv, cwd):
+        env = {**os.environ, "PYTHONPATH": str(SRC), "HOME": str(self.home)}
+        return subprocess.run(
+            [sys.executable, "-B", "-m", "sherlock_kit", *argv],
+            env=env,
+            cwd=cwd,
+            capture_output=True,
+            check=True,
+        )
+
+    def test_every_site_offers_the_rules_kinds(self):
+        for found in sites.SITES.values():
+            self.assertEqual(tuple(found.rules), install.KINDS)
+
+    def test_rules_and_install_skill_ignore_a_configuration_of_the_other_site(self):
+        sherlock_repo, marlowe_repo = self.tmp / "sherlock-repo", self.tmp / "marlowe-repo"
+        sherlock_repo.mkdir()
+        marlowe_repo.mkdir()
+        (sherlock_repo / "sherlock-kit.toml").write_text('project = "demo"\n')
+        marlowe_config(marlowe_repo)
+        for flag, cwd, rules, copies in (
+            (["--site", "marlowe"], sherlock_repo, MARLOWE_RULES, MARLOWE_COPIES),
+            ([], marlowe_repo, {k: DATA / f"rules/{k}.md" for k in install.KINDS}, COPIES),
+        ):
+            for kind, source in rules.items():
+                with self.subTest(cwd=cwd.name, kind=kind):
+                    done = self.module(*flag, "rules", kind, cwd=cwd)
+                    self.assertEqual((done.stdout, done.stderr), (source.read_bytes(), b""))
+            report = json.loads(
+                self.module(*flag, "install-skill", "--project", ".", cwd=cwd).stdout
+            )
+            self.assertEqual(report["files"], dict.fromkeys(copies.values(), "written"))
+        self.assertEqual(inventory(self.home), {})
+
+    def test_both_clients_get_a_marked_copy_of_the_marlowe_skill(self):
+        code, report = self.skill(site="marlowe")
+        self.assertEqual((code, report["ok"]), (0, True))
+        self.assertEqual(report["files"], dict.fromkeys(MARLOWE_COPIES.values(), "written"))
+        source = MARLOWE_SKILL.read_text(encoding="utf-8")
+        front, body = source.split("\n---\n", 1)
+        for rel in MARLOWE_COPIES.values():
+            text = (self.project / rel).read_text(encoding="utf-8")
+            self.assertTrue(text.startswith("---\nname: sherlock-kit-marlowe\n"))
+            self.assertEqual(text, f"{front}\n---\n{MARKER}{body}")
+        self.assertEqual(sorted(p.name for p in self.project.iterdir()), [".agents", ".claude"])
+        self.assertEqual(inventory(self.home), {})
+
+    def test_check_reports_missing_stale_and_current_marlowe_copies(self):
+        code, report = self.skill("--check", "--rules", "cluster", site="marlowe")
+        self.assertEqual(
+            (code, report["files"]),
+            (
+                1,
+                {
+                    **dict.fromkeys(MARLOWE_COPIES.values(), "missing"),
+                    MARLOWE_RULES_COPY: "missing",
+                },
+            ),
+        )
+        self.assertEqual(list(self.project.iterdir()), [])
+        self.skill("--rules", "cluster", site="marlowe")
+        self.assertEqual(self.skill("--check", "--rules", "cluster", site="marlowe")[0], 0)
+        self.assertEqual(self.skill("--check", "--rules", "workstation", site="marlowe")[0], 1)
+        self.assertEqual(self.skill("--check")[0], 1)  # Sherlock's copies are not there
+        stale = self.project / MARLOWE_COPIES["codex"]
+        stale.write_text(
+            stale.read_text(encoding="utf-8").replace(
+                MARKER, MARKER.replace(sherlock_kit.__version__, "0.3.9")
+            ),
+            encoding="utf-8",
+        )
+        snapshot = inventory(self.project)
+        code, report = self.skill("--check", site="marlowe")
+        self.assertEqual(
+            (code, report["files"]),
+            (1, {MARLOWE_COPIES["claude"]: "current", MARLOWE_COPIES["codex"]: "stale"}),
+        )
+        self.assertEqual(inventory(self.project), snapshot)
+        self.assertEqual(self.skill(site="marlowe")[1]["files"][MARLOWE_COPIES["codex"]], "written")
+        self.assertEqual(self.skill("--check", site="marlowe")[0], 0)
+
+    def test_marlowe_rules_copy_and_its_own_home_checks(self):
+        code, report = self.skill("--client", "claude", "--rules", "cluster", site="marlowe")
+        self.assertEqual((code, report["files"][MARLOWE_RULES_COPY]), (0, "written"))
+        self.assertEqual(
+            (self.project / MARLOWE_RULES_COPY).read_bytes(), MARLOWE_RULES["cluster"].read_bytes()
+        )
+        self.assertEqual(report["notices"], [])
+        (self.project / MARLOWE_RULES_COPY).unlink()
+        (self.home / ".claude/rules").mkdir(parents=True)
+        (self.home / ".claude/skills").mkdir()
+        (self.home / RULES_COPY).symlink_to(DATA / "rules/workstation.md")
+        (self.home / ".claude/skills/sherlock-kit").symlink_to(SKILL.parent)
+        code, report = self.skill("--client", "claude", "--rules", "cluster", site="marlowe")
+        self.assertEqual(
+            (code, report["files"][MARLOWE_RULES_COPY], report["notices"]), (0, "written", [])
+        )
+        (self.project / MARLOWE_RULES_COPY).unlink()
+        (self.home / MARLOWE_RULES_COPY).symlink_to(MARLOWE_RULES["workstation"])
+        (self.home / ".claude/skills/sherlock-kit-marlowe").symlink_to(MARLOWE_SKILL.parent)
+        before = inventory(self.home)
+        code, report = self.skill("--client", "claude", "--rules", "cluster", site="marlowe")
+        self.assertEqual(code, 0)
+        self.assertNotIn(MARLOWE_RULES_COPY, report["files"])
+        self.assertFalse((self.project / MARLOWE_RULES_COPY).exists())
+        self.assertEqual(
+            report["notices"],
+            [
+                "~/.claude/skills/sherlock-kit-marlowe exists: Claude Code uses that personal skill, "
+                "not this copy",
+                "~/.claude/rules/sherlock-kit-marlowe.md already loads in Claude Code: --rules skipped "
+                "(--force copies anyway)",
+            ],
+        )
+        code, report = self.skill(
+            "--client", "claude", "--rules", "cluster", "--force", site="marlowe"
+        )
+        self.assertEqual((code, report["files"][MARLOWE_RULES_COPY]), (0, "written"))
+        self.assertEqual(inventory(self.home), before)
+        (self.home / RULES_COPY).unlink()  # Marlowe's HOME copies do not skip Sherlock's
+        (self.home / ".claude/skills/sherlock-kit").unlink()
+        before = inventory(self.home)
+        code, report = self.skill("--client", "claude", "--rules", "cluster")
+        self.assertEqual((code, report["files"][RULES_COPY], report["notices"]), (0, "written", []))
+        self.assertEqual(inventory(self.home), before)
+
+    def test_codex_gets_a_hint_that_names_the_site(self):
+        code, report = self.skill("--client", "codex", "--rules", "cluster", site="marlowe")
+        self.assertEqual((code, list(report["files"])), (0, [MARLOWE_COPIES["codex"]]))
+        self.assertEqual(
+            report["notices"],
+            [
+                "Codex has no rules import: append the output of `shk --site marlowe rules cluster` "
+                "to the project's AGENTS.md if Codex should load it"
+            ],
+        )
+        self.assertFalse((self.project / ".claude").exists())
+
+    def test_both_sites_share_a_project_without_touching_each_other(self):
+        self.skill("--rules", "workstation")
+        sherlock = inventory(self.project)
+        stamps = {
+            rel: os.stat(self.project / rel).st_mtime_ns for rel in (*COPIES.values(), RULES_COPY)
+        }
+        code, report = self.skill("--rules", "workstation", site="marlowe")
+        self.assertEqual(
+            (code, report["files"]),
+            (
+                0,
+                {
+                    **dict.fromkeys(MARLOWE_COPIES.values(), "written"),
+                    MARLOWE_RULES_COPY: "written",
+                },
+            ),
+        )
+        both = inventory(self.project)
+        self.assertEqual({k: v for k, v in both.items() if k in sherlock}, sherlock)
+        self.assertEqual({rel: os.stat(self.project / rel).st_mtime_ns for rel in stamps}, stamps)
+        for site in (None, "marlowe"):
+            with self.subTest(site=site):
+                code, report = self.skill("--rules", "workstation", site=site)
+                self.assertEqual((code, set(report["files"].values())), (0, {"current"}))
+                self.assertEqual(self.skill("--check", "--rules", "workstation", site=site)[0], 0)
+        self.assertEqual(inventory(self.project), both)
 
 
 if __name__ == "__main__":

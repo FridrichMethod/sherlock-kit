@@ -1,14 +1,18 @@
-"""`shk rules` and `shk install-skill`: the packaged agent rules and skill.
+"""`shk rules` and `shk install-skill`: the packaged agent rules and skill of a site.
 
-`shk rules KIND` prints a packaged rules file verbatim.
+Both commands take the site from --site alone (Context.flag_site, default Sherlock) and never
+read a configuration. SKILL below is the site's skill name: sherlock-kit on Sherlock,
+sherlock-kit-marlowe on Marlowe, so the copies of both sites live side by side in one project.
 
-`shk install-skill --project DIR` copies the packaged skill to
-DIR/.claude/skills/sherlock-kit/ (Claude Code) and DIR/.agents/skills/sherlock-kit/
-(Codex), with a marker line after the front matter that names the shk version.
-`--rules KIND` also copies the rules to DIR/.claude/rules/sherlock-kit.md, unless
-~/.claude/rules/sherlock-kit.md already loads in Claude Code (`--force` copies
-anyway). This compatibility check does not require a global shk executable.
-Codex has no rules import, so it gets a hint instead of a file.
+`shk rules KIND` prints the site's packaged rules file of that kind verbatim.
+
+`shk install-skill --project DIR` copies the site's packaged skill to
+DIR/.claude/skills/SKILL/ (Claude Code) and DIR/.agents/skills/SKILL/ (Codex), with a
+marker line after the front matter that names the shk version. `--rules KIND` also
+copies the site's rules to DIR/.claude/rules/SKILL.md, unless ~/.claude/rules/SKILL.md
+already loads in Claude Code (`--force` copies anyway). This compatibility check does
+not require a global shk executable. Codex has no rules import, so it gets a hint
+instead of a file: append the output of the site's `shk rules KIND` command.
 
 Copies are idempotent. `--check` writes nothing and exits 1 when a copy is missing
 or stale. It never writes into HOME itself or through a link that leaves DIR.
@@ -22,20 +26,15 @@ from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from sherlock_kit import __version__
+from sherlock_kit import __version__, sites
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_OK, Outcome, ShkError
 
 if TYPE_CHECKING:
     from sherlock_kit.cli import Context
 
-KINDS = ("workstation", "cluster")
+KINDS = ("workstation", "cluster")  # the rules kinds of every site
 CLIENTS = ("claude", "codex")
-SKILL_COPIES = {
-    "claude": ".claude/skills/sherlock-kit/SKILL.md",
-    "codex": ".agents/skills/sherlock-kit/SKILL.md",
-}
-RULES_COPY = ".claude/rules/sherlock-kit.md"
-PERSONAL_SKILL = ".claude/skills/sherlock-kit"
+SKILL_DIRS = {"claude": ".claude/skills", "codex": ".agents/skills"}
 MARKER = f"<!-- installed by sherlock-kit {__version__} via shk install-skill; edits are overwritten -->\n"
 FRONT_MATTER_END = "\n---\n"
 
@@ -53,6 +52,11 @@ def packaged(*parts: str) -> str:
     return (resources.files("sherlock_kit") / "data").joinpath(*parts).read_text(encoding="utf-8")
 
 
+def rules_copy(site: sites.Site) -> str:
+    """The project-relative rules copy of the site, also the path under HOME that skips it."""
+    return f".claude/rules/{site.skill}.md"
+
+
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     """Add the rules and install-skill commands."""
     rules = subparsers.add_parser("rules", help="print the packaged Sherlock rules for agents")
@@ -62,53 +66,57 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     skill = subparsers.add_parser(
         "install-skill", help="copy the sherlock-kit skill (and rules) into a project"
     )
+    sherlock_rules = rules_copy(sites.SHERLOCK)
     skill.add_argument("--project", required=True, type=Path, metavar="DIR")
     skill.add_argument("--client", choices=(*CLIENTS, "all"), default="all")
-    skill.add_argument("--rules", choices=KINDS, help=f"also copy these rules to DIR/{RULES_COPY}")
+    skill.add_argument(
+        "--rules", choices=KINDS, help=f"also copy these rules to DIR/{sherlock_rules}"
+    )
     skill.add_argument(
         "--check", action="store_true", help="write nothing; exit 1 if a copy is missing or stale"
     )
     skill.add_argument(
-        "--force", action="store_true", help=f"copy --rules even when ~/{RULES_COPY} exists"
+        "--force", action="store_true", help=f"copy --rules even when ~/{sherlock_rules} exists"
     )
     skill.set_defaults(handler=install)
 
 
-def print_rules(args: argparse.Namespace, _ctx: Context) -> Outcome:
-    """`shk rules KIND`: the packaged rules file, verbatim."""
-    return Outcome.text(packaged("rules", f"{args.kind}.md"))
+def print_rules(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk rules KIND`: the site's packaged rules file, verbatim."""
+    return Outcome.text(packaged("rules", ctx.flag_site.rules[args.kind]))
 
 
-def marked_skill() -> str:
-    """The packaged SKILL.md with the marker right after its front matter, which must stay first."""
-    text = packaged("skills", "sherlock-kit", "SKILL.md")
+def marked_skill(site: sites.Site) -> str:
+    """The site's SKILL.md with the marker right after its front matter, which must stay first."""
+    text = packaged("skills", site.skill, "SKILL.md")
     end = text.index(FRONT_MATTER_END, 3) + len(FRONT_MATTER_END)
     return text[:end] + MARKER + text[end:]
 
 
-def wanted_files(args: argparse.Namespace, home: Path) -> Wanted:
-    """The copies and notices for these arguments, given the user's home directory."""
+def wanted_files(args: argparse.Namespace, home: Path, site: sites.Site) -> Wanted:
+    """The copies and notices for these arguments and site, given the user's home directory."""
     clients = CLIENTS if args.client == "all" else (args.client,)
     wanted = Wanted()
-    skill = marked_skill()
+    skill = marked_skill(site)
     for client in clients:
-        wanted.files[SKILL_COPIES[client]] = skill
-    if "claude" in clients and (home / PERSONAL_SKILL).exists():
+        wanted.files[f"{SKILL_DIRS[client]}/{site.skill}/SKILL.md"] = skill
+    personal = f"{SKILL_DIRS['claude']}/{site.skill}"
+    if "claude" in clients and (home / personal).exists():
         wanted.notices.append(
-            f"~/{PERSONAL_SKILL} exists: Claude Code uses that personal skill, not this copy"
+            f"~/{personal} exists: Claude Code uses that personal skill, not this copy"
         )
+    rules = rules_copy(site)
     if args.rules and "claude" in clients:
-        if (home / RULES_COPY).exists() and not args.force:
+        if (home / rules).exists() and not args.force:
             wanted.notices.append(
-                f"~/{RULES_COPY} already loads in Claude Code: --rules skipped "
-                "(--force copies anyway)"
+                f"~/{rules} already loads in Claude Code: --rules skipped (--force copies anyway)"
             )
         else:
-            wanted.files[RULES_COPY] = packaged("rules", f"{args.rules}.md")
+            wanted.files[rules] = packaged("rules", site.rules[args.rules])
     if args.rules and "codex" in clients:
         wanted.notices.append(
-            f"Codex has no rules import: append the output of `shk rules {args.rules}` to the "
-            "project's AGENTS.md if Codex should load it"
+            f"Codex has no rules import: append the output of `{sites.command(site)} rules "
+            f"{args.rules}` to the project's AGENTS.md if Codex should load it"
         )
     return wanted
 
@@ -137,8 +145,8 @@ def copy_state(path: Path, text: str) -> str:
     return "stale"
 
 
-def install(args: argparse.Namespace, _ctx: Context) -> Outcome:
-    """`shk install-skill`: write (or with --check only compare) the project copies."""
+def install(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk install-skill`: write (or with --check only compare) the site's project copies."""
     home = Path.home().resolve()
     project = args.project.expanduser().resolve()
     if not project.is_dir() or project == home:
@@ -147,7 +155,7 @@ def install(args: argparse.Namespace, _ctx: Context) -> Outcome:
             "project_invalid",
             f"--project {args.project}: not a directory or HOME itself",
         )
-    wanted = wanted_files(args, home)
+    wanted = wanted_files(args, home, ctx.flag_site)
     refuse_links_out_of(project, list(wanted.files))
     states = {rel: copy_state(project / rel, text) for rel, text in wanted.files.items()}
     if not args.check:
