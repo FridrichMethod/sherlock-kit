@@ -1,8 +1,10 @@
 """`shk wait`: repeat the status read of a selection until it needs the agent, or --timeout.
 
 Each read is the read `shk status` makes for the same --task/--name/--all selection
-(slurm.status_reader(): one query.sh run, one squeue and one sacct). After it wait decides, in
-this order:
+(slurm.status_reader(): one query.sh run, one squeue and one sacct). The wait takes its start and
+--timeout deadline from Context.clock, then sleeps 60 s through Context.sleep before its first
+read, so that read comes at least 60 s after the shk reply before it (a submit, a status read, an
+earlier wait). After each read it decides, in this order:
 
 - anomaly (exit 6): the read is exit 6; names holds the names whose current job has anomalies;
 - failed: a name is failed now that an earlier read of this wait saw live (an older failure, such
@@ -13,15 +15,18 @@ this order:
   running task resets the name;
 - timeout: less than 60 s are left before --timeout ends.
 
-Otherwise it sleeps through Context.sleep for the delay, or for what is left before the deadline
-when that is shorter, and reads again, so consecutive reads are at least 60 s apart (site rule
-10) and the last one can fall on the deadline. The first delay is --interval; after a read in
+Otherwise it sleeps for the delay, cut to what is left before the deadline and, with
+--max-pending, to what is left before the earliest idle name reaches that bound (but never under
+60 s), and reads again. Consecutive reads are therefore at least 60 s apart (site rule 10), the
+last one can fall on the deadline, and max_pending comes at the read on its bound, or 60 s after
+the read before it when the bound falls sooner. The first delay is --interval; after a read in
 which no listed name has a running task and every name kept its state, current job id and task
 counts, the delay doubles, up to max(30 min, --interval), and any other read resets it to
---interval. A ShkError of a read ends the wait with that error and exit code, without a retry.
-The reply, printed once at the end, is the last read's status reply unchanged plus "wait":
-{outcome, names, reads, started_at, timeout_at}. wait dispatches no mutation and writes nothing,
-here or remotely; what it remembers between reads lives only in this process.
+--interval; the cuts leave the delay itself unchanged. A ShkError of a read ends the wait with
+that error and exit code, without a retry. The reply, printed once at the end, is the last read's
+status reply unchanged plus "wait": {outcome, names, reads, started_at, timeout_at}. wait
+dispatches no mutation and writes nothing, here or remotely; what it remembers between reads
+lives only in this process.
 """
 
 from __future__ import annotations
@@ -142,6 +147,13 @@ class _Watch:
         self.observed = observed
         return self.delay
 
+    def until_pending(self, now: datetime) -> timedelta:
+        """The time left before the earliest idle name reaches --max-pending, but at least 60 s."""
+        if self.max_pending is None or not self.idle_since:
+            return timedelta.max
+        idle = now - min(self.idle_since.values())
+        return max(self.max_pending - idle, slurm.CADENCE)
+
 
 def wait(args: argparse.Namespace, ctx: Context) -> Outcome:
     """`shk wait`: read, decide and sleep until an outcome; the module docstring gives the order."""
@@ -154,6 +166,7 @@ def wait(args: argparse.Namespace, ctx: Context) -> Outcome:
     started = ctx.clock()
     deadline = started + timeout
     reads = 0
+    ctx.sleep(slurm.CADENCE.total_seconds())  # within --timeout, which is at least 1m
     while True:
         found = read()
         reads += 1
@@ -170,4 +183,5 @@ def wait(args: argparse.Namespace, ctx: Context) -> Outcome:
             }
             code = EXIT_ANOMALY if outcome == "anomaly" else EXIT_OK
             return Outcome({**found.payload, "wait": summary}, code)
-        ctx.sleep(min(watch.next_delay(found.payload["names"]), deadline - now).total_seconds())
+        delay = watch.next_delay(found.payload["names"])
+        ctx.sleep(min(delay, deadline - now, watch.until_pending(now)).total_seconds())

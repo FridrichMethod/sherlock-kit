@@ -482,10 +482,13 @@ current job id and task counts per name, and the current delay; nothing is
 written. The loop ends by itself, at the first of an anomaly (exit 6), a
 failure of a name it saw live, no live name, the optional `--max-pending`
 bound and the required `--timeout` of at most 168 hours. Its reads are at
-least 60 s apart by construction: the delay starts at `--interval` (5 minutes
-by default, at least 1 minute) and doubles, up to 30 minutes or the interval,
-while nothing runs and nothing changes, and the wait ends before a sleep
-shorter than 60 s. The decision order wakes the agent as soon as it is
+least 60 s apart by construction, and its first read comes at least 60 s
+after the reply before it: it sleeps 60 s before that read, the delay starts
+at `--interval` (5 minutes by default, at least 1 minute) and doubles, up to
+30 minutes or the interval, while nothing runs and nothing changes, a sleep
+cut short so that the next read falls on a `--max-pending` bound is still at
+least 60 s, and the wait ends before a sleep shorter than 60 s. The decision
+order wakes the agent as soon as it is
 needed: an anomaly first, then a failure, which ends the wait even while other
 names are still live, then the settled case and the two bounds. A read error
 ends the wait with that error and exit code, never retried, as for

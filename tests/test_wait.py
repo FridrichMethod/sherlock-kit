@@ -1,11 +1,12 @@
 """shk wait: the real query.sh against the fake Slurm, with a fake clock and a fake sleep.
 
-The fake sleep records each delay wait asks for, advances the clock by it and then applies the
-next scripted change to the fake Slurm state (or to the environment), so the next read sees what
-a real wait would see one delay later. Every run also checks what each wait guarantees: only
-squeue and sacct run (one of each per read, nothing reaches the tripwire, so no sbatch, scancel
-or scontrol), nothing is printed before the end and nothing on stderr, no file is written, and
-consecutive reads are at least 60 s apart.
+The fake sleep records each delay wait asks for, advances the clock by it and then, after every
+sleep but the first (the 60 s before the first read), applies the next scripted change to the
+fake Slurm state (or to the environment), so the next read sees what a real wait would see one
+delay later. Every run also checks what each wait guarantees: only squeue and sacct run (one of
+each per read, nothing reaches the tripwire, so no sbatch, scancel or scontrol), nothing is
+printed before the end and nothing on stderr, no file is written, the first read comes 60 s
+after the start and consecutive reads are at least 60 s apart.
 """
 
 import io
@@ -48,7 +49,7 @@ class WaitFlow(Flow):
         self.assertLess(len(self.sleeps), 50, "the wait does not end")  # fail instead of hanging
         self.sleeps.append(seconds)
         self.now += timedelta(seconds=seconds)
-        change = self.changes.pop(0) if self.changes else None
+        change = self.changes.pop(0) if self.changes and len(self.sleeps) > 1 else None
         if change is not None:
             change()
 
@@ -79,7 +80,7 @@ class WaitFlow(Flow):
         }
 
     def wait(self, *argv, changes=()):
-        """shk wait with one change applied per sleep, checked against what every wait keeps."""
+        """shk wait with one change applied per sleep between reads, checked as every wait is."""
         self.sleeps, self.changes = [], list(changes)
         before, hits, calls = self.files(), len(tripwire_hits()), len(self.slurm.calls())
         code, reply = self.shk("wait", *argv)
@@ -93,7 +94,7 @@ class WaitFlow(Flow):
         if "wait" in reply:
             reads = reply["wait"]["reads"]
             self.assertEqual(tools, ["squeue", "sacct"] * reads)
-            self.assertEqual(len(self.sleeps), reads - 1)
+            self.assertEqual((len(self.sleeps), self.sleeps[0]), (reads, 60))
             self.assertEqual(list(reply)[-1], "wait")
         return code, reply
 
@@ -127,7 +128,7 @@ class WaitOutcomes(WaitFlow):
             },
         )
         self.assertEqual([entry["state"] for entry in reply["names"]], ["done", "failed", "new"])
-        self.assertEqual(self.sleeps, [])
+        self.assertEqual((self.sleeps, reply["queried_at"]), ([60], iso(60)))
         self.assert_status_reply(code, reply, *selection)
 
     def test_it_settles_once_no_name_is_live(self):
@@ -136,10 +137,10 @@ class WaitOutcomes(WaitFlow):
         code, reply = self.wait("--task", "a", "--timeout", "2h", changes=changes)
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "settled", reads=3)
-        self.assertEqual(self.sleeps, [300, 300])
+        self.assertEqual(self.sleeps, [60, 300, 300])
         self.assertEqual(
             (reply["names"][0]["state"], reply["queried_at"], reply["executor"]),
-            ("done", iso(600), "local"),
+            ("done", iso(660), "local"),
         )
         self.assertEqual(
             (reply["wait"]["started_at"], reply["wait"]["timeout_at"]), (iso(0), iso(7200))
@@ -192,7 +193,47 @@ class WaitOutcomes(WaitFlow):
         )
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "max_pending", [self.name()], reads=4)
-        self.assertEqual(self.sleeps, [300, 600, 1200])  # 2100 s idle, the first read at least 20m
+        # Reads at 1, 6, 16 and 21 min: the backoff asks for 20 min after the third read, and the
+        # sleep is cut to 5 min, so the last read falls on the bound, 20 min after the first.
+        self.assertEqual(self.sleeps, [60, 300, 600, 300])
+        self.assertEqual(reply["queried_at"], iso(1260))
+
+    def test_max_pending_reads_on_its_bound_and_wins_over_timeout_there(self):
+        self.slurm.add(self.name(), "PENDING")
+        code, reply = self.wait(
+            "--task", "a", "--timeout", "30m", "--max-pending", "0:28:30", changes=[None] * 3
+        )
+        self.assertEqual(code, 0)
+        self.assert_outcome(reply, "max_pending", [self.name()], reads=4)
+        # Idle since the read at 60 s: the bound falls at 1770 s, 30 s before timeout_at.
+        self.assertEqual(self.sleeps, [60, 300, 600, 810])
+        self.assertEqual((reply["queried_at"], reply["wait"]["timeout_at"]), (iso(1770), iso(1800)))
+
+    def test_a_bound_under_60_s_away_is_read_60_s_later(self):
+        self.slurm.add(self.name(), "PENDING")
+        code, reply = self.wait(
+            "--task", "a", "--timeout", "1h", "--max-pending", "0:05:30", changes=[None] * 2
+        )
+        self.assertEqual(code, 0)
+        self.assert_outcome(reply, "max_pending", [self.name()], reads=3)
+        self.assertEqual(self.sleeps, [60, 300, 60])  # the bound falls 30 s after the second read
+
+    def test_a_running_array_task_keeps_max_pending_off_while_others_pend(self):
+        self.slurm.add(self.name(), "RUNNING", "PENDING")  # a throttled array
+        code, reply = self.wait(
+            "--task",
+            "a",
+            "--timeout",
+            "30m",
+            "--interval",
+            "10m",
+            "--max-pending",
+            "10m",
+            changes=[None] * 3,
+        )
+        self.assertEqual(code, 0)
+        self.assert_outcome(reply, "timeout", reads=4)
+        self.assertEqual(self.sleeps, [60, 600, 600, 540])
 
     def test_a_running_task_resets_max_pending(self):
         job = self.slurm.add(self.name(), "PENDING", partition="owners")  # requeue is expected
@@ -208,9 +249,10 @@ class WaitOutcomes(WaitFlow):
         )
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "max_pending", [self.name()], reads=5)
-        # Without the reset the read at 600 s would end it: idle since 0. Idle since 600 instead.
-        self.assertEqual(self.sleeps, [300, 300, 300, 600])
-        self.assertEqual(reply["queried_at"], iso(1500))
+        # Without the reset the read at 660 s would end it: idle since 60. Idle since 660 instead,
+        # so the last sleep is cut from the 600 s delay to the 300 s left before the bound.
+        self.assertEqual(self.sleeps, [60, 300, 300, 300, 300])
+        self.assertEqual(reply["queried_at"], iso(1260))
         self.assertEqual(reply["names"][0]["current"]["anomalies"], [])
 
     def test_timeout_reads_once_more_at_the_deadline(self):
@@ -218,23 +260,29 @@ class WaitOutcomes(WaitFlow):
         code, reply = self.wait("--task", "a", "--timeout", "12m", changes=[None, None])
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "timeout", reads=3)
-        self.assertEqual(self.sleeps, [300, 420])
+        self.assertEqual(self.sleeps, [60, 300, 360])
         self.assertEqual((reply["queried_at"], reply["wait"]["timeout_at"]), (iso(720), iso(720)))
         self.assertEqual(reply["names"][0]["state"], "live")
 
     def test_less_than_60_s_before_the_deadline_is_a_timeout_without_another_read(self):
         self.slurm.add(self.name(), "PENDING")
-        code, reply = self.wait("--task", "a", "--timeout", "0:05:30", changes=[None])
+        code, reply = self.wait("--task", "a", "--timeout", "0:06:30", changes=[None])
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "timeout", reads=2)
-        self.assertEqual(self.sleeps, [300])
-        self.assertEqual((reply["queried_at"], reply["wait"]["timeout_at"]), (iso(300), iso(330)))
+        self.assertEqual(self.sleeps, [60, 300])
+        self.assertEqual((reply["queried_at"], reply["wait"]["timeout_at"]), (iso(360), iso(390)))
 
 
 class WaitCadence(WaitFlow):
     def test_reads_are_at_least_60_s_apart(self):
         self.slurm.add(self.name(), "PENDING")
-        for timeout, sleeps in (("1m", [60]), ("0:02:30", [60, 90]), ("0:02:59", [60, 119])):
+        cases = (
+            ("1m", [60]),
+            ("0:02:59", [60, 60]),
+            ("0:03:30", [60, 60, 90]),
+            ("0:03:59", [60, 60, 119]),
+        )
+        for timeout, sleeps in cases:
             with self.subTest(timeout=timeout):
                 code, reply = self.wait(
                     "--task",
@@ -243,10 +291,10 @@ class WaitCadence(WaitFlow):
                     timeout,
                     "--interval",
                     "1m",
-                    changes=[None] * len(sleeps),
+                    changes=[None] * (len(sleeps) - 1),
                 )
                 self.assertEqual(code, 0)
-                self.assert_outcome(reply, "timeout", reads=len(sleeps) + 1)
+                self.assert_outcome(reply, "timeout", reads=len(sleeps))
                 self.assertEqual(self.sleeps, sleeps)
 
     def test_the_delay_doubles_to_30_min_and_a_running_task_resets_it(self):
@@ -259,7 +307,7 @@ class WaitCadence(WaitFlow):
         code, reply = self.wait("--task", "a", "--timeout", "4h", changes=changes)
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "settled", reads=8)
-        self.assertEqual(self.sleeps, [300, 600, 1200, 1800, 1800, 300, 300])
+        self.assertEqual(self.sleeps, [60, 300, 600, 1200, 1800, 1800, 300, 300])
 
     def test_a_change_without_a_running_task_resets_the_delay(self):
         job = self.slurm.add(self.name(), "PENDING", "PENDING")
@@ -272,7 +320,7 @@ class WaitCadence(WaitFlow):
         code, reply = self.wait("--task", "a", "--timeout", "4h", changes=changes)
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "settled", reads=5)
-        self.assertEqual(self.sleeps, [300, 600, 300, 600])
+        self.assertEqual(self.sleeps, [60, 300, 600, 300, 600])
 
     def test_an_interval_above_30_min_is_the_delay_and_its_cap(self):
         self.slurm.add(self.name(), "PENDING")
@@ -281,7 +329,27 @@ class WaitCadence(WaitFlow):
         )
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "timeout", reads=7)
-        self.assertEqual(self.sleeps, [2700] * 5 + [900])
+        self.assertEqual(self.sleeps, [60] + [2700] * 5 + [840])
+
+    def test_a_huge_interval_or_max_pending_acts_as_one_longer_than_the_wait(self):
+        self.slurm.add(self.name(), "PENDING")
+        argv = ("--interval", "99999999999999h", "--max-pending", "99999999999999:00:00")
+        code, reply = self.wait("--task", "a", "--timeout", "1h", *argv, changes=[None])
+        self.assertEqual(code, 0)
+        self.assert_outcome(reply, "timeout", reads=2)
+        self.assertEqual(self.sleeps, [60, 3540])
+
+    def test_a_wait_reads_first_60_s_after_it_starts(self):
+        """So a wait started right after a submit, or after another wait, reads 60 s after it."""
+        code, previous = self.submit(task="a")
+        self.assertEqual((code, previous["action"]), (0, "submitted"))
+        for _ in range(2):
+            code, reply = self.wait("--task", "a", "--timeout", "1m")
+            self.assertEqual(code, 0)
+            self.assert_outcome(reply, "timeout")
+            self.assertEqual(reply["wait"]["started_at"], previous["queried_at"])
+            self.assertEqual(reply["queried_at"], previous["next_check_after"])
+            previous = reply
 
 
 class WaitArguments(WaitFlow):
@@ -335,6 +403,7 @@ class WaitArguments(WaitFlow):
         )
         for argv, seconds in cases:
             with self.subTest(argv=argv):
+                self.now = NOW  # each wait sleeps 60 s before its read
                 code, reply = self.wait("--task", "a", *argv)
                 self.assertEqual(code, 0)
                 self.assert_outcome(reply, "settled")
@@ -384,7 +453,7 @@ class WaitErrors(WaitFlow):
         code, reply = self.wait("--task", "a", "--timeout", "1h", changes=[fail_squeue])
         self.assertEqual((code, reply["ok"], reply["error"]), (1, False, "malformed_read"))
         self.assertNotIn("wait", reply)
-        self.assertEqual(self.sleeps, [300])
+        self.assertEqual(self.sleeps, [60, 300])
         self.assertEqual(
             [call["tool"] for call in self.slurm.calls()], ["squeue", "sacct", "sacct"]
         )
@@ -415,7 +484,7 @@ class SshWait(WaitFlow):
         code, reply = self.wait("--task", "a", "--timeout", "1h", changes=changes)
         self.assertEqual((code, reply["error"]), (4, "unavailable"))
         self.assertNotIn("wait", reply)
-        self.assertEqual(self.sleeps, [300])
+        self.assertEqual(self.sleeps, [60, 300])
         self.assertEqual(self.dials(), ["sherlock-plain"] * 2)
 
 

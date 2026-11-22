@@ -18,12 +18,15 @@ lists the new command.
   `submit --time`; `--timeout` is required, from 1 minute to 168 hours,
   `--interval` defaults to 5 minutes and is at least 1 minute, and
   `--max-pending` is off by default and at least 1 minute when given; any
-  other value is exit 1 `spec_invalid`. The delay doubles after a read in
-  which nothing runs and nothing changed, up to 30 minutes or the interval,
-  and returns to the interval otherwise, so reads are always at least 60 s
-  apart. A read error ends the wait with that error and exit code, without a
-  retry. It is read-only, writes nothing, and works on Sherlock and Marlowe
-  with the ssh and the local executor.
+  other value is exit 1 `spec_invalid`. The first read comes 60 s after the
+  start, so a wait never reads within 60 s of the reply before it. The delay
+  doubles after a read in which nothing runs and nothing changed, up to 30
+  minutes or the interval, and returns to the interval otherwise; with
+  `--max-pending` a sleep is cut so that the next read falls on the earliest
+  name's bound, but never to less than 60 s. Reads are therefore always at
+  least 60 s apart. A read error ends the wait with that error and exit code,
+  without a retry. It is read-only, writes nothing, and works on Sherlock and
+  Marlowe with the ssh and the local executor.
 
 Guidance:
 

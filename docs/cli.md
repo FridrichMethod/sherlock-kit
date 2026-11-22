@@ -615,7 +615,9 @@ locally or remotely.
 ### Loop
 
 The wait takes its start time from the clock and sets `timeout_at` to the
-start plus `--timeout`. Then:
+start plus `--timeout`. It then sleeps 60 s, so that its first read comes at
+least 60 s after the `shk` reply before it (a submit, a status read, an
+earlier wait), and loops:
 
 1. It reads: exactly the read that `shk status` makes for the selection, one
    remote call with one `squeue` and one `sacct`.
@@ -631,13 +633,16 @@ start plus `--timeout`. Then:
       measured from that read; a read that shows a running task starts that
       name's count again;
    5. `timeout`: less than 60 s remain before `timeout_at`.
-3. Otherwise it sleeps for the current delay, or until `timeout_at` when that
-   comes sooner, and reads again.
+3. Otherwise it sleeps for the current delay, cut to what is left before
+   `timeout_at` and, with `--max-pending`, to what is left before the earliest
+   live name without a running task reaches that bound (but to no less than
+   60 s), and reads again.
 
 The delay starts at `--interval`. After a read in which no listed name has a
 running task and every name shows the state, current job id and task counts
 of the previous read, the delay doubles, up to 30 minutes or `--interval` when
-that is longer; after any other read it returns to `--interval`. With the
+that is longer; after any other read it returns to `--interval`. A sleep cut
+short by `timeout_at` or `--max-pending` leaves the delay as it is. With the
 default interval, reads of a job that pends unchanged are 5, 10, 20 and then 30
 minutes apart, and reads of a running job 5 minutes apart. The wait ends
 before it would sleep less than 60 s, so consecutive reads are always at least
@@ -646,17 +651,23 @@ before it would sleep less than 60 s, so consecutive reads are always at least
 - `settled` means only that no listed name is `live`. A name that is `done`,
   or already `failed` at the first read, is not live, and neither is a `new`
   or `stale` name, which has no Slurm rows: a wait on such names alone
-  settles at the first read. Start a wait once `submit` has returned the job
-  id, and read each name's `state` in the reply.
+  settles at the first read, 60 s after the start. Start a wait once `submit`
+  has returned the job id; it may start right after that reply, or after any
+  other, since its first read comes 60 s later. A job that has already failed
+  by the first read is not live there, so it settles rather than giving
+  `failed`: read each name's `state` in the reply.
 - With `--all` the names are those the read lists, so an old failed job never
   gives `failed`: only a job that the wait saw live does. An anomaly on any
   listed name, an old one included, ends the wait at the first read.
-- Pending time before the wait started does not count toward
+- Pending time before the wait's first read does not count toward
   `--max-pending`, and neither does pending time before the last read that
-  showed a running task. The bound is checked only at a read, so `max_pending`
-  comes at the first read at or after it, up to one delay later: with
-  `--interval 5m`, `--max-pending 20m` ends at 35 minutes for a job that never
-  starts (reads at 0, 5, 15 and 35 minutes).
+  showed a running task. The bound is checked at a read, and the wait cuts a
+  sleep so that its next read falls on the earliest bound, or 60 s after the
+  read before it when the bound falls sooner: with `--interval 5m`,
+  `--max-pending 20m` ends at 21 minutes for a job that never starts. The
+  reads come at 1, 6 and 16 minutes, the first of them starting the count;
+  the delay after the third read is 20 minutes, and the sleep is cut to 5, so
+  the fourth read, at 21 minutes, falls on the bound.
 - An error of a read (exit 1 `malformed_read` or a configuration error, exit 4
   `auth_required`, `unavailable` or `timeout`) ends the wait with that error
   reply and exit code, without a retry; the error reply has no `wait` object.
@@ -679,7 +690,8 @@ fields, `user`, `host`, `queried_at`, `next_check_after`, `names` and
 - `started_at` and `timeout_at` have the format of `queried_at`
   (`YYYY-MM-DDTHH:MM:SSZ`, UTC).
 - `next_check_after`, 60 s after the last read, is the earliest time for a
-  `status` read by hand.
+  `status` read by hand. A new wait may start at once: its first read comes
+  60 s after it starts.
 
 | Outcome | Ends the wait when | `wait.names` | Exit |
 |---|---|---|---|

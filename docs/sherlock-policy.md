@@ -250,10 +250,11 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Jobs on `owners` must checkpoint periodically (the site accepts checkpoint or
   requeue); live requeues gave no usable SIGTERM window
   (docs/validation/observed-slurm.md).
-- Status reads are rarer than the site's 60 s floor: `shk wait` reads every 5
-  minutes by default and backs off to 30 minutes while nothing runs or
-  changes, and reads by hand outside a wait are rare, ideally 10 minutes or
-  more apart. These are owner-approved defaults.
+- Status reads are rarer than the site's 60 s floor: `shk wait` makes its
+  first read 60 s after it starts, then reads every 5 minutes by default and
+  backs off to 30 minutes while nothing runs or changes, and reads by hand
+  outside a wait are rare, ideally 10 minutes or more apart. These are
+  owner-approved defaults.
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.
