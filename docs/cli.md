@@ -624,8 +624,9 @@ earlier wait), and loops:
 2. It decides, in this order; the first case that applies ends the wait:
    1. `anomaly`: the read is exit 6, an anomaly on the newest job of a listed
       name;
-   2. `failed`: a listed name is `failed` now and was `live` at an earlier
-      read of this wait;
+   2. `failed`: with `--task` or `--name`, a listed name is `failed` now, at
+      any read, the first one included; with `--all`, a name is `failed` now
+      and was `live` at an earlier read of this wait;
    3. `settled`: no listed name is `live`;
    4. `max_pending`, only with `--max-pending`: the current job of a live name
       has shown no running task (`current.tasks.running` 0) at every read
@@ -648,17 +649,21 @@ minutes apart, and reads of a running job 5 minutes apart. The wait ends
 before it would sleep less than 60 s, so consecutive reads are always at least
 60 s apart, and it ends no later than `--timeout` plus one read.
 
-- `settled` means only that no listed name is `live`. A name that is `done`,
-  or already `failed` at the first read, is not live, and neither is a `new`
-  or `stale` name, which has no Slurm rows: a wait on such names alone
-  settles at the first read, 60 s after the start. Start a wait once `submit`
-  has returned the job id; it may start right after that reply, or after any
-  other, since its first read comes 60 s later. A job that has already failed
-  by the first read is not live there, so it settles rather than giving
-  `failed`: read each name's `state` in the reply.
+- `settled` means only that no listed name is `live`. A name that is `done`
+  is not live, and neither is a `new` or `stale` name, which has no Slurm
+  rows: a wait on such names alone settles at the first read, 60 s after the
+  start. Start a wait once `submit` has returned the job id; it may start
+  right after that reply, or after any other, since its first read comes 60 s
+  later.
+- With `--task` or `--name`, a listed name whose current job is `failed`
+  gives `failed` at any read, so a job that failed before the wait started,
+  or in the 60 s before its first read, ends the wait at that read: list only
+  the names still waited for.
 - With `--all` the names are those the read lists, so an old failed job never
-  gives `failed`: only a job that the wait saw live does. An anomaly on any
-  listed name, an old one included, ends the wait at the first read.
+  gives `failed`: only a job that the wait saw live does, and a job that fails
+  before the first read does not (read each name's `state` in the reply). An
+  anomaly on any listed name, an old one included, ends the wait at the first
+  read.
 - Pending time before the wait's first read does not count toward
   `--max-pending`, and neither does pending time before the last read that
   showed a running task. The bound is checked at a read, and the wait cuts a
@@ -696,7 +701,7 @@ fields, `user`, `host`, `queried_at`, `next_check_after`, `names` and
 | Outcome | Ends the wait when | `wait.names` | Exit |
 |---|---|---|---|
 | `anomaly` | the read is exit 6 | the names whose current job has anomalies | 6 |
-| `failed` | a name that the wait saw `live` is `failed` | those names | 0 |
+| `failed` | a listed name is `failed` (with `--all`, one that the wait saw `live`) | those names | 0 |
 | `settled` | no listed name is `live` | `[]` | 0 |
 | `max_pending` | a live name has had no running task for `--max-pending` | those names | 0 |
 | `timeout` | less than 60 s remain before `timeout_at` | `[]` | 0 |
@@ -717,10 +722,12 @@ tool-call limit or ends the turn and checks when the user asks; it neither
 starts the wait with `&` nor polls its output. A wait that is killed loses its
 reply and nothing else. At most one wait runs at a time, over every name to
 watch (repeat `--task`, or `--all`); after a further submit the agent lets the
-running wait end, or stops it and starts one wait over all names. A wait
-belongs to the attended session that started it. It is never detached so that
-it outlives the session (`nohup`, `setsid`, `&`, a `tmux` or `screen` session
-left running, cron) and never used to prompt an agent again; see the rules.
+running wait end, or stops it and starts one wait over all names. A restarted
+wait with `--task` reports a name that failed in between at its first read;
+one with `--all` does not. A wait belongs to the attended session that started
+it. It is never detached so that it outlives the session (`nohup`, `setsid`,
+`&`, a `tmux` or `screen` session left running, cron) and never used to prompt
+an agent again; see the rules.
 Inside a Sherlock allocation a bounded deterministic controller may run
 `shk --executor local wait` ([controllers inside a job](#controllers-inside-a-job)).
 

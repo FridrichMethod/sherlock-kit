@@ -140,19 +140,19 @@ After every read the first matching outcome decides:
 | `wait.outcome` | Exit | Meaning | Do |
 |---|---|---|---|
 | `anomaly` | 6 | the current job of a name in `wait.names` has an anomaly | stop and report it to the user |
-| `failed` | 0 | a name that this wait saw `live` is now `failed`; the wait ends at the first failure, so other names may still be live | diagnose first (`shk status --task T --details` from the reply's `next_check_after` on, the Slurm logs in the run directory); resubmit with `--resubmit "reason"` only once a cause is found, then wait again for the rest |
-| `settled` | 0 | no selected name is `live` | check that every name is `done` (one that was already `done`, `failed` or `new` at the first read settles at once), then pull its outputs |
+| `failed` | 0 | a listed name is `failed`, at any read, the first included (with `--all`: one that this wait saw `live`); the wait ends at the first failure, so other names may still be live | diagnose first (`shk status --task T --details` from the reply's `next_check_after` on, the Slurm logs in the run directory); resubmit with `--resubmit "reason"` only once a cause is found, then wait again for the rest |
+| `settled` | 0 | no selected name is `live` | check that every name is `done` (a `new` name settles too, and with `--all` one that failed before the first read), then pull its outputs |
 | `max_pending` | 0 | with `--max-pending`, a live name's current job showed no running task at every read for at least that long | consider `shk resources --partition P --summary` and `shk update` (a compatible partition, constraint or prefer, a shorter walltime), or another wait |
 | `timeout` | 0 | none of the above before `--timeout` (the wait ends once less than 60 s of it remains) | run another wait, or end the turn and report the state |
 | (error) | 1, 4, ... | the read failed | act as the exit code table says |
 
-- With `--all`, a job that had already failed before the wait started does not give `failed`; only a job that the wait saw live does.
+- With `--task` or `--name`, a listed name that is already `failed` ends the wait at its first read: list only the names you still wait for. With `--all`, only a job that the wait saw live gives `failed`; an older failure, or one before the first read, does not.
 - A held job (`submit --hold`, or a requeue hold) stays `live`: without `--max-pending` the wait runs until its timeout.
 
 Run it from an agent so that it costs no turns and still ends by itself:
 
 - Run it as a background command that the harness itself tracks and whose exit it reports, and do nothing for it until then (Claude Code: Bash with `run_in_background`; do not read its output file while it runs). A shell `&` is not one: nothing reports its exit, and it can outlive the session. Where the harness reports no such exit (in Codex, for example, nothing wakes you when a background command ends), either run the wait in the foreground with a `--timeout` safely within the tool-call limit, leaving room for one read, or end the turn and check when the user asks; never start it with `&` and never poll its output.
-- Run at most one wait at a time, over every name to watch (repeat `--task`, or `--all`). After a further submit, let the running wait end, or stop it (it is read-only) and start one wait over all names. A restarted wait does not report `failed` for a name that failed before its first read, so check every name's state when it ends.
+- Run at most one wait at a time, over every name to watch (repeat `--task`, or `--all`). After a further submit, let the running wait end, or stop it (it is read-only) and start one wait over all names. Prefer repeated `--task` here: a restarted `--task` wait reports a name that failed in between at its first read, while an `--all` wait does not, so after one check every name's state.
 - Never detach a wait so that it outlives the session (`nohup`, a plain `&`, `setsid`, `disown`, a `tmux` or `screen` session left running, cron), never use it to restart or re-prompt an agent, and never schedule a later agent session. On a Sherlock login node run it only in the attended session; inside an allocation a bounded deterministic controller may run `shk --executor local wait`.
 - Between stages prefer `--after-ok` dependencies to waiting.
 

@@ -684,9 +684,10 @@ The pull contract is payload-only:
   from reading the same names more often; the skills ask for at most one wait
   at a time.
 - `wait` decides from its reads alone. A task that ran only between two reads
-  counts as never running for `--max-pending`; a name that failed before the
-  first read settles instead of giving `failed`; and a name that failed and was
-  resubmitted between two reads reads as live.
+  counts as never running for `--max-pending`; with `--all`, a name that failed
+  before the first read does not give `failed` (with `--task` or `--name` any
+  listed failed name does); and a name that failed and was resubmitted between
+  two reads reads as live.
 - A master can die between the check and the dial; `-oProxyCommand=false` makes
   that dial fail instead of logging in, at most once per command.
 - The remote side trusts `sh`, `sha256sum` and the Slurm clients (`squeue`,

@@ -3,7 +3,7 @@
 The fake sleep records each delay wait asks for, advances the clock by it and then, after every
 sleep but the first (the 60 s before the first read), applies the next scripted change to the
 fake Slurm state (or to the environment), so the next read sees what a real wait would see one
-delay later. Every run also checks what each wait guarantees: only squeue and sacct run (one of
+delay later; a test may also give one change for that first sleep. Every run also checks what each wait guarantees: only squeue and sacct run (one of
 each per read, nothing reaches the tripwire, so no sbatch, scancel or scontrol), nothing is
 printed before the end and nothing on stderr, no file is written, the first read comes 60 s
 after the start and consecutive reads are at least 60 s apart.
@@ -40,6 +40,7 @@ class WaitFlow(Flow):
         self.now = NOW
         self.sleeps = []
         self.changes = []
+        self.first = None
 
     def name(self, task="a"):
         return spec.job_name("demo", "default", task)
@@ -49,7 +50,10 @@ class WaitFlow(Flow):
         self.assertLess(len(self.sleeps), 50, "the wait does not end")  # fail instead of hanging
         self.sleeps.append(seconds)
         self.now += timedelta(seconds=seconds)
-        change = self.changes.pop(0) if self.changes and len(self.sleeps) > 1 else None
+        if len(self.sleeps) == 1:
+            change, self.first = self.first, None
+        else:
+            change = self.changes.pop(0) if self.changes else None
         if change is not None:
             change()
 
@@ -79,13 +83,13 @@ class WaitFlow(Flow):
             if path not in logs
         }
 
-    def wait(self, *argv, changes=()):
-        """shk wait with one change applied per sleep between reads, checked as every wait is."""
-        self.sleeps, self.changes = [], list(changes)
+    def wait(self, *argv, changes=(), first=None):
+        """shk wait with one change per sleep between reads (and first in the sleep before them)."""
+        self.sleeps, self.changes, self.first = [], list(changes), first
         before, hits, calls = self.files(), len(tripwire_hits()), len(self.slurm.calls())
         code, reply = self.shk("wait", *argv)
         self.assertEqual(self.err.getvalue(), "")
-        self.assertEqual(self.changes, [], "every scripted change must happen")
+        self.assertEqual((self.changes, self.first), ([], None), "every change must happen")
         self.assertEqual(self.files(), before)
         self.assertEqual(len(tripwire_hits()), hits)
         tools = [call["tool"] for call in self.slurm.calls()[calls:]]
@@ -111,10 +115,9 @@ class WaitFlow(Flow):
 
 
 class WaitOutcomes(WaitFlow):
-    def test_a_selection_without_a_live_name_settles_at_the_first_read(self):
+    def test_a_selection_without_a_live_or_failed_name_settles_at_the_first_read(self):
         self.slurm.add(self.name("done"), "COMPLETED")
-        self.slurm.add(self.name("old"), "FAILED")
-        selection = ("--task", "done", "--task", "old", "--task", "never")
+        selection = ("--task", "done", "--task", "never")
         code, reply = self.wait(*selection, "--timeout", "1h")
         self.assertEqual(code, 0)
         self.assertEqual(
@@ -127,7 +130,7 @@ class WaitOutcomes(WaitFlow):
                 "timeout_at": iso(3600),
             },
         )
-        self.assertEqual([entry["state"] for entry in reply["names"]], ["done", "failed", "new"])
+        self.assertEqual([entry["state"] for entry in reply["names"]], ["done", "new"])
         self.assertEqual((self.sleeps, reply["queried_at"]), ([60], iso(60)))
         self.assert_status_reply(code, reply, *selection)
 
@@ -156,6 +159,25 @@ class WaitOutcomes(WaitFlow):
         self.assertEqual(code, 0)
         self.assert_outcome(reply, "failed", [self.name("a")], reads=2)
         self.assertEqual([entry["state"] for entry in reply["names"]], ["failed", "live"])
+        self.assert_status_reply(code, reply, *selection)
+
+    def test_a_listed_name_failed_at_the_first_read_ends_the_wait_there(self):
+        self.slurm.add(self.name("old"), "FAILED")
+        self.slurm.add(self.name("b"), "RUNNING")
+        selection = ("--task", "old", "--task", "b")
+        code, reply = self.wait(*selection, "--timeout", "2h")
+        self.assertEqual(code, 0)
+        self.assert_outcome(reply, "failed", [self.name("old")])
+        self.assertEqual([entry["state"] for entry in reply["names"]], ["failed", "live"])
+        # A job that fails in the 60 s before the first read, while another name is live, too.
+        first = self.slurm.add(self.name("a"), "PENDING")
+        selection = ("--task", "a", "--task", "b")
+        code, reply = self.wait(
+            *selection, "--timeout", "2h", first=lambda: self.slurm.set(first, "FAILED")
+        )
+        self.assertEqual(code, 0)
+        self.assert_outcome(reply, "failed", [self.name("a")])
+        self.assertEqual(self.sleeps, [60])
         self.assert_status_reply(code, reply, *selection)
 
     def test_with_all_an_older_failure_never_counts_and_a_watched_one_does(self):

@@ -7,9 +7,11 @@ read, so that read comes at least 60 s after the shk reply before it (a submit, 
 earlier wait). After each read it decides, in this order:
 
 - anomaly (exit 6): the read is exit 6; names holds the names whose current job has anomalies;
-- failed: a name is failed now that an earlier read of this wait saw live (an older failure, such
-  as one --all finds, never counts);
-- settled: no listed name is live (a selection without a live name settles at the first read);
+- failed: with --task or --name, a listed name is failed now, at any read, the first included (so
+  a job that fails before the first read counts); with --all, a name is failed now that an earlier
+  read of this wait saw live (an older failure that --all finds never counts);
+- settled: no listed name is live (a selection without a live name, and with --task or --name
+  without a failed one, settles at the first read);
 - max_pending (with --max-pending): a live name whose current job had no running task at every
   read since the wait first read it so, for at least that long on Context.clock; a read with a
   running task resets the name;
@@ -92,6 +94,7 @@ class _Watch:
 
     interval: timedelta
     max_pending: timedelta | None
+    listed: bool  # --task or --name: every failed name counts; --all: only one seen live
     seen_live: set[str] = field(default_factory=set)
     idle_since: dict[str, datetime] = field(default_factory=dict)  # live without a running task
     observed: list[tuple[Any, ...]] | None = None  # what the backoff compares, per name
@@ -111,7 +114,7 @@ class _Watch:
         failed = [
             entry["name"]
             for entry in entries
-            if entry["state"] == "failed" and entry["name"] in self.seen_live
+            if entry["state"] == "failed" and (self.listed or entry["name"] in self.seen_live)
         ]
         live = [entry for entry in entries if entry["state"] == "live"]
         self.seen_live.update(entry["name"] for entry in live)
@@ -161,7 +164,7 @@ def wait(args: argparse.Namespace, ctx: Context) -> Outcome:
     interval = duration("--interval", args.interval, "at least 1m")
     pending = args.max_pending
     max_pending = None if pending is None else duration("--max-pending", pending, "at least 1m")
-    watch = _Watch(interval, max_pending)
+    watch = _Watch(interval, max_pending, listed=not args.all)
     read = slurm.status_reader(args, ctx)
     started = ctx.clock()
     deadline = started + timeout

@@ -11,8 +11,9 @@ lists the new command.
   no `--details`) and prints one reply at the end: the last read's status
   reply with a `wait` object of `outcome`, `names`, `reads`, `started_at` and
   `timeout_at`. It ends at the first of, in this order: an anomaly
-  (`anomaly`, exit 6), a name that is `failed` after the wait saw it `live`
-  (`failed`), no live name (`settled`), a live name whose current job has had
+  (`anomaly`, exit 6), a failed name (`failed`: with `--task` or `--name`
+  any listed name that is `failed`, with `--all` one that the wait saw
+  `live`), no live name (`settled`), a live name whose current job has had
   no running task for `--max-pending` (`max_pending`), and less than 60 s
   left before the timeout (`timeout`), each exit 0. DUR takes the forms of
   `submit --time`; `--timeout` is required, from 1 minute to 168 hours,
