@@ -71,17 +71,17 @@ Pin a release tag in the project that uses `shk` (Python 3.11 or newer; `main`
 can be ahead of the latest release):
 
 ```sh
-pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.8.0'
+pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.9.0'
 ```
 
 or, with uv:
 
 ```toml
 [tool.uv.sources]
-sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.8.0" }
+sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.9.0" }
 ```
 
-`shk --version` then prints `sherlock-kit 0.8.0 (git <commit>)`. Environments
+`shk --version` then prints `sherlock-kit 0.9.0 (git <commit>)`. Environments
 on Sherlock, use inside jobs, submodules and editable installs are covered in
 [Installation and connection](docs/install.md).
 

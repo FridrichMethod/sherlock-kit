@@ -1,12 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.9.0
 
 Additions. Nothing else changes: the replies, frozen specs, `sbatch` argv
 and remote programs of the other commands are byte-identical to 0.8.0
-(`release` and `requeue` keep `control.sh`), except that the
-`batch_not_allowed` message for `dev` quotes the new `dev` courtesy text, and
-`shk --help` lists the new command.
+(`release` and `requeue` keep `control.sh`) apart from the version text and
+the `batch_not_allowed` message for `dev`, which quotes the new `dev`
+courtesy text, and `shk --help` lists the new command.
 
 - `shk update --job-id N --expect-name NAME [--expect-token TOKEN]` changes
   one field group of one own job in place and keeps its job id, so its
