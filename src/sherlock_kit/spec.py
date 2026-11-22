@@ -13,6 +13,10 @@ shell variable). --partition P,P is a set of compatible partitions, passed to sb
 A given --constraint, --prefer or --signal goes to sbatch unchanged (Slurm checks it); an omitted
 one adds nothing to the argv. Each --after-ok value must be one job id, since shk joins them into
 its own --dependency string, where a ',' or '?' would add clauses.
+
+A site with an account rule (Marlowe) needs the configuration's account, which is never guessed:
+without it build() is exit 1 config_required, dry run included. Its argv names the account as
+--account directly after --partition; a Sherlock argv has no --account.
 """
 
 from __future__ import annotations
@@ -371,15 +375,23 @@ def resources(
 
 
 def sbatch_argv(
-    name: str, run: str, wanted: Resources, token: str | None = None, hold: bool = False
+    name: str,
+    run: str,
+    wanted: Resources,
+    token: str | None = None,
+    hold: bool = False,
+    account: str | None = None,
 ) -> list[str]:
     """Sbatch options in the fixed 0.4.0 order; submit.sh appends the staged script path.
 
     A submission token reaches the job as SHK_SUBMISSION_TOKEN and Slurm Comment; both it and
-    --hold come last, so the argv without them is the 0.4.0 one.
+    --hold come last, so the argv without them is the 0.4.0 one. An account (a site with an
+    account rule) follows --partition; without one the argv is that of a kit without sites.
     """
     log = f"{run}/slurm-{'%A_%a' if wanted.array else '%j'}"
     argv = ["sbatch", "--parsable", f"--job-name={name}", f"--partition={wanted.partition}"]
+    if account is not None:
+        argv.append(f"--account={account}")
     if wanted.array:
         throttle = f"%{wanted.array.throttle}" if wanted.array.throttle else ""
         argv.append(f"--array=0-{wanted.array.count - 1}{throttle}")
@@ -443,6 +455,27 @@ def git_state(root: Path | None) -> dict[str, Any] | None:
     }
 
 
+def account(config: ProjectConfig, site: sites.Site) -> str | None:
+    """The configured account of a site with an account rule, None for a site without one.
+
+    config parsing has checked a set account against the rule; a missing one is exit 1
+    config_required, with a hint that reads it over the open master instead of guessing it.
+    """
+    if site.account is None:
+        return None
+    if not config.account:
+        raise ShkError(
+            EXIT_LOCAL,
+            "config_required",
+            f"{config.path}: missing account: every {site.display} job names its project "
+            "account, and shk never guesses it",
+            hint=f"read it over the open master with ssh -oBatchMode=yes -oProxyCommand=false "
+            f"{config.control_host} 'echo {site.name}-$PROJECT_ID', then add "
+            f'account = "<that value>" to {config.path}',
+        )
+    return config.account
+
+
 def build(
     args: argparse.Namespace,
     config: ProjectConfig,
@@ -451,6 +484,7 @@ def build(
 ) -> Spec:
     """All offline checks of shk submit on site, then the sbatch argv and the frozen spec."""
     project = config.project
+    charged = account(config, site)
     campaign, task = checked_text("campaign", args.campaign), checked_text("task", args.task)
     name = job_name(project, campaign, task)
     profile, members = partition_request(args.partition, site)
@@ -473,7 +507,8 @@ def build(
         raise _invalid("--submission-token must be 1-128 public characters: A-Z a-z 0-9 _ . : -")
     if hold and token is None:
         raise _invalid("--hold needs --submission-token, which shk release checks")
-    argv, digest = sbatch_argv(name, run, wanted, token, hold), hashlib.sha256(script).hexdigest()
+    argv = sbatch_argv(name, run, wanted, token, hold, charged)
+    digest = hashlib.sha256(script).hexdigest()
     argv = cpu_threads.command(argv, thread_policy)
     document = {
         "schema": 1,
