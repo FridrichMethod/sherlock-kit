@@ -128,7 +128,10 @@ file (`/cm/shared/apps/slurm/var/etc/slurm/slurm.conf`) exists, that is on a
 Marlowe login or compute node, and `push` and `pull` are refused there (exit 3
 `transfer_on_marlowe`). That test chooses the executor for the selected site,
 never the site: on a Marlowe login node, a command without `--site marlowe`
-and without a Marlowe configuration is a Sherlock command.
+and without a Marlowe configuration is a Sherlock command. With
+`--executor local` or `SHK_EXECUTOR=local` such a command is exit 1
+`site_mismatch`, whose hint names `--site marlowe`: a forced local executor
+on a machine of another site would read that site's Slurm.
 
 ## Sites
 

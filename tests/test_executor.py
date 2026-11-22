@@ -561,6 +561,44 @@ class MarloweDetectionTests(unittest.TestCase):
             local, _ = self.detect(config.defaults(sites.site("marlowe")), "local")
             self.assertEqual((local.kind, local.site.name), ("local", "marlowe"))
 
+    def test_a_forced_local_executor_on_another_sites_machine_is_a_mismatch(self):
+        marlowe = config.defaults(sites.site("marlowe"))
+        with marlowe_site(on_cluster=True):
+            for settings in (None, config.DEFAULTS):
+                for override, env in (("local", {}), (None, {"SHK_EXECUTOR": "local"})):
+                    for data in (False, True):
+                        with (
+                            self.subTest(settings=settings, override=override, data=data),
+                            self.assertRaises(ShkError) as caught,
+                        ):
+                            executor.detect(settings, override, env, "login-01", data=data)
+                        error = caught.exception
+                        self.assertEqual((error.code, error.token), (1, "site_mismatch"))
+                        self.assertEqual(
+                            error.message,
+                            "this machine belongs to Marlowe, but the site is Sherlock: "
+                            "--executor local (or SHK_EXECUTOR=local) would treat Marlowe's "
+                            "Slurm as Sherlock's",
+                        )
+                        self.assertEqual(
+                            error.hint,
+                            "pass --site marlowe, or --project-dir DIR where DIR holds the "
+                            "Marlowe configuration",
+                        )
+            control, data = self.detect(marlowe, "local")
+            self.assertEqual((control.kind, data.kind), ("local", "local"))
+            self.assertEqual((control.site.name, data.site.name), ("marlowe", "marlowe"))
+        with marlowe_site(on_cluster=False):
+            for hostname in ("lab-ubuntu", "sh02-ln04"):  # a workstation, a Sherlock login node
+                control, data = self.detect(None, "local", hostname=hostname)
+                self.assertEqual((control.kind, data.kind), ("local", "local"))
+                self.assertEqual((control.site, data.site), (sites.SHERLOCK, sites.SHERLOCK))
+            with self.assertRaises(ShkError) as caught:
+                executor.detect(marlowe, "local", {}, "sh02-ln04")
+            self.assertEqual(caught.exception.token, "site_mismatch")
+            self.assertTrue(caught.exception.message.startswith("this machine belongs to Sherlock"))
+            self.assertTrue(caught.exception.hint.startswith("pass --site sherlock, "))
+
 
 if __name__ == "__main__":
     unittest.main()

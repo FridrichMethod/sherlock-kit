@@ -197,7 +197,11 @@ names (`login-0N`, `nNN`, the `cm.cluster` domain) and its Slurm ClusterName
 (`slurm`) are vendor defaults that do not identify it, so its test is whether
 its Slurm configuration file exists on the machine. On a Marlowe login node a
 Marlowe command (by `--site` or by configuration) runs locally by itself,
-while a command with neither stays a Sherlock command. Where the test holds,
+while a command with neither stays a Sherlock command. A forced local
+executor (`--executor local`, `SHK_EXECUTOR=local`) where the selected site's
+test fails and another site's holds is exit 1 `site_mismatch`, whose hint
+names `--site` of that site: the Slurm of this machine would otherwise answer
+for the selected site. Where the test holds,
 the data executor is local and refuses push and pull; on Marlowe that is
 `transfer_on_marlowe`, a toolkit choice: transfers start outside Marlowe.
 

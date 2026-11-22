@@ -22,7 +22,9 @@ detect() picks the executor for the site of the configuration (Sherlock without 
 --executor or SHK_EXECUTOR; else local where the site's on_cluster(hostname, env) holds; else
 ssh to the control host (or with data=True the data host). On the cluster the data executor is
 always local, and its rsync_args() refuses: transfers start outside the cluster, and on
-Sherlock never ssh to a DTN from Sherlock.
+Sherlock never ssh to a DTN from Sherlock. A forced local executor where the site's on_cluster
+fails and another packaged site's holds is ShkError(1, "site_mismatch"): this machine belongs
+to that other site, whose Slurm would answer for the selected one.
 """
 
 from __future__ import annotations
@@ -389,7 +391,20 @@ def detect(
             "executor_invalid",
             f"executor {choice!r} (--executor or SHK_EXECUTOR) must be auto, local or ssh",
         )
-    here = site.on_cluster(socket.gethostname() if hostname is None else hostname, env)
+    machine = socket.gethostname() if hostname is None else hostname
+    here = site.on_cluster(machine, env)
+    if choice == "local" and not here:
+        for other in sites.SITES.values():
+            if other.name != site.name and other.on_cluster(machine, env):
+                raise ShkError(
+                    EXIT_LOCAL,
+                    "site_mismatch",
+                    f"this machine belongs to {other.display}, but the site is {site.display}: "
+                    f"--executor local (or SHK_EXECUTOR=local) would treat {other.display}'s "
+                    f"Slurm as {site.display}'s",
+                    hint=f"pass --site {other.name}, or --project-dir DIR where DIR holds the "
+                    f"{other.display} configuration",
+                )
     if choice == "local" or (here and (data or choice == "auto")):  # transfers start outside
         return LocalExecutor(command_timeout=settings.command_timeout, site=site)
     return SshExecutor(

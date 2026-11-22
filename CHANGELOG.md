@@ -63,7 +63,9 @@ Marlowe:
   exit 3 `transfer_on_marlowe`.
 - The local executor is chosen where Marlowe's Slurm configuration file
   exists, on a Marlowe login or compute node; that test never selects the
-  site.
+  site. A forced local executor (`--executor local`, `SHK_EXECUTOR=local`)
+  where the selected site's test fails and another site's holds is exit 1
+  `site_mismatch`.
 - `shk --site marlowe rules workstation` and `shk --site marlowe rules cluster`
   print the new `data/rules/marlowe-workstation.md` and `marlowe-cluster.md`,
   and `shk --site marlowe install-skill` copies the new skill
