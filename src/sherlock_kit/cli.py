@@ -4,6 +4,12 @@ Each command module has register(subparsers), whose subcommands set_defaults(han
 fn(args, ctx) -> Outcome. stdout is the payload as JSON, or its "text" verbatim. A ShkError
 prints its payload with its exit code; any other exception prints a traceback on stderr and an
 internal_error payload (exit 1); usage errors stay argparse's exit 2.
+
+The site of a command that reaches a cluster (Context.site) is --site, else the site of the
+found configuration, else Sherlock; a --site that names another site than the found
+configuration (one without the key counts as Sherlock) is ShkError(1, "site_mismatch").
+Context.flag_site is --site alone (default Sherlock) and never reads a configuration. No
+environment variable selects a site.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from sherlock_kit import allocation, doctor, install, slurm, transfer, version_line
+from sherlock_kit import allocation, doctor, install, sites, slurm, transfer, version_line
 from sherlock_kit import config as project_config
 from sherlock_kit import executor as executors
 from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, Outcome, ShkError
@@ -41,14 +47,16 @@ class Context:
         *,
         project_dir: str | Path | None = None,
         executor: str = "auto",
+        site: str | None = None,
         env: Mapping[str, str] | None = None,
         hostname: str | None = None,
         clock: Callable[[], datetime] | None = None,
         cwd: str | Path | None = None,
     ) -> None:
-        """Keep the overrides; the configuration and the executors are resolved on first use."""
+        """Keep the overrides; the configuration, site and executors are resolved on first use."""
         self.project_dir = project_dir
         self.executor_override = executor
+        self.site_override = site  # --site, or None when it was not given
         self.env = os.environ if env is None else env
         self.hostname = socket.gethostname() if hostname is None else hostname
         self.clock = clock or _utc_now  # aware UTC now; tests inject a fixed clock
@@ -59,6 +67,32 @@ class Context:
     def config(self) -> project_config.ProjectConfig | None:
         """The project configuration (discovered once), or None when there is none."""
         return project_config.discover(self.project_dir, self.cwd)
+
+    @property
+    def flag_site(self) -> sites.Site:
+        """The site --site names, Sherlock without it; no configuration is read."""
+        return sites.site(self.site_override or sites.SHERLOCK.name)
+
+    @cached_property
+    def site(self) -> sites.Site:
+        """--site, else the configuration's site, else Sherlock; a differing --site is refused."""
+        found = self.config
+        if found is not None and self.site_override not in (None, found.site):
+            raise ShkError(
+                EXIT_LOCAL,
+                "site_mismatch",
+                f"--site {self.site_override} does not match {found.path}, a configuration of "
+                f"site {found.site}",
+                hint=f"pass --project-dir DIR, where DIR holds the configuration with "
+                f'site = "{self.site_override}", or drop --site to use {found.path}',
+            )
+        return sites.site(found.site) if found is not None else self.flag_site
+
+    @property
+    def settings(self) -> project_config.ProjectConfig:
+        """The configuration, or the defaults of the site when there is none; checks the site."""
+        site = self.site
+        return self.config or project_config.defaults(site)
 
     def require(self, *keys: str) -> project_config.ProjectConfig:
         """The configuration with every key set; else ShkError(1, "config_required")."""
@@ -78,16 +112,16 @@ class Context:
     def _executor(self, *, data: bool) -> executors.Executor:
         if data not in self._executors:
             self._executors[data] = executors.detect(
-                self.config, self.executor_override, self.env, self.hostname, data=data
+                self.settings, self.executor_override, self.env, self.hostname, data=data
             )
         return self._executors[data]
 
     def executor(self) -> executors.Executor:
-        """The control-host executor, detected once."""
+        """The control-host executor of the site, detected once."""
         return self._executor(data=False)
 
     def data_executor(self) -> executors.Executor:
-        """The data-host (DTN) executor, detected once; on Sherlock it refuses transfers."""
+        """The data-host executor of the site, detected once; on the cluster it refuses transfers."""
         return self._executor(data=True)
 
 
@@ -110,6 +144,12 @@ def build_parser(modules: Sequence[ModuleType] = MODULES) -> argparse.ArgumentPa
         choices=("auto", "ssh", "local"),
         default="auto",
         help="ssh from a workstation or local on Sherlock (default: detect; env SHK_EXECUTOR)",
+    )
+    parser.add_argument(
+        "--site",
+        choices=tuple(sites.SITES),
+        help="the cluster (default: the site of the configuration, else sherlock); it must "
+        "match the configuration's site",
     )
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
     for module in modules:
@@ -135,7 +175,7 @@ def _run(
         return version_line() + "\n", EXIT_OK
     if args.command is None:
         parser.error("a command is required")
-    ctx = context or Context(project_dir=args.project_dir, executor=args.executor)
+    ctx = context or Context(project_dir=args.project_dir, executor=args.executor, site=args.site)
     outcome: Outcome = args.handler(args, ctx)
     return _render(outcome.payload, outcome.code), outcome.code
 

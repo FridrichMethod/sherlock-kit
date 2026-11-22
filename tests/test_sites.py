@@ -2,18 +2,38 @@
 
 import dataclasses
 import json
+import os
+import secrets
+import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from fakes import SRC
+from fakes import SRC, TRIPWIRE
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import sites
+from sherlock_kit import executor, sites
 
 DATA = SRC / "sherlock_kit" / "data"
+PRELUDE = "PATH=$PATH:$1\nSLURM_CONF=$2\nexport PATH SLURM_CONF\nshift 2\n"
+# Arguments a shell would mangle if the prelude quoted, split, globbed or shifted them wrongly.
+ARGV = ["", "a b", "*", "$(id)", "'q'", 'd"q', "new\nline", "-x", "--", "\\"]
+
+
+class Recorder:
+    """An executor that records the argv it is asked to run."""
+
+    kind = "ssh"
+
+    def __init__(self, site):
+        self.site = site
+        self.argv = None
+
+    def run(self, argv, **options):
+        self.argv = argv
+        return executor.Result("complete")
 
 
 class RecordTests(unittest.TestCase):
@@ -129,6 +149,101 @@ class RecordTests(unittest.TestCase):
             },
         )
         self.assertNotRegex(preempt["courtesy"], r"[0-9]", "package data holds no numbers")
+
+
+class PreludeTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.tmp = Path(temporary.name).resolve()
+        self.bin = self.tmp / "site-bin"
+        self.bin.mkdir()
+        self.conf = self.tmp / "site.conf"
+        self.site = dataclasses.replace(
+            sites.MARLOWE, slurm=sites.SlurmEnvironment(bin=str(self.bin), conf=str(self.conf))
+        )
+
+    def tool(self, name, body):
+        path = self.bin / name
+        path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+        path.chmod(0o755)
+
+    def test_the_prelude_is_fixed_text(self):
+        text = executor.program_text("site-env")
+        self.assertEqual(
+            "".join(line + "\n" for line in text.splitlines() if not line.startswith("#")),
+            PRELUDE,
+        )
+
+    def test_argv_per_site(self):
+        sherlock, marlowe = Recorder(sites.SHERLOCK), Recorder(sites.MARLOWE)
+        self.assertEqual(executor.run_program(sherlock, "query", ["a", "b"]).site, sites.SHERLOCK)
+        self.assertEqual(
+            sherlock.argv, ["sh", "-c", executor.program_text("query"), "shk-query", "a", "b"]
+        )
+        self.assertEqual(executor.run_program(marlowe, "query", ["a", "b"]).site, sites.MARLOWE)
+        self.assertEqual(
+            marlowe.argv,
+            [
+                "sh",
+                "-c",
+                executor.program_text("site-env") + executor.program_text("query"),
+                "shk-query",
+                "/cm/shared/apps/slurm/current/bin",
+                "/cm/shared/apps/slurm/var/etc/slurm/slurm.conf",
+                "a",
+                "b",
+            ],
+        )
+
+    def shells(self):
+        """("sh", {}) and, with bash installed, bash as sh (Sherlock's sh) first on PATH."""
+        yield "sh", {}
+        bash = shutil.which("bash")
+        if bash:
+            shim = self.tmp / "bash-as-sh"
+            shim.mkdir(exist_ok=True)
+            if not (shim / "sh").exists():
+                (shim / "sh").symlink_to(bash)
+            yield "bash", {"PATH": f"{shim}{os.pathsep}{os.environ['PATH']}"}
+
+    def test_later_arguments_reach_a_real_program_unchanged(self):
+        # preflight.sh runs "$@" --test-only: a uniquely named stub that only the appended
+        # directory holds receives the arguments after BIN and CONF, and SLURM_CONF.
+        stub = f"shk-prelude-probe-{secrets.token_hex(4)}"
+        self.assertIsNone(shutil.which(stub))
+        self.tool(stub, 'printf "%s\\0" "$SLURM_CONF" "$@"')
+        for shell, env in self.shells():
+            with self.subTest(shell=shell), patch.dict(os.environ, env):
+                ex = executor.LocalExecutor(command_timeout=30, site=self.site)
+                result = executor.run_program(ex, "preflight", [stub, *ARGV], stdin=b"#!/bin/sh\n")
+                lines = executor.records(result.stdout)
+                self.assertEqual(lines[-2:], ["SHK_RC sbatch 0", "SHK_END"], result)
+                encoded = "".join(
+                    line.removeprefix("SHK_OUTHEX|")
+                    for line in lines
+                    if line.startswith("SHK_OUTHEX|")
+                )
+                words = bytes.fromhex(encoded).decode().split("\0")
+                self.assertEqual(words, [str(self.conf), *ARGV, "--test-only", ""])
+
+    def test_the_appended_directory_never_shadows_an_earlier_path_entry(self):
+        # The suite's tripwire is first on PATH; clients in the site directory come after it.
+        for name in ("sbatch", "squeue", "sacct"):
+            self.tool(name, f'echo "{name} $*" >>"{self.tmp}/calls"')
+        ex = executor.LocalExecutor(command_timeout=30, site=self.site)
+        lines = executor.records(executor.run_program(ex, "doctor").stdout)
+        tools = dict(line.split(" ")[1:3] for line in lines if line.startswith("SHK_TOOL "))
+        for name in ("sbatch", "squeue", "sacct"):
+            self.assertEqual(tools[name], str(TRIPWIRE / name))
+        self.assertFalse((self.tmp / "calls").exists())
+
+    def test_the_packaged_marlowe_environment_runs_where_its_paths_are_absent(self):
+        ex = executor.LocalExecutor(command_timeout=30, site=sites.MARLOWE)
+        result = executor.run_program(ex, "manifest", [str(self.tmp / "absent dir")])
+        self.assertEqual(
+            (result.status, result.stdout), ("complete", "SHK_ERROR no_directory\nSHK_END\n")
+        )
 
 
 if __name__ == "__main__":

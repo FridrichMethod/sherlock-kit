@@ -20,7 +20,7 @@ from unittest.mock import patch
 from fakes import SRC, install_fake_ssh
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import cli, executor, transfer
+from sherlock_kit import cli, executor, sites, transfer
 from sherlock_kit.errors import ShkError
 
 H, G = "ab" * 32, "cd" * 32
@@ -82,6 +82,7 @@ class StubControl:
     """A control executor whose manifest.sh reply is fixed text."""
 
     kind = "ssh"
+    site = sites.SHERLOCK
 
     def __init__(self, stdout: str):
         self.stdout = stdout

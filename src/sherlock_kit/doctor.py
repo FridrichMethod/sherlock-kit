@@ -1,9 +1,14 @@
 """`shk doctor [--remote]`: read-only checks; without --remote nothing is dialled.
 
-Python, ssh and rsync, the configuration, the executor and `ssh -O check` of both hosts; --remote
-adds data/remote/doctor.sh (uname -n, id -un, the Slurm tools, sha256sum, /etc/agents/AGENTS.md).
-Exit 0 healthy, 1 problem, 4 unreachable (also: no usable control master with the ssh executor; a
-missing data master is only a warning).
+Python, ssh and rsync, the configuration, the site, the executor and `ssh -O check` of both hosts
+(once where they are one host); --remote adds data/remote/doctor.sh (uname -n, id -un, the Slurm
+tools, sha256sum, /etc/agents/AGENTS.md), through the site's Slurm environment. The checks use the
+site of the command (cli.Context.site); with an invalid configuration, the defaults of the site
+--site names. A --site that differs from the configuration's site is a problem, checked no
+further. Only a site with an instructions file reports site_instructions and warns when it is not
+readable. A site other than Sherlock adds its "site" key after "executor". Exit 0 healthy,
+1 problem, 4 unreachable (also: no usable control master with the ssh executor; a missing data
+master is only a warning).
 """
 
 from __future__ import annotations
@@ -14,8 +19,8 @@ import shutil
 from typing import TYPE_CHECKING, Any
 
 from sherlock_kit import executor as executors
-from sherlock_kit import version_line
-from sherlock_kit.config import DEFAULTS, ProjectConfig
+from sherlock_kit import sites, version_line
+from sherlock_kit.config import ProjectConfig, defaults
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_OK, EXIT_UNREACHABLE, Outcome, ShkError
 
 if TYPE_CHECKING:
@@ -51,20 +56,35 @@ def _config(ctx: Context, problems: list[str]) -> tuple[ProjectConfig | None, di
     return found, {"status": "found", **report}
 
 
+def _site(
+    ctx: Context, found: ProjectConfig | None, problems: list[str]
+) -> tuple[sites.Site, bool]:
+    """(the site to check, whether it is checked); a site mismatch is a problem."""
+    if found is None:  # none, or invalid: the site --site names
+        return ctx.flag_site, True
+    try:
+        return ctx.site, True
+    except ShkError as exc:
+        problems.append(exc.message)
+        return ctx.flag_site, False
+
+
 def _masters(
-    found: ProjectConfig | None, problems: list[str], warnings: list[str]
+    settings: ProjectConfig, site: sites.Site, problems: list[str], warnings: list[str]
 ) -> dict[str, str]:
     """`ssh -O check` of both hosts: a control problem is fatal, a data problem a warning."""
-    settings = found or DEFAULTS
-    states = {}
+    states: dict[str, str] = {}
     for role, host, sink in (
         ("control", settings.control_host, problems),
         ("data", settings.data_host, warnings),
     ):
+        if role == "data" and host == settings.control_host:  # one host: one master, one check
+            states[role] = states["control"]
+            continue
         state, detail = executors.master_status(host)
         states[role] = state
         if state != "running":
-            hint = executors.master_hint(state, host, data=role == "data")
+            hint = executors.master_hint(state, host, data=role == "data", site=site)
             if state in {"none", "not_configured"}:
                 hint = f"ask the user to: {hint}"
             sink.append(f"no usable SSH master for {host} ({role}, {state}: {detail}); {hint}")
@@ -91,16 +111,19 @@ def _remote(ctx: Context, problems: list[str], warnings: list[str]) -> tuple[dic
     problems.extend(
         f"{tool} is not on the remote PATH" for tool, path in tools.items() if path is None
     )
-    if facts.get("SHK_SITE") != "readable":
-        warnings.append("/etc/agents/AGENTS.md is not readable where shk runs")
+    site = result.site
     report = {
         "status": "complete",
         "executor": ctx.executor().kind,
+        **sites.reply_fields(site),
         "host": facts.get("SHK_HOST"),
         "user": facts.get("SHK_USER"),
         "tools": tools,
-        "site_instructions": facts.get("SHK_SITE"),
     }
+    if site.instructions is not None:
+        if facts.get("SHK_SITE") != "readable":
+            warnings.append(f"{site.instructions} is not readable where shk runs")
+        report["site_instructions"] = facts.get("SHK_SITE")
     return report, EXIT_OK
 
 
@@ -109,6 +132,8 @@ def handle(args: argparse.Namespace, ctx: Context) -> Outcome:
     problems: list[str] = []
     warnings: list[str] = []
     found, config_report = _config(ctx, problems)
+    site, checked = _site(ctx, found, problems)
+    settings = found or defaults(site)
     report: dict[str, Any] = {
         "version": version_line(),
         "python": platform.python_version(),
@@ -116,15 +141,17 @@ def handle(args: argparse.Namespace, ctx: Context) -> Outcome:
         "tools": {tool: shutil.which(tool) for tool in ("ssh", "rsync")},
         "config": config_report,
         "executor": None,
+        **sites.reply_fields(site),
         "masters": {},
     }
-    try:
-        executor = executors.detect(found, ctx.executor_override, ctx.env, ctx.hostname)
-        report["executor"] = executor.kind
-    except ShkError as exc:
-        problems.append(exc.message)
+    if checked:
+        try:
+            executor = executors.detect(settings, ctx.executor_override, ctx.env, ctx.hostname)
+            report["executor"] = executor.kind
+        except ShkError as exc:
+            problems.append(exc.message)
     if report["executor"] == "ssh":  # a missing ssh shows up as the ssh_missing master state
-        report["masters"] = _masters(found, problems, warnings)
+        report["masters"] = _masters(settings, site, problems, warnings)
     code = EXIT_UNREACHABLE if report["masters"].get("control", "running") != "running" else EXIT_OK
     if args.remote and report["executor"]:
         report["remote"], remote_code = _remote(ctx, problems, warnings)

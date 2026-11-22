@@ -10,7 +10,8 @@ Any other invocation is a dial: the first non-option
 argument is the host and the rest, joined by spaces as real ssh does, is the
 remote command. $FAKE_SSH_MODE selects the dial behaviour:
 
-- ``exec`` (default): print the Sherlock login banner on stderr, then exec
+- ``exec`` (default): print the Sherlock login banner on stderr (unless
+  $FAKE_SSH_BANNER is ``none``, a host without it), then exec
   ``sh -c <remote command>`` with stdin passed through, so the real remote sh
   programs (and ``rsync --server``) run end to end on this machine.
 - ``echo``: print the remote command split back into argv, as JSON.
@@ -78,7 +79,8 @@ def dial(args):
     if mode == "hang":
         time.sleep(float(os.environ.get("FAKE_SSH_HANG", "30")))
         return 255
-    print(BANNER, file=sys.stderr, flush=True)
+    if os.environ.get("FAKE_SSH_BANNER") != "none":
+        print(BANNER, file=sys.stderr, flush=True)
     remote = " ".join(words)
     if mode == "echo":
         print(json.dumps(shlex.split(remote)))

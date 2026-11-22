@@ -10,10 +10,11 @@ from pathlib import Path
 from fakes import SRC
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import config
+from sherlock_kit import config, sites
 from sherlock_kit.errors import ShkError
 
 GOOD = 'project = "bioemu-ft"\nremote_root = "/scratch/users/u/bioemu-ft"\n'
+MARLOWE = 'site = "marlowe"\nproject = "demo-mw"\naccount = "marlowe-m000000"\n'
 
 
 class ConfigTests(unittest.TestCase):
@@ -110,6 +111,76 @@ class ConfigTests(unittest.TestCase):
                 self.invalid(text)
         ok = config.parse(tomllib.loads(f'project = "{"a" * 24}"\nremote_root = "/x/y/"'), None)
         self.assertEqual(ok.remote_root, "/x/y")
+
+    def test_site_and_its_host_defaults(self):
+        self.assertEqual((config.DEFAULTS.site, config.DEFAULTS.account), (sites.SHERLOCK.name, ""))
+        self.assertEqual(config.defaults(sites.SHERLOCK), config.DEFAULTS)
+        self.assertEqual(config.parse({"site": "sherlock"}, None), config.DEFAULTS)
+        found = config.parse(tomllib.loads(MARLOWE), None)
+        self.assertEqual(
+            (found.site, found.project, found.account, found.control_host, found.data_host),
+            ("marlowe", "demo-mw", "marlowe-m000000", "marlowe-plain", "marlowe-plain"),
+        )
+        defaults = config.defaults(sites.MARLOWE)
+        self.assertEqual(
+            (defaults.site, defaults.control_host, defaults.data_host, defaults.account),
+            ("marlowe", "marlowe-plain", "marlowe-plain", ""),
+        )
+        self.assertEqual(config.parse({"site": "marlowe"}, None), defaults)
+        # Control and data host must differ only where the site's own defaults differ.
+        same = config.parse({"site": "marlowe", "control_host": "mw", "data_host": "mw"}, None)
+        self.assertEqual((same.control_host, same.data_host), ("mw", "mw"))
+        self.invalid('control_host = "c"\ndata_host = "c"')
+
+    def test_site_values(self):
+        for text in ('site = "Marlowe"', 'site = "other"', "site = 1", 'site = ["marlowe"]'):
+            with self.subTest(text=text):
+                self.invalid(text)
+
+    def test_account_only_where_the_site_has_an_account_rule(self):
+        found = config.parse({"site": "marlowe", "account": "marlowe-abc12"}, None)
+        self.assertEqual(found.account, "marlowe-abc12")
+        self.assertEqual(config.parse({"site": "marlowe"}, None).account, "")  # submit's concern
+        for account in ('"marlowe-users"', '"marlowe-m000000-pm01"', '""', "5", '"m000000"'):
+            with self.subTest(account=account):
+                self.invalid(f'site = "marlowe"\naccount = {account}')
+        for text in ('account = "marlowe-m000000"', 'site = "sherlock"\naccount = "marlowe-m0"'):
+            with self.subTest(text=text), self.assertRaises(ShkError) as caught:
+                config.parse(tomllib.loads(text), Path("/p/sherlock-kit.toml"))
+            self.assertEqual(caught.exception.token, "config_invalid")
+            self.assertIn("takes no account", caught.exception.message)
+            self.assertIn("marlowe", caught.exception.hint)
+
+    def test_another_sites_default_alias_is_refused(self):
+        for text in (
+            'site = "marlowe"\ncontrol_host = "sherlock-plain"',
+            'site = "marlowe"\ndata_host = "sherlock-dtn"',
+            'site = "marlowe"\ncontrol_host = "sherlock-dtn"\ndata_host = "sherlock-plain"',
+            'control_host = "marlowe-plain"',
+            'data_host = "marlowe-plain"',
+            'site = "sherlock"\ncontrol_host = "marlowe-plain"\ndata_host = "x"',
+        ):
+            with self.subTest(text=text):
+                self.invalid(text)
+        with self.assertRaises(ShkError) as caught:
+            config.parse({"site": "marlowe", "control_host": "sherlock-plain"}, None)
+        self.assertIn("default host of Sherlock", caught.exception.message)
+        self.assertIn("remove control_host to use marlowe-plain", caught.exception.hint)
+        # A consumer's Sherlock table writes both of its own hosts explicitly.
+        own = {"control_host": "sherlock-plain", "data_host": "sherlock-dtn"}
+        self.assertEqual(config.parse(own, None), config.DEFAULTS)
+        other = config.parse({"site": "marlowe", "control_host": "mw-login"}, None)
+        self.assertEqual((other.control_host, other.data_host), ("mw-login", "marlowe-plain"))
+
+    def test_unknown_key_hint_lists_every_key(self):
+        with self.assertRaises(ShkError) as caught:
+            config.parse({"secret": "x"}, None)
+        self.assertEqual(
+            caught.exception.hint,
+            "allowed: account, command_timeout, connect_timeout, control_host, "
+            "cpu_thread_budget, data_host, project, remote_root, site, transfer_timeout, "
+            "validators",
+        )
 
     def test_unreadable_files(self):
         self.write("pyproject.toml", "[tool.sherlock-kit\n")

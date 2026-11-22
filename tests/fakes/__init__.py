@@ -20,13 +20,21 @@ Every test module imports this package, so both entry points (``tests/run_suite.
 runs ``fake_ssh.py`` with the test interpreter, and returns a ``FakeSsh``:
 ``.path`` (the wrapper), ``.bin`` (prepend to PATH), ``.env(**knobs)`` (PATH plus
 FAKE_SSH_RECORD plus knobs such as FAKE_SSH_MODE / FAKE_SSH_MASTER /
-FAKE_SSH_HANG, for ``unittest.mock.patch.dict(os.environ, ...)``) and
+FAKE_SSH_HANG / FAKE_SSH_BANNER, for ``unittest.mock.patch.dict(os.environ, ...)``) and
 ``.calls()`` (every recorded argv[1:], in order). ``SRC`` is the package source
 root for tests that import ``sherlock_kit`` without installing it; ``in_git()`` tells
 whether ``ROOT`` is the top of a git checkout.
+
+Marlowe: ``marlowe_config(directory, **keys)`` writes ``directory/sherlock-kit.toml`` for site
+marlowe with the synthetic project ``demo-mw`` and account ``MARLOWE_ACCOUNT`` (keys add or
+replace TOML values, given as TOML text); ``marlowe_site(on_cluster)`` patches the packaged
+Marlowe record so that its on-cluster predicate answers ``on_cluster`` instead of looking for
+Marlowe's Slurm configuration on this machine. Tests that let shk detect a Marlowe executor
+use it, so that they do not depend on the machine they run on.
 """
 
 import atexit
+import dataclasses
 import json
 import os
 import shlex
@@ -35,8 +43,10 @@ import signal
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "src"
@@ -73,6 +83,7 @@ SLURM_CLIENTS = (
     "strigger",
 )
 TRIPWIRE_RC = 97
+MARLOWE_ACCOUNT = "marlowe-m000000"
 
 
 def _scrub():
@@ -170,3 +181,21 @@ def install_fake_ssh(directory) -> FakeSsh:
     wrapper.write_text(f'#!/bin/sh\nexec {command} "$@"\n', encoding="utf-8")
     wrapper.chmod(0o755)
     return FakeSsh(bin_dir, Path(directory) / "ssh-calls.jsonl")
+
+
+def marlowe_config(directory, **keys) -> Path:
+    values = {"site": '"marlowe"', "project": '"demo-mw"', "account": f'"{MARLOWE_ACCOUNT}"'}
+    values.update(keys)
+    path = Path(directory) / "sherlock-kit.toml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(f"{key} = {value}\n" for key, value in values.items()))
+    return path
+
+
+@contextmanager
+def marlowe_site(on_cluster: bool = False):
+    from sherlock_kit import sites
+
+    record = dataclasses.replace(sites.MARLOWE, on_cluster=lambda _host, _env: on_cluster)
+    with patch.dict(sites.SITES, {record.name: record}):
+        yield record

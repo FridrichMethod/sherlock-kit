@@ -1,4 +1,4 @@
-r"""Run argv on Sherlock: OpenSSH from a workstation, or locally on Sherlock (frozen 0.4.0).
+r"""Run argv on a site: OpenSSH from a workstation, or locally on the cluster (frozen 0.4.0).
 
 Result.status is complete, failed (a read exited nonzero), unknown (a mutation exited nonzero
 or timed out after dispatch: never retry it blind), auth_required or unavailable (ssh exit 255
@@ -8,14 +8,21 @@ and a timeout or an interrupt kills the child's whole process group.
 
 Every ssh dial follows `ssh -O check -oBatchMode=yes HOST`, which only asks the local control
 socket: no master is ShkError(4, "auth_required") with the hint `ssh HOST` (`ssh -fN HOST` for
-the DTN), a client config without a usable ControlPath is ShkError(4, "unavailable") with a
-~/.ssh/config hint, and -oProxyCommand=false makes a master lost after the check fail instead
+the data host), a client config without a usable ControlPath is ShkError(4, "unavailable") with
+a ~/.ssh/config hint, and -oProxyCommand=false makes a master lost after the check fail instead
 of logging in. An ssh run sends ONE shlex-joined remote command.
 
-detect() picks the executor: --executor or SHK_EXECUTOR; else local on a login node
-(^sh\d+-ln\d+$), with SLURM_CLUSTER_NAME=sherlock or on an sh<N>- node inside a job; else ssh.
-The data executor on Sherlock is always local, and its rsync_args() refuses: never ssh to a DTN
-from Sherlock.
+Each executor knows its site (sites.Site, Sherlock by default). run_program() sends
+["sh", "-c", <program>, "shk-NAME", *args] for a site whose Slurm clients are on the login PATH
+(Sherlock), and ["sh", "-c", <site-env.sh> + <program>, "shk-NAME", BIN, CONF, *args] for a site
+with a Slurm client environment (Marlowe); the Result names the site, whose display name and
+selector check() puts in its messages and hints.
+
+detect() picks the executor for the site of the configuration (Sherlock without one):
+--executor or SHK_EXECUTOR; else local where the site's on_cluster(hostname, env) holds; else
+ssh to the control host (or with data=True the data host). On the cluster the data executor is
+always local, and its rsync_args() refuses: transfers start outside the cluster, and on
+Sherlock never ssh to a DTN from Sherlock.
 """
 
 from __future__ import annotations
@@ -29,7 +36,7 @@ import subprocess
 import sys
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from importlib import resources
 from typing import TypeAlias
 
@@ -76,6 +83,7 @@ class Result:
     stdout: str = ""
     stderr: str = ""
     returncode: int | None = None
+    site: sites.Site = sites.SHERLOCK  # where the program ran; run_program() sets it
 
 
 def _text(value: bytes | str | None) -> str:
@@ -176,7 +184,9 @@ def master_status(host: str, ssh: str = "ssh", timeout: float = 10) -> tuple[str
     return ("none" if NO_MASTER.search(detail) else "unavailable"), detail
 
 
-def master_hint(state: str, host: str, data: bool = False) -> str:
+def master_hint(
+    state: str, host: str, data: bool = False, site: sites.Site = sites.SHERLOCK
+) -> str:
     """What the user should do about a master state other than running."""
     login = f"ssh -fN {host}" if data else f"ssh {host}"
     if state == "none":
@@ -190,7 +200,10 @@ def master_hint(state: str, host: str, data: bool = False) -> str:
             "do not disable the sandbox or reopen the master solely for this error"
         )
     if state in {"timeout", "unavailable"}:
-        return "run shk doctor; inspect the local SSH check failure before requesting a new login"
+        return (
+            f"run {sites.command(site)} doctor; inspect the local SSH check failure before "
+            "requesting a new login"
+        )
     return (
         f"set ControlMaster auto, ControlPersist yes and ControlPath ~/.ssh/%C for {host} "
         f"in ~/.ssh/config, then run: {login}"
@@ -198,7 +211,7 @@ def master_hint(state: str, host: str, data: bool = False) -> str:
 
 
 class SshExecutor:
-    """Runs argv on a Sherlock host through the user's OpenSSH control master; never logs in."""
+    """Runs argv on a host of a site through the user's OpenSSH control master; never logs in."""
 
     kind = "ssh"
 
@@ -210,13 +223,15 @@ class SshExecutor:
         connect_timeout: int = 15,
         command_timeout: float = 60,
         ssh: str = "ssh",
+        site: sites.Site = sites.SHERLOCK,
     ) -> None:
-        """Use the OpenSSH alias host; data marks the DTN, whose login hint is ssh -fN."""
+        """Use the OpenSSH alias host; data marks the data host, whose login hint is ssh -fN."""
         self.host = host
         self.data = data
         self.connect_timeout = connect_timeout
         self.command_timeout = command_timeout
         self.ssh = ssh
+        self.site = site
 
     def preflight(self) -> None:
         """Raise ShkError 4 unless `ssh -O check` finds a running master; nothing is dialled."""
@@ -232,7 +247,7 @@ class SshExecutor:
                 "auth_required" if state == "none" else "unavailable",
                 f"no usable SSH master for {self.host} ({state}: {detail}); shk never logs in."
                 f"{instruction}",
-                hint=master_hint(state, self.host, self.data),
+                hint=master_hint(state, self.host, self.data, self.site),
             )
 
     def _prefix(self) -> list[str]:
@@ -259,13 +274,14 @@ class SshExecutor:
 
 
 class LocalExecutor:
-    """Runs argv directly on Sherlock (a login node or inside a job)."""
+    """Runs argv directly on the cluster of a site (a login node or inside a job)."""
 
     kind = "local"
 
-    def __init__(self, *, command_timeout: float = 60) -> None:
+    def __init__(self, *, command_timeout: float = 60, site: sites.Site = sites.SHERLOCK) -> None:
         """Use command_timeout seconds unless a run passes its own timeout."""
         self.command_timeout = command_timeout
+        self.site = site
 
     def run(
         self,
@@ -280,13 +296,22 @@ class LocalExecutor:
         return _execute(argv, stdin, mutation=mutation, timeout=timeout, transport=False)
 
     def rsync_args(self, remote_path: str) -> tuple[list[str], str]:
-        """Always refuses (exit 3): transfers start outside Sherlock."""
+        """Always refuses (exit 3): transfers start outside the cluster."""
+        if self.site.name == sites.SHERLOCK.name:
+            raise ShkError(
+                EXIT_REFUSED,
+                "transfer_on_sherlock",
+                f"push and pull of {remote_path} start from the workstation; never ssh to a DTN "
+                "from Sherlock",
+                hint="the data is already here; copy large trees in a Slurm job",
+            )
+        display = self.site.display
         raise ShkError(
             EXIT_REFUSED,
-            "transfer_on_sherlock",
-            f"push and pull of {remote_path} start from the workstation; never ssh to a DTN "
-            "from Sherlock",
-            hint="the data is already here; copy large trees in a Slurm job",
+            f"transfer_on_{self.site.name}",
+            f"push and pull of {remote_path}: shk transfers to and from {display} start outside "
+            f"{display} (a toolkit choice)",
+            hint=f"the data is already on {display}: copy it there with cp or rsync, without shk",
         )
 
 
@@ -309,22 +334,28 @@ def run_program(
     mutation: bool = False,
     timeout: float | None = None,
 ) -> Result:
-    """Run the packaged program as ["sh", "-c", <text>, "shk-<name>", *args]."""
-    argv = ["sh", "-c", program_text(name), f"shk-{name}", *args]
-    return ex.run(argv, stdin=stdin, mutation=mutation, timeout=timeout)
+    """Run the packaged program on the executor's site; the module docstring gives the argv."""
+    slurm = ex.site.slurm
+    if slurm is None:
+        argv = ["sh", "-c", program_text(name), f"shk-{name}", *args]
+    else:
+        text = program_text("site-env") + program_text(name)
+        argv = ["sh", "-c", text, f"shk-{name}", slurm.bin, slurm.conf, *args]
+    result = ex.run(argv, stdin=stdin, mutation=mutation, timeout=timeout)
+    return replace(result, site=ex.site)
 
 
 def check(result: Result, action: str) -> Result:
     """The result when complete; else ShkError 5 (unknown), 1 (failed) or 4 (unreachable)."""
-    tail = result.stderr.strip()[-2000:]
     if result.status == "complete":
         return result
+    tail, shk = result.stderr.strip()[-2000:], sites.command(result.site)
     if result.status == "unknown":
         raise ShkError(
             EXIT_UNKNOWN,
             "unknown_outcome",
             f"{action}: dispatched, outcome unknown. {tail}".strip(),
-            hint="wait at least 60 s, then run shk status; never resubmit blind",
+            hint=f"wait at least 60 s, then run {shk} status; never resubmit blind",
         )
     if result.status == "failed":
         raise ShkError(
@@ -333,8 +364,8 @@ def check(result: Result, action: str) -> Result:
     raise ShkError(
         EXIT_UNREACHABLE,
         result.status,
-        f"{action}: Sherlock unreachable. {tail}".strip(),
-        hint="run shk doctor",
+        f"{action}: {result.site.display} unreachable. {tail}".strip(),
+        hint=f"run {shk} doctor",
     )
 
 
@@ -349,6 +380,7 @@ def detect(
     """The executor for the control host (or with data=True the data host); see the module."""
     env = os.environ if env is None else env
     settings = config or DEFAULTS
+    site = sites.site(settings.site)
     choice = override if override not in (None, "auto") else env.get("SHK_EXECUTOR", "")
     choice = (choice or "").strip().lower() or "auto"
     if choice not in ("auto", "local", "ssh"):
@@ -357,13 +389,13 @@ def detect(
             "executor_invalid",
             f"executor {choice!r} (--executor or SHK_EXECUTOR) must be auto, local or ssh",
         )
-    hostname = socket.gethostname() if hostname is None else hostname
-    on_sherlock = sites.SHERLOCK.on_cluster(hostname, env)
-    if choice == "local" or (on_sherlock and (data or choice == "auto")):  # no DTN from Sherlock
-        return LocalExecutor(command_timeout=settings.command_timeout)
+    here = site.on_cluster(socket.gethostname() if hostname is None else hostname, env)
+    if choice == "local" or (here and (data or choice == "auto")):  # transfers start outside
+        return LocalExecutor(command_timeout=settings.command_timeout, site=site)
     return SshExecutor(
         settings.data_host if data else settings.control_host,
         data=data,
         connect_timeout=settings.connect_timeout,
         command_timeout=settings.command_timeout,
+        site=site,
     )

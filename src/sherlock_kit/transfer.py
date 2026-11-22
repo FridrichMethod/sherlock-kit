@@ -27,6 +27,10 @@ manifest: write DIR/SHA256SUMS locally (inside jobs, no network), sha256sum-comp
 The DTN refuses options that alter its restricted rsync server command. Pull's --chmod=Du+rwx is
 receiver-local: it keeps incoming directories writable without changing file permissions or the
 remote sender command. --files-from=- sends the DTN-proven list-file command.
+
+The data host is the site's: sherlock-dtn on Sherlock, the marlowe-plain login node on Marlowe,
+which has no DTN for rsync. On the cluster push and pull are refused (exit 3,
+transfer_on_<site>).
 """
 
 from __future__ import annotations
@@ -46,7 +50,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sherlock_kit import __version__, executor
+from sherlock_kit import __version__, executor, sites
 from sherlock_kit.config import DEFAULTS, ProjectConfig
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNREACHABLE, Outcome, ShkError
 
@@ -170,21 +174,21 @@ def _walk(
 # Reading the remote manifest -------------------------------------------------------------------
 
 
-def _malformed(remote: str, problem: str) -> ShkError:
+def _malformed(remote: str, problem: str, site: sites.Site) -> ShkError:
     return ShkError(
         EXIT_LOCAL,
         "malformed_reply",
         f"reading {remote}/SHA256SUMS: {problem}",
-        hint="run shk doctor --remote",
+        hint=f"run {sites.command(site)} doctor --remote",
     )
 
 
-def _manifest_error(remote: str, error: str) -> ShkError:
+def _manifest_error(remote: str, error: str, site: sites.Site) -> ShkError:
     if error == "no_directory":
         return ShkError(
             EXIT_LOCAL,
             "manifest_unavailable",
-            f"{remote} is not a directory on Sherlock",
+            f"{remote} is not a directory on {site.display}",
             hint="check REMOTE: the absolute path of the directory the job wrote",
         )
     if error == "no_manifest":
@@ -194,7 +198,7 @@ def _manifest_error(remote: str, error: str) -> ShkError:
             f"{remote}/SHA256SUMS is missing or unreadable",
             hint=MANIFEST_HINT,
         )
-    return _malformed(remote, f"unknown error {error!r}")
+    return _malformed(remote, f"unknown error {error!r}", site)
 
 
 def _read_manifest(control: executor.Executor, remote: str) -> tuple[str, int]:
@@ -202,13 +206,13 @@ def _read_manifest(control: executor.Executor, remote: str) -> tuple[str, int]:
     reply = executor.check(executor.run_program(control, "manifest", [remote]), "read SHA256SUMS")
     lines = reply.stdout.split("\n")
     if "SHK_END" not in lines:
-        raise _malformed(remote, "the reply ends before SHK_END")
+        raise _malformed(remote, "the reply ends before SHK_END", reply.site)
     fields = dict(line.split(" ", 1) for line in lines if re.match(r"SHK_[A-Z]+ ", line))
     if "SHK_ERROR" in fields:
-        raise _manifest_error(remote, fields["SHK_ERROR"])
+        raise _manifest_error(remote, fields["SHK_ERROR"], reply.site)
     count = fields.get("SHK_COUNT", "")
     if not count.isdigit():
-        raise _malformed(remote, "the reply has no file count")
+        raise _malformed(remote, "the reply has no file count", reply.site)
     text = "".join(
         line.removeprefix("SHK_M|") + "\n" for line in lines if line.startswith("SHK_M|")
     )
@@ -524,7 +528,7 @@ def push(args: argparse.Namespace, ctx: Context) -> Outcome:
             )
     if not local.is_dir():
         raise ShkError(EXIT_LOCAL, "local_missing", f"LOCAL {args.local} is not a directory")
-    options, target = ctx.data_executor().rsync_args(remote)  # DTN preflight; refused on Sherlock
+    options, target = ctx.data_executor().rsync_args(remote)  # preflight; refused on the cluster
     _rsync([*PUSH, *options, "--", f"{local}/", f"{target}/"], _settings(ctx).transfer_timeout)
     return Outcome({"action": "pushed", "local": str(local), "remote": remote, "target": target})
 
@@ -553,7 +557,7 @@ def pull(args: argparse.Namespace, ctx: Context) -> Outcome:
         )
     places = Places.beside(_destination(args.local))
     data = ctx.data_executor()
-    if data.kind == "local":  # on Sherlock: refuse before any work, the data is already here
+    if data.kind == "local":  # on the cluster: refuse before any work, the data is already here
         data.rsync_args(remote)
     text, count = _read_manifest(ctx.executor(), remote)
     entries = parse_manifest(text)

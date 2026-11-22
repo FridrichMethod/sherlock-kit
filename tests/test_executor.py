@@ -15,11 +15,11 @@ from contextlib import redirect_stderr, suppress
 from pathlib import Path
 from unittest.mock import patch
 
-from fakes import SRC, install_fake_ssh
+from fakes import SRC, install_fake_ssh, marlowe_site
 from fakes.fake_ssh import BANNER
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import config, executor
+from sherlock_kit import config, executor, sites
 from sherlock_kit.errors import ShkError
 
 PREFIX = [
@@ -363,6 +363,93 @@ class SherlockTextTests(unittest.TestCase):
         )
 
 
+class SiteTransportTests(unittest.TestCase):
+    """The site an executor knows decides the argv, the texts and the transfer refusal."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.fake = install_fake_ssh(temporary.name)
+        environment = patch.dict(os.environ, self.fake.env(FAKE_SSH_MODE="echo"))
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def dialled(self, site, *args):
+        ex = executor.SshExecutor(site.control_host, ssh=str(self.fake.path), site=site)
+        with redirect_stderr(io.StringIO()):
+            result = executor.run_program(ex, "doctor", list(args))
+        self.assertEqual((result.status, result.site), ("complete", site))
+        check, dial = self.fake.calls()[-2:]
+        self.assertEqual(check, [*CHECK, site.control_host])
+        self.assertEqual(dial[:-1], [*PREFIX, site.control_host])
+        self.assertEqual(json.loads(result.stdout), shlex.split(dial[-1]))
+        return json.loads(result.stdout)
+
+    def test_sherlock_argv_is_the_program_and_its_arguments_only(self):
+        doctor = executor.program_text("doctor")
+        self.assertEqual(self.dialled(sites.SHERLOCK), ["sh", "-c", doctor, "shk-doctor"])
+        self.assertEqual(
+            self.dialled(sites.SHERLOCK, "a b", ""), ["sh", "-c", doctor, "shk-doctor", "a b", ""]
+        )
+
+    def test_marlowe_argv_carries_the_prelude_and_its_slurm_environment(self):
+        text = executor.program_text("site-env") + executor.program_text("doctor")
+        slurm = [sites.MARLOWE.slurm.bin, sites.MARLOWE.slurm.conf]
+        self.assertEqual(
+            self.dialled(sites.MARLOWE, "a b"), ["sh", "-c", text, "shk-doctor", *slurm, "a b"]
+        )
+
+    def test_marlowe_texts(self):
+        unreachable = ("query: Marlowe unreachable. tail", "run shk --site marlowe doctor")
+        cases = {
+            "unavailable": (4, *unreachable),
+            "timeout": (4, *unreachable),
+            "unknown": (
+                5,
+                "query: dispatched, outcome unknown. tail",
+                "wait at least 60 s, then run shk --site marlowe status; never resubmit blind",
+            ),
+        }
+        for status, (code, message, hint) in cases.items():
+            with self.subTest(status=status), self.assertRaises(ShkError) as caught:
+                result = executor.Result(status, "", "tail\n", 9, site=sites.MARLOWE)
+                executor.check(result, "query")
+            error = caught.exception
+            self.assertEqual((error.code, error.message, error.hint), (code, message, hint))
+        self.assertEqual(
+            executor.master_hint("timeout", "marlowe-plain", site=sites.MARLOWE),
+            "run shk --site marlowe doctor; inspect the local SSH check failure before "
+            "requesting a new login",
+        )
+        self.assertEqual(
+            executor.master_hint("none", "marlowe-plain", site=sites.MARLOWE), "ssh marlowe-plain"
+        )
+        with self.assertRaises(ShkError) as caught:
+            executor.LocalExecutor(site=sites.MARLOWE).rsync_args("/scratch/m000000/x")
+        self.assertEqual(
+            (caught.exception.code, caught.exception.payload()),
+            (
+                3,
+                {
+                    "ok": False,
+                    "error": "transfer_on_marlowe",
+                    "message": "push and pull of /scratch/m000000/x: shk transfers to and from "
+                    "Marlowe start outside Marlowe (a toolkit choice)",
+                    "hint": "the data is already on Marlowe: copy it there with cp or rsync, "
+                    "without shk",
+                },
+            ),
+        )
+
+    def test_a_failed_master_check_names_the_site_selector_only_off_sherlock(self):
+        with patch.object(executor, "master_status", return_value=("timeout", "slow")):
+            for site, shk in ((sites.SHERLOCK, "shk"), (sites.MARLOWE, "shk --site marlowe")):
+                ex = executor.SshExecutor(site.control_host, ssh=str(self.fake.path), site=site)
+                with self.subTest(site=site.name), self.assertRaises(ShkError) as caught:
+                    ex.preflight()
+                self.assertTrue(caught.exception.hint.startswith(f"run {shk} doctor; "))
+
+
 class DetectionTests(unittest.TestCase):
     def kind(self, hostname, override=None, **env):
         return executor.detect(None, override, env, hostname).kind
@@ -416,6 +503,63 @@ class DetectionTests(unittest.TestCase):
         )
         self.assertEqual((data.host, data.data), ("d", True))
         self.assertEqual(executor.detect(None, "ssh", {}, "x").host, "sherlock-plain")
+
+    def test_sherlock_executors_know_their_site(self):
+        for override, hostname in ((None, "lab-ubuntu"), (None, "sh02-ln04"), ("local", "x")):
+            for data in (False, True):
+                found = executor.detect(None, override, {}, hostname, data=data)
+                self.assertEqual(found.site, sites.SHERLOCK)
+
+
+class MarloweDetectionTests(unittest.TestCase):
+    """The Marlowe predicate picks the local executor only for an already selected Marlowe."""
+
+    def detect(self, settings, override=None, hostname="login-01", **env):
+        return (
+            executor.detect(settings, override, env, hostname),
+            executor.detect(settings, override, env, hostname, data=True),
+        )
+
+    def test_on_marlowe_the_local_executor_serves_marlowe_only(self):
+        with marlowe_site(on_cluster=True):
+            marlowe = config.defaults(sites.site("marlowe"))
+            control, data = self.detect(marlowe)
+            self.assertEqual((control.kind, data.kind), ("local", "local"))
+            self.assertEqual((control.site.name, data.site.name), ("marlowe", "marlowe"))
+            with self.assertRaises(ShkError) as caught:
+                data.rsync_args("/scratch/m000000/x")
+            self.assertEqual(caught.exception.token, "transfer_on_marlowe")
+            forced, data = self.detect(marlowe, "ssh")  # the data role never dials from here
+            self.assertEqual(
+                (forced.kind, forced.host, data.kind), ("ssh", "marlowe-plain", "local")
+            )
+            # The same machine with site Sherlock (no configuration) still dials Sherlock.
+            for settings in (None, config.DEFAULTS):
+                control, data = self.detect(settings, SLURM_CLUSTER_NAME="slurm", SLURM_JOB_ID="1")
+                self.assertEqual((control.kind, control.host), ("ssh", "sherlock-plain"))
+                self.assertEqual((data.kind, data.host), ("ssh", "sherlock-dtn"))
+                self.assertEqual(control.site, sites.SHERLOCK)
+
+    def test_off_marlowe_both_roles_dial_the_login_node_alias(self):
+        with marlowe_site(on_cluster=False):
+            control, data = self.detect(config.defaults(sites.site("marlowe")), hostname="lab")
+            self.assertEqual(
+                (control.kind, control.host, control.data, data.kind, data.host, data.data),
+                ("ssh", "marlowe-plain", False, "ssh", "marlowe-plain", True),
+            )
+            self.assertEqual(control.site.name, "marlowe")
+            # Sherlock's detection facts identify nothing for Marlowe.
+            for hostname, env in (
+                ("sh02-ln04", {}),
+                ("x", {"SLURM_CLUSTER_NAME": "sherlock"}),
+                ("sh02-12n05", {"SLURM_JOB_ID": "1"}),
+            ):
+                control, _ = self.detect(
+                    config.defaults(sites.site("marlowe")), hostname=hostname, **env
+                )
+                self.assertEqual(control.kind, "ssh")
+            local, _ = self.detect(config.defaults(sites.site("marlowe")), "local")
+            self.assertEqual((local.kind, local.site.name), ("local", "marlowe"))
 
 
 if __name__ == "__main__":
