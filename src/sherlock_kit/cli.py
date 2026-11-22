@@ -19,6 +19,7 @@ import json
 import os
 import socket
 import sys
+import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -27,12 +28,12 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-from sherlock_kit import allocation, doctor, install, sites, slurm, transfer, version_line
+from sherlock_kit import allocation, doctor, install, sites, slurm, transfer, version_line, wait
 from sherlock_kit import config as project_config
 from sherlock_kit import executor as executors
 from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, EXIT_OK, Outcome, ShkError
 
-MODULES: tuple[ModuleType, ...] = (doctor, slurm, transfer, install, allocation)
+MODULES: tuple[ModuleType, ...] = (doctor, slurm, wait, transfer, install, allocation)
 
 
 def _utc_now() -> datetime:
@@ -40,7 +41,7 @@ def _utc_now() -> datetime:
 
 
 class Context:
-    """What a handler needs besides its arguments: configuration, executors, clock, host."""
+    """What a handler needs besides its arguments: configuration, executors, clock, sleep, host."""
 
     def __init__(
         self,
@@ -52,6 +53,7 @@ class Context:
         hostname: str | None = None,
         clock: Callable[[], datetime] | None = None,
         cwd: str | Path | None = None,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         """Keep the overrides; the configuration, site and executors are resolved on first use."""
         self.project_dir = project_dir
@@ -60,6 +62,7 @@ class Context:
         self.env = os.environ if env is None else env
         self.hostname = socket.gethostname() if hostname is None else hostname
         self.clock = clock or _utc_now  # aware UTC now; tests inject a fixed clock
+        self.sleep = sleep or time.sleep  # seconds; tests inject one that advances their clock
         self.cwd = cwd
         self._executors: dict[bool, executors.Executor] = {}
 

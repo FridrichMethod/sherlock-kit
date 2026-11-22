@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
@@ -181,6 +182,7 @@ class FrameTests(TempCase):
         ctx = self.context(clock=lambda: now)
         self.assertEqual(ctx.clock(), now)
         self.assertIsNotNone(cli.Context().clock().tzinfo)
+        self.assertIs(cli.Context().sleep, time.sleep)
         self.assertIsNone(ctx.config)
         with self.assertRaises(ShkError) as caught:
             ctx.require("project")
@@ -220,6 +222,7 @@ class FrameTests(TempCase):
                 "status",
                 "submit",
                 "update",
+                "wait",
             ],
         )
 

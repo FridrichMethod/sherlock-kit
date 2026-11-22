@@ -13,7 +13,8 @@ adds sites.reply_fields() after "executor", and its selector to the exit 5 `next
 commands that hints name. Partitions are those of the selected site's table. A site with
 test_before_submit (Marlowe) runs control.preflight (sbatch --test-only) after the duplicate read
 and before staging: when Slurm refuses, submit returns that preflight reply unchanged (exit 3,
-nothing staged), else it goes on as usual.
+nothing staged), else it goes on as usual. status_reader() checks a status selection once and
+returns its read, which wait repeats.
 """
 
 from __future__ import annotations
@@ -718,18 +719,25 @@ def _register_submit(subparsers: Subparsers) -> None:
     parser.set_defaults(handler=submit, requeue=None)
 
 
-def _register_status(subparsers: Subparsers) -> None:
-    parser = subparsers.add_parser(
-        "status", help="state of logical tasks from one squeue and one sacct call"
-    )
+def selection_arguments(parser: argparse.ArgumentParser, *, job_ids: bool = False) -> None:
+    """The selection of status and wait: one of --task, --name or --all, then the qualifiers.
+
+    job_ids adds --job-id to the exclusive group and --details after it (status only).
+    --campaign, --run-dir and --since mean what _selection() and _since() read.
+    """
     which = parser.add_mutually_exclusive_group(required=True)
     which.add_argument("--task", action="append", help="repeatable")
     which.add_argument("--name", action="append", help="repeatable")
     which.add_argument("--all", action="store_true", help="every shk job of this project")
-    which.add_argument(
-        "--job-id", action="append", help="repeatable own-UID N or N_TASK, including legacy jobs"
-    )
-    parser.add_argument("--details", action="store_true", help="retain complete raw Slurm evidence")
+    if job_ids:
+        which.add_argument(
+            "--job-id",
+            action="append",
+            help="repeatable own-UID N or N_TASK, including legacy jobs",
+        )
+        parser.add_argument(
+            "--details", action="store_true", help="retain complete raw Slurm evidence"
+        )
     parser.add_argument(
         "--campaign",
         action="append",
@@ -744,6 +752,13 @@ def _register_status(subparsers: Subparsers) -> None:
         metavar="DAYS",
         help=f"sacct window, 1 to {MAX_SINCE_DAYS} (default {SINCE_DAYS}, {SINCE_DAYS_ALL} with --all)",
     )
+
+
+def _register_status(subparsers: Subparsers) -> None:
+    parser = subparsers.add_parser(
+        "status", help="state of logical tasks from one squeue and one sacct call"
+    )
+    selection_arguments(parser, job_ids=True)
     parser.set_defaults(handler=status)
 
 
@@ -1068,18 +1083,15 @@ def _all_names(ctx: Context) -> Callable[[str], bool]:
     return lambda name: name.startswith(prefix)
 
 
-def status(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """`shk status`: one read for every selected name; exit 6 on an anomaly."""
-    if args.job_id or args.details:
-        return details.status(args, ctx)
-    since, selected = _since(args, ctx.site), _selection(args, ctx)
-    query = ["all" if args.all else "names", str(since), "-"]
+def _status_read(ctx: Context, since: int, selected: list[Selected], every: bool) -> Outcome:
+    """One read of the selected names, or with every (--all) of every shk name of the project."""
+    query = ["all" if every else "names", str(since), "-"]
     for item in selected:
         query += [item.name, item.run_dir or "-"]
     read, meta = _read(ctx, query, ("squeue", "sacct"))
     wanted = {item.name for item in selected}
     rows = parse_rows(
-        read.queue, read.acct, _all_names(ctx) if args.all else lambda name: name in wanted
+        read.queue, read.acct, _all_names(ctx) if every else lambda name: name in wanted
     )
     listed = selected or [Selected(name) for name in sorted(rows.by_name)]
     names = [
@@ -1091,6 +1103,22 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
         {**meta, "names": names, "truncated": rows.truncated},
         EXIT_ANOMALY if anomalous else EXIT_OK,
     )
+
+
+def status_reader(args: argparse.Namespace, ctx: Context) -> Callable[[], Outcome]:
+    """Check the --task/--name/--all selection and --since once; each call is one status read.
+
+    The call returns what `shk status` prints for the selection: wait repeats it.
+    """
+    since, selected = _since(args, ctx.site), _selection(args, ctx)
+    return lambda: _status_read(ctx, since, selected, args.all)
+
+
+def status(args: argparse.Namespace, ctx: Context) -> Outcome:
+    """`shk status`: one read for every selected name; exit 6 on an anomaly."""
+    if args.job_id or args.details:
+        return details.status(args, ctx)
+    return status_reader(args, ctx)()
 
 
 def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
