@@ -39,6 +39,7 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 - `remote_root` lies under `/scratch/PROJECT/USER`. Site: scratch is shared by the project, not backed up and "may be purged"; `/projects` is backed up and billed; home is small. Keep what must last in `/projects` or on the workstation.
 - `shk --site marlowe push` and `pull` copy small and medium trees over the login-node master; large data goes through Globus, outside shk. Pull verifies the job output's `SHA256SUMS`.
 - Site: access only your own or explicitly shared files and jobs; visibility is not authorization.
+- Site: Low and Moderate Risk data only; ask when unclear.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`.

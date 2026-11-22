@@ -14,9 +14,10 @@ stands alone; the Sherlock rules and their provenance
 
 ## Source
 
-The rules follow these pages of <https://marlowe-research.stanford.edu>, all
-retrieved 2026-11-21. The documentation carries no version or modification
-date of its own, so the retrieval date is the only version mark.
+The rules follow these pages of <https://marlowe-research.stanford.edu> and
+one University IT page, all retrieved 2026-11-21. The documentation carries no
+version or modification date of its own, so the retrieval date is the only
+version mark.
 
 | Page | Path | Used for |
 |---|---|---|
@@ -31,6 +32,8 @@ date of its own, so the retrieval date is the only version mark.
 | Conda | `/documentation/software/conda/` | environments outside the home directory |
 | Apply for Access | `/access/` | recharge: billing of GPU-hours, CPU-hours and project storage to the research account |
 | Tech Specs | `/documentation/specs/` | identical DGX H100 compute nodes |
+| About | `/about/` | the data classification, "Low & Moderate Risk" |
+| Risk Classifications (University IT) | `https://uit.stanford.edu/guide/riskclassifications` | Marlowe approved for low and moderate risk data, not for general high risk data and not for PHI |
 
 The older documentation site, `docs.marlowe.stanford.edu`, which the submit
 plugin's account error still names, now points to the pages above; its
@@ -157,6 +160,7 @@ file, "C" the cluster file.
 | Pull verifies the job output's `SHA256SUMS` | W | toolkit | as on Sherlock |
 | Push and pull are refused on Marlowe (exit 3 `transfer_on_marlowe`); transfers start outside | C | toolkit | the data is already on the cluster |
 | Access only your own or explicitly shared files and jobs; visibility is not authorization | W, C | site | Usage Violations, the quoted provision on unauthorized access |
+| Low and Moderate Risk data only; ask when unclear | W, C | site, toolkit | About ("Data Classification: Low & Moderate Risk"); the University IT risk classification table approves Marlowe for low and moderate risk data, not for general high risk data or PHI; asking when unclear is the toolkit's |
 
 ### Partition profiles
 
@@ -206,8 +210,10 @@ By design, the rules files leave out these site statements:
 - contacts (the Slack channel, support and policy addresses, security contacts)
   and the consequences of a violation: agents do not contact the site, and the
   rules state the restrictions, not their sanctions;
-- a data-risk classification: the documentation names none, so the rules carry
-  none.
+- the compliance columns of the University IT table (NIST SP 800-171, NIH
+  controlled-access data, FAR 52.204-21, CMMC Level 1), none of which Marlowe
+  meets: the rules carry the risk classes only, and "ask when unclear" covers
+  regulated data.
 
 ## Toolkit rules stricter than the site
 

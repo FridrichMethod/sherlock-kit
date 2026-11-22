@@ -102,6 +102,7 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 - The job writes the manifest over its output directory DIR (for example `out/` under the run directory, never the run directory itself): `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`.
 - On Marlowe itself push and pull are refused (exit 3 `transfer_on_marlowe`): transfers start outside Marlowe.
 - `/scratch/PROJECT` is shared by the project, not backed up and may be purged; `/projects/PROJECT` is backed up and billed; home is small.
+- Marlowe takes Low and Moderate Risk data only, never High Risk data or PHI; ask the user when the classification is unclear.
 
 ## Never
 

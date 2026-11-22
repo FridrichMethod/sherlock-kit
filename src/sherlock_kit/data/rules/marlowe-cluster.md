@@ -44,6 +44,7 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 - Site: `/scratch/PROJECT` is shared by the project, not backed up and "may be purged"; `/projects/PROJECT` is backed up and billed; home is small. `remote_root` lies under `/scratch/PROJECT/USER`; keep what must last in `/projects`.
 - `shk --site marlowe push` and `pull` are refused here (exit 3 `transfer_on_marlowe`): transfers start outside Marlowe. Large data goes through Globus.
 - Site: access only your own or explicitly shared files and jobs; visibility is not authorization.
+- Site: Low and Moderate Risk data only; ask when unclear.
 
 ### Partition profiles
 `shk` refuses partitions not listed here. Requeue only where `requeue=yes`.
