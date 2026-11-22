@@ -6,22 +6,28 @@ is this logical task already in Slurm, what is its state, and did this data
 arrive intact. Everything else (authorization, scientific validity, what a job
 script does) stays with the user, the site rules and the project.
 
+Stanford's Marlowe cluster is a second packaged site, selected per command
+([Sites](#sites)). Where this guide names Sherlock alone it describes the
+default site.
+
 ## Pieces
 
 | Module | Role |
 |---|---|
-| `cli.py` | argparse frame, `Context` (lazy config, executors, clock), JSON output, exit codes |
+| `cli.py` | argparse frame, `Context` (lazy config, site, executors, clock), JSON output, exit codes |
 | `errors.py` | exit codes, `ShkError(code, token, message, hint)`, `Outcome(payload, code)` |
 | `config.py` | `[tool.sherlock-kit]` discovery and validation |
+| `sites.py` | the packaged site records (Sherlock, Marlowe) and the helpers that add a site to replies, hints and `next` |
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
-| `partitions.py` | the packaged partition table and the generated rules block |
+| `partitions.py` | the packaged partition table of each site and the generated rules block |
 | `doctor.py` | read-only checks |
 | `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources (one partition or a compatible partition list), job name, sbatch argv and its optional thread-budget `env` prefix; `submit` (with the `--preflight` estimate), `status`, `cancel`, `occupancy`, `resources` (per node or `--summary`), `release`, `requeue`, `update` |
 | `allocation.py` | local worker PID and allocation/step evidence, strict field parsing, actual resources and GPU SKU candidates of the node records |
 | `transfer.py` | `push`, payload-only `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
-| `data/remote/*.sh` | the fixed POSIX `sh` programs run on the login node |
-| `data/rules/*.md`, `data/skills/sherlock-kit/SKILL.md` | agent content, delivered by `install-skill` or read with `shk rules` |
+| `data/remote/*.sh` | the fixed POSIX `sh` programs run on the login node, and `site-env.sh`, the prelude for a site whose Slurm clients are not on the login `PATH` |
+| `data/partitions.json`, `data/partitions-marlowe.json` | the partition table of each site |
+| `data/rules/*.md`, `data/skills/*/SKILL.md` | agent content of each site, delivered by `install-skill` or read with `shk rules` |
 
 `bin/shk` is a stdlib-only entry point: it follows symlinks to the repository,
 puts its `src/` first on `sys.path`, disables bytecode to keep the source checkout
@@ -44,7 +50,8 @@ empty). The facts live where they already are:
   `.shk/<name>.<stamp>.sh`, `.json` and `.err` there instead, one set per such
   submission, and each `.json` under `.shk/`, staged or renamed, counts toward
   the name's `spec_files` in `status`. On scratch the directory is subject to
-  the 90-day purge like everything else there.
+  the 90-day purge like everything else there (Marlowe's scratch "may be
+  purged", with no period stated).
 - `pull` keeps its stage, lock and receipt beside the project's own destination.
 - The project configuration is a project file.
 
@@ -61,8 +68,10 @@ remote program.
 
 `detect()` picks the executor: `--executor` or `SHK_EXECUTOR` first; else local
 on a Sherlock login node (`^sh\d+-ln\d+$`), with `SLURM_CLUSTER_NAME=sherlock`,
-or on an `sh<N>-` compute node inside a job; else ssh. It never probes system
-configuration and never infers Sherlock from `sbatch` being on `PATH`.
+or on an `sh<N>-` compute node inside a job; else ssh. For Sherlock it never
+probes system configuration and never infers Sherlock from `sbatch` being on
+`PATH`. For Marlowe, whose host names do not identify it, the local test is
+whether its Slurm configuration file exists ([on the cluster](#on-the-cluster)).
 
 Every ssh dial is preceded by `ssh -O check -oBatchMode=yes HOST`, which only
 asks the local control socket:
@@ -96,6 +105,158 @@ interrupt kills the child's whole process group. The local executor runs the
 same programs with `sh -c` and no preflight; the data executor on any Sherlock
 host refuses (exit 3), because transfers start outside Sherlock and the site
 forbids ssh to a DTN from Sherlock.
+
+## Sites
+
+`sites.py` holds one frozen record per cluster, `SHERLOCK` and `MARLOWE`, as
+typed literals: no JSON and no loader. A record carries stable facts only,
+never a limit, duration, price or node shape, because the sites change those
+with demand:
+
+- the default control and data host aliases: `sherlock-plain` and
+  `sherlock-dtn`; `marlowe-plain` for both, since rsync goes through the
+  Marlowe login nodes;
+- the Slurm client environment: none for Sherlock, whose clients are on the
+  login `PATH`; for Marlowe the bin directory to append to `PATH` and the
+  `SLURM_CONF` path;
+- the account rule: none for Sherlock; for Marlowe the pattern
+  `marlowe-[a-z]+[0-9]+` that a configured account must fully match (base
+  project accounts only);
+- the on-cluster test, the site instructions file that `doctor` reads
+  (Sherlock's `/etc/agents/AGENTS.md`, none on Marlowe), whether `submit`
+  tests a request before staging, the partition table file, the rules files
+  by kind, the skill name, and the note a preflight estimate carries (Marlowe
+  only).
+
+Functions without a `Context` (partition lookups, spec helpers) take the
+site as a parameter that defaults to Sherlock, so the Sherlock paths and their
+tests are those of a kit without sites.
+
+### Selection
+
+The site of a command is `--site`, else the found configuration's `site`,
+else Sherlock (`Context.site`); `rules` and `install-skill` use `--site` alone
+(`Context.flag_site`) and read no configuration. One configuration names one
+site: a project on both clusters keeps two configurations in two directories,
+and distinct `project` values give the clusters distinct job names, so a
+command aimed at the wrong cluster finds nothing instead of the other
+cluster's job. A `--site` that differs from the found configuration is
+`site_mismatch`, not an override: the configuration's project, remote root
+and hosts belong to its site, and a Marlowe command run from the root of a
+two-cluster repository would otherwise act with the Sherlock table. The
+Marlowe rules therefore write `shk --site marlowe` on every Marlowe command.
+
+No environment variable selects the site, so nothing ambient can redirect a
+command to another cluster. An inherited variable would follow a shell into
+every later command and into jobs (`--export=ALL` carries the submitting
+shell's environment), while a flag stays visible in the command line, in
+hints and in the exit 5 `next`. `SHK_EXECUTOR` chooses the executor, never
+the site.
+
+A configuration cannot set what belongs to the site: partitions, QOS,
+account patterns, Slurm paths, the on-cluster test, rules and skill. Its
+`control_host` and `data_host` must not be a default alias of another
+packaged site, because consumers' Sherlock tables name both hosts explicitly
+and a copied table would talk to Sherlock. The rule that the two hosts differ
+applies only where the site's defaults differ. A pinned release without site
+support reads a Marlowe configuration as `config_invalid` (unknown keys), so
+it stops before any remote call.
+
+### Remote environment
+
+On Marlowe the Slurm clients are not on the `PATH` of the non-login `sh` that
+ssh runs, and `module` is not defined there; the clients work once their bin
+directory is on `PATH` and `SLURM_CONF` is set
+([observed](validation/observed-marlowe.md#slurm-client-environment)). For a
+site with a Slurm client environment, `run_program` puts the fixed prelude
+`data/remote/site-env.sh` in front of the program text:
+
+```sh
+PATH=$PATH:$1
+SLURM_CONF=$2
+export PATH SLURM_CONF
+shift 2
+```
+
+and runs `["sh", "-c", PRELUDE + PROGRAM, "shk-NAME", BIN, CONF, *ARGS]`,
+where Sherlock keeps `["sh", "-c", PROGRAM, "shk-NAME", *ARGS]`. The shift
+leaves exactly ARGS as the program's positional parameters, and every
+program's scrub of `SLURM_*` keeps `SLURM_CONF`. The bin directory is
+appended, never prepended, so earlier `PATH` entries keep winning: the test
+suite's blocking stubs stay ahead of every client, and should the site put
+Slurm on the default `PATH`, the prelude changes nothing. The prelude serves
+both executors and `doctor --remote`, and is linted and formatted with the
+other programs.
+
+### On the cluster
+
+`detect()` asks the selected site's `on_cluster(hostname, env)` whether this
+machine belongs to that site: the test chooses the executor, never the site.
+Sherlock's test is the host name and environment check above. Marlowe's host
+names (`login-0N`, `nNN`, the `cm.cluster` domain) and its Slurm ClusterName
+(`slurm`) are vendor defaults that do not identify it, so its test is whether
+its Slurm configuration file exists on the machine. On a Marlowe login node a
+Marlowe command (by `--site` or by configuration) runs locally by itself,
+while a command with neither stays a Sherlock command. Where the test holds,
+the data executor is local and refuses push and pull; on Marlowe that is
+`transfer_on_marlowe`, a toolkit choice: transfers start outside Marlowe.
+
+### Partitions, accounts and the test before submit
+
+Each site names its own partition table (`partitions.json`,
+`partitions-marlowe.json`, one schema); the tables never merge, and every
+lookup, anomaly and update check uses the selected site's. Marlowe's lists
+`preempt` alone, the only partition that the QOS of a base project account
+reaches; `batch` and `hero` need suffixed accounts and other QOS. The
+generated rules block prints its borrowed-partition sentence only for a table
+with a borrowed profile.
+
+Marlowe's submit plugin refuses a job without an explicit account, even for a
+user with a default account, so `submit` takes the account from the
+configuration, puts `--account=` directly after `--partition=` and never
+guesses it (`$PROJECT_ID` is not read). The frozen spec gains no key, and the
+`--export` value is Sherlock's.
+
+On Marlowe every deterministic refusal (account, QOS, the shared submit
+limit, the time limit, features, `--tmp`, typed GRES) comes at test time
+([observed](validation/observed-marlowe.md#submission-verdicts)). Without a
+test each would surface as a failed `sbatch`, which `shk` never reads as a
+refusal: exit 5, then `stale`, then a resubmit. So for a site whose record
+sets `test_before_submit`, `submit` calls `control.preflight` after the read
+and the duplicate guards and before staging, and returns its reply unchanged
+when Slurm refuses: exit 3 with nothing staged. The test also stands in for
+any packaged array or time cap. It costs one round trip per submit, and it can
+refuse while no node is schedulable, since a full drain gives the same
+"Requested node configuration is not available".
+
+### Replies and hints
+
+A reply from a site other than Sherlock carries `"site": NAME` after
+`executor`, from one helper (`sites.reply_fields`), and the `shk` commands of
+its hints and exit 5 `next` carry `--site NAME` (`sites.selector`,
+`sites.command`). Error replies carry no `site`, except the errors of
+`status --details`, which keep the read's `executor` and `site`. Sherlock adds
+nothing, so its replies, hints and `next` are those of a kit without sites.
+
+### Deferred
+
+Marlowe support covers commands from a workstation and from a login node.
+Left out on purpose:
+
+- controllers inside Marlowe jobs: site selection inside a job without a
+  configuration, site and executor exports into jobs, `requeue --self`,
+  allocation proofs, and a grace-window job template, which waits for a
+  consumer that has seen a real preemption;
+- `SHK_SITE` or any other environment selection, and a configuration layout
+  with several sites;
+- partitions `batch` and `hero`, suffixed accounts and `--qos`;
+- detection of Marlowe by host name;
+- a `site` key in the frozen spec or in error replies;
+- a requeue-hold anomaly token;
+- dollar figures, numeric caps, and a per-site array cap or accounting
+  window;
+- a `marlowe-dtn` alias, Globus integration and size warnings;
+- a neutral rewording of the Sherlock texts, and a separate distribution.
 
 ## Job names
 
@@ -464,7 +625,8 @@ The pull contract is payload-only:
 ## Weaker guarantees, accepted
 
 - Deduplication uses only `squeue -t all` and `sacct` over the last 30 days
-  (`status` takes `--since`, 1 to 31 days: Sherlock's slurmdbd refuses wider windows). Spec files are reported as `stale` but never block:
+  (`status` takes `--since`, 1 to 31 days: Sherlock's slurmdbd refuses wider
+  windows, and the bound holds on Marlowe too, which accepts them). Spec files are reported as `stale` but never block:
   a task with no Slurm rows in that window is submitted again as new, without
   `--resubmit`, even when its run directory still exists, and the new job runs
   in the same run directory.
@@ -488,7 +650,9 @@ The pull contract is payload-only:
 - A master can die between the check and the dial; `-oProxyCommand=false` makes
   that dial fail instead of logging in, at most once per command.
 - The remote side trusts `sh`, `sha256sum` and the Slurm clients (`squeue`,
-  `sacct`, `sbatch`, `scancel`, `scontrol`) on the login shell's `PATH`.
+  `sacct`, `sbatch`, `scancel`, `scontrol`) on the login shell's `PATH`; on
+  Marlowe, on that `PATH` with the site's bin directory appended, and the
+  configuration that `SLURM_CONF` names.
 - Provenance lives in the run directory and is purged with scratch.
 - Reply records are separated by LF only: the `SHK_SPEC` payload is flattened
   remotely, but an LF inside a job name or comment that `squeue`, `sacct` or
@@ -515,6 +679,18 @@ The pull contract is payload-only:
   partition can be the Alternate of a listed one
   ([source-confirmed](validation/observed-slurm.md#test-only-estimates)).
   Comparing partitions takes one preflight per partition.
+- On Marlowe the start that `sbatch --test-only` prints is not a queue-wait
+  prediction at all: an estimate more than a day out preceded a start within
+  a minute ([observed](validation/observed-marlowe.md#test-only-estimates-and-real-starts)).
+  The reply says so in `estimate.note`; only the verdict is usable.
+- The test before a Marlowe submit and the submit are separate calls: a
+  shared limit can fill in between, and an `sbatch` refused then is outcome
+  unknown (exit 5) as on Sherlock. The test can also refuse a request while
+  no node is schedulable.
+- A Marlowe job on `preempt` can be preempted, requeued and restarted from
+  the top many times; `status` counts this as no anomaly. A job that ends in
+  REQUEUE_HOLD shows that state in `current.tasks.by_state`, with no anomaly
+  token of its own.
 - The partition text of a job submitted with a partition list is what Slurm
   prints: the list while it pends, in an order Slurm may change, and the run
   partition once it has started; one member in `squeue` and the list in
@@ -602,3 +778,14 @@ the check needs no global `shk` executable.
 Codex has no rules import: with `--rules` it gets a hint to append `shk rules KIND` to the
 project's `AGENTS.md`. The partition block in both rules files is generated by
 `partitions.markdown()` and a test keeps it byte-identical to the table.
+
+The Marlowe rules (`data/rules/marlowe-workstation.md`, `marlowe-cluster.md`)
+and skill (`data/skills/sherlock-kit-marlowe/SKILL.md`) keep the same format
+and cap and stand alone: the Sherlock rules are not assumed to be loaded.
+Their paths are provisional, not contract paths. `install-skill` derives every
+copy path and both HOME checks from the site's skill name, so the copies of
+both sites live side by side in one project, and the Codex hint names
+`shk --site marlowe rules KIND`. Their partition block is generated by
+`partitions.markdown(sites.MARLOWE)`, and the same kind of test keeps it
+identical. [Marlowe policy](marlowe-policy.md) records the source of every
+Marlowe rules sentence.
