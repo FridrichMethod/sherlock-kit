@@ -8,7 +8,9 @@ rows grouped by base job id give new | live | done | failed | stale. live refuse
 --resubmit, done and failed need --resubmit REASON, stale (spec files, no rows) submits
 like new. Remote calls print next_check_after (now + 60 s); a dispatched mutation without a
 confirmed result (a lost reply, sbatch without a job id, a nonzero scancel) is action "unknown"
-(exit 5); exit 6 when the newest job of a listed name has an anomaly.
+(exit 5); exit 6 when the newest job of a listed name has an anomaly. A site other than Sherlock
+adds sites.reply_fields() after "executor", and its selector to the exit 5 `next` and to the shk
+commands that hints name.
 """
 
 from __future__ import annotations
@@ -25,7 +27,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
 
-from sherlock_kit import control, details, node_resources, partitions, spec
+from sherlock_kit import control, details, node_resources, partitions, sites, spec
 from sherlock_kit import executor as executors
 from sherlock_kit.errors import (
     EXIT_ANOMALY,
@@ -93,14 +95,17 @@ BUDGET_JOBS, BUDGET_MINUTES = 2, 120
 
 @dataclass(frozen=True)
 class Refusal:
-    """The error token and hint of a remote marker printed before dispatch: nothing ran."""
+    """The error token and hint of a remote marker printed before dispatch: nothing ran.
+
+    {shk} in the hint stands for the site's command prefix (sites.command).
+    """
 
     token: str
     hint: str
 
 
 REFUSALS = {  # printed before sbatch, scancel or scontrol is dispatched (exit 3)
-    "SHK_LIVE": Refusal("live", "wait; check shk status at most once per 60 s"),
+    "SHK_LIVE": Refusal("live", "wait; check {shk} status at most once per 60 s"),
     "SHK_REFUSED": Refusal("remote_refused", "nothing ran; fix the cause, then retry once"),
 }
 
@@ -163,7 +168,7 @@ def _grouped(records: list[str]) -> dict[str, list[str]]:
     return grouped
 
 
-def parse_read(stdout: str, tools: Iterable[str]) -> Read:
+def parse_read(stdout: str, tools: Iterable[str], site: sites.Site = sites.SHERLOCK) -> Read:
     """A query.sh reply; complete only with SHK_END and SHK_RC 0 from every tool (else exit 1)."""
     records: dict[str, list[str]] = {
         "SHK_Q": [],
@@ -186,7 +191,8 @@ def parse_read(stdout: str, tools: Iterable[str]) -> Read:
             EXIT_LOCAL,
             "malformed_read",
             f"query incomplete: end={'SHK_END' in facts}, rc={codes}",
-            hint="retry once after 60 s; shk doctor --remote checks the remote tools",
+            hint=f"retry once after 60 s; {sites.command(site)} doctor --remote checks the "
+            "remote tools",
         )
     specs = {}
     for name, found in _grouped(records["SHK_SPEC"]).items():
@@ -774,8 +780,14 @@ def _cadence(ctx: Context) -> dict[str, str]:
 def _read(ctx: Context, query: list[str], tools: tuple[str, ...]) -> tuple[Read, dict[str, Any]]:
     """Run query.sh once: the parsed reply and the fields every read prints."""
     result = executors.check(executors.run_program(ctx.executor(), "query", query), "query")
-    read = parse_read(result.stdout, tools)
-    meta = {"executor": ctx.executor().kind, "user": read.user, "host": read.host, **_cadence(ctx)}
+    read = parse_read(result.stdout, tools, result.site)
+    meta = {
+        "executor": ctx.executor().kind,
+        **sites.reply_fields(result.site),
+        "user": read.user,
+        "host": read.host,
+        **_cadence(ctx),
+    }
     return read, meta
 
 
@@ -788,10 +800,12 @@ class Reply:
     lines: list[str]
 
 
-def _refusal(program: str, marker: str, value: str, errors: str) -> ShkError:
+def _refusal(program: str, marker: str, value: str, errors: str, site: sites.Site) -> ShkError:
     refusal = REFUSALS[marker]
     message = f"{program}: {marker} {value} {errors[-2000:]}".strip()
-    return ShkError(EXIT_REFUSED, refusal.token, message, refusal.hint)
+    return ShkError(
+        EXIT_REFUSED, refusal.token, message, refusal.hint.format(shk=sites.command(site))
+    )
 
 
 def _mutate(
@@ -817,7 +831,7 @@ def _mutate(
         line.removeprefix("SHK_ERR|") for line in lines if line.startswith("SHK_ERR|")
     ).strip()
     if marker in REFUSALS:
-        raise _refusal(program, marker, value, errors)
+        raise _refusal(program, marker, value, errors, result.site)
     if marker == "SHK_UNPARSED":
         evidence = " ".join(part for part in (value, errors[-2000:]) if part)
         detail = f"{program} outcome not confirmed" + (f": {evidence}" if evidence else "")
@@ -835,6 +849,7 @@ def _unknown(ctx: Context, name: str, selector: str, detail: str) -> Outcome:
         "shk",
         "--project-dir",
         str(project_dir),
+        *sites.selector(ctx.site),
         "--executor",
         ctx.executor().kind,
         "status",
@@ -871,11 +886,13 @@ def _checked_name(name: str) -> str:
     return name
 
 
-def _refuse_existing(name: str, found: dict[str, Any], reason: str | None) -> None:
+def _refuse_existing(
+    name: str, found: dict[str, Any], reason: str | None, site: sites.Site
+) -> None:
     """Live always refuses; done and failed refuse without --resubmit REASON."""
     state = found["state"]
     if state == "live":
-        hint = REFUSALS["SHK_LIVE"].hint
+        hint = REFUSALS["SHK_LIVE"].hint.format(shk=sites.command(site))
     elif state in ("done", "failed") and not reason:
         hint = "find the cause, then add --resubmit REASON"
     else:
@@ -958,7 +975,7 @@ def submit(args: argparse.Namespace, ctx: Context) -> Outcome:
     found = _resolve(
         read, parse_rows(read.queue, read.acct, lambda name: name == built.name), built.name
     )
-    _refuse_existing(built.name, found, args.resubmit)
+    _refuse_existing(built.name, found, args.resubmit, ctx.site)
     if borrowed:
         report.update(_courtesy(read, built))
     stamp = f"{ctx.clock():%Y%m%dT%H%M%SZ}-{secrets.token_hex(2)}"
@@ -1074,6 +1091,7 @@ def cancel(args: argparse.Namespace, ctx: Context) -> Outcome:
         "name": name,
         "jobs": jobs,
         "executor": ctx.executor().kind,
+        **sites.reply_fields(ctx.site),
         **_cadence(ctx),
     })
 

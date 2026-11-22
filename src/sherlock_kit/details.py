@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from sherlock_kit import control, executor
+from sherlock_kit import control, executor, sites
 from sherlock_kit.errors import EXIT_ANOMALY, EXIT_LOCAL, Outcome, ShkError
 
 if TYPE_CHECKING:
@@ -374,6 +374,7 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
     report["complete"] = bool(report["complete"] and ended and set(codes.values()) == {0})
     meta = {
         "executor": ctx.executor().kind,
+        **sites.reply_fields(result.site),
         "user": read.user,
         "uid": uid,
         "host": read.host,
@@ -401,7 +402,8 @@ def status(args: argparse.Namespace, ctx: Context) -> Outcome:
                 "ok": False,
                 "error": "malformed_read",
                 "message": f"details query incomplete: end={ended}, rc={codes}",
-                "hint": "retry once after 60 s; shk doctor --remote checks the remote tools",
+                "hint": f"retry once after 60 s; {sites.command(result.site)} doctor --remote "
+                "checks the remote tools",
                 **meta,
                 "details": report,
             },

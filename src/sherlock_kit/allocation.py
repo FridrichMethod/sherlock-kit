@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from sherlock_kit import control, details, executor
+from sherlock_kit import control, details, executor, sites
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, EXIT_UNREACHABLE, Outcome, ShkError
 
 if TYPE_CHECKING:
@@ -180,7 +180,7 @@ class Collector:
                 EXIT_UNREACHABLE,
                 "timeout",
                 "allocation: evidence deadline exceeded",
-                hint="run shk doctor",
+                hint=f"run {sites.command(self.ex.site)} doctor",
             )
         result = executor.run_program(self.ex, "allocation", [action, target], timeout=remaining)
         lines = executor.records(executor.check(result, f"allocation {action}").stdout)
@@ -420,6 +420,7 @@ def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
     return Outcome({
         "action": "allocation",
         "executor": "local",
+        **sites.reply_fields(collector.ex.site),
         "complete": True,
         "queried_at": queried_at,
         "process": {

@@ -12,7 +12,7 @@ import argparse
 import re
 from typing import TYPE_CHECKING, Any
 
-from sherlock_kit import details, executor, partitions, slurm, spec
+from sherlock_kit import details, executor, partitions, sites, slurm, spec
 from sherlock_kit.errors import EXIT_LOCAL, Outcome, ShkError
 
 if TYPE_CHECKING:
@@ -337,7 +337,8 @@ def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
             "malformed_read",
             f"resources incomplete: end={'SHK_END' in lines}, scontrol rc={rc}. "
             f"{result.stderr.strip()[-2000:]}".strip(),
-            hint="retry once after 60 s; shk doctor --remote checks the remote tools",
+            hint=f"retry once after 60 s; {sites.command(result.site)} doctor --remote checks "
+            "the remote tools",
         )
     complete = True
     nodes, malformed = [], []
@@ -359,6 +360,7 @@ def resources(args: argparse.Namespace, ctx: Context) -> Outcome:
         "complete": bool(complete and nodes),
         "malformed": malformed,
         "executor": ctx.executor().kind,
+        **sites.reply_fields(result.site),
         **slurm._cadence(ctx),
         "provenance": PROVENANCE,
     }

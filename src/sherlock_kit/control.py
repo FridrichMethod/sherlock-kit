@@ -12,7 +12,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 
-from sherlock_kit import details, executor, partitions, spec
+from sherlock_kit import details, executor, partitions, sites, spec
 from sherlock_kit.errors import EXIT_LOCAL, EXIT_REFUSED, Outcome, ShkError
 
 if TYPE_CHECKING:
@@ -179,6 +179,7 @@ def preflight(built: spec.Spec, ctx: Context) -> Outcome:
                 "observed_at": cadence["queried_at"],
             },
             "executor": ctx.executor().kind,
+            **sites.reply_fields(result.site),
             **cadence,
         },
         EXIT_REFUSED if code else 0,
@@ -212,6 +213,7 @@ def _change(action: str, job: str, args: argparse.Namespace, ctx: Context, *extr
         "name": args.expect_name,
         "submission_token": token,
         "executor": ctx.executor().kind,
+        **sites.reply_fields(ctx.site),
         **_cadence(ctx),
     })
 
@@ -249,7 +251,9 @@ def _bit(flag: bool) -> str:
     return "1" if flag else "0"
 
 
-def _request(args: argparse.Namespace) -> tuple[str, list[str], dict[str, str]]:
+def _request(
+    args: argparse.Namespace, site: sites.Site = sites.SHERLOCK
+) -> tuple[str, list[str], dict[str, str]]:
     """The field, its update.sh arguments and the Slurm KEY=VALUE pairs, checked offline."""
     given = {
         "time": args.time is not None,
@@ -261,8 +265,8 @@ def _request(args: argparse.Namespace) -> tuple[str, list[str], dict[str, str]]:
     if len(chosen) != 1:
         raise _invalid(
             "give exactly one of --time, --partition, --constraint/--prefer or --throttle",
-            hint="run one shk update per field: Slurm applies the fields of one update one by "
-            "one, without rollback",
+            hint=f"run one {sites.command(site)} update per field: Slurm applies the fields of "
+            "one update one by one, without rollback",
         )
     field = chosen[0]
     if field == "time":
@@ -387,7 +391,7 @@ def update(args: argparse.Namespace, ctx: Context) -> Outcome:
             hint="an update addresses the whole job or the whole array, never one task",
         )
     token = _expected_token(args)
-    field, remote, requested = _request(args)
+    field, remote, requested = _request(args, ctx.site)
     reply = _mutate(
         ctx,
         "update",
@@ -428,5 +432,6 @@ def update(args: argparse.Namespace, ctx: Context) -> Outcome:
         "after": after,
         "slurm_messages": "\n".join(messages) or None,
         "executor": ctx.executor().kind,
+        **sites.reply_fields(ctx.site),
         **_cadence(ctx),
     })
