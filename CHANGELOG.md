@@ -86,6 +86,10 @@ Visible on Sherlock:
   `config_invalid`.
 - `--site marlowe` in a Sherlock project is exit 1 `site_mismatch`, for a dry
   run too: a dry run resolves the site.
+- With an invalid configuration and invalid arguments, `status --since`,
+  `resources`, `occupancy` and `update` answer `config_invalid` first, where
+  they answered `spec_invalid` or `unknown_partition`: they resolve the site,
+  which reads the configuration, before they check their arguments.
 
 Documentation:
 

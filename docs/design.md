@@ -195,7 +195,9 @@ machine belongs to that site: the test chooses the executor, never the site.
 Sherlock's test is the host name and environment check above. Marlowe's host
 names (`login-0N`, `nNN`, the `cm.cluster` domain) and its Slurm ClusterName
 (`slurm`) are vendor defaults that do not identify it, so its test is whether
-its Slurm configuration file exists on the machine. On a Marlowe login node a
+its Slurm configuration file exists on the machine. That path is a vendor
+default too, so the test would also hold on another cluster managed the same
+way, which is why it never selects the site. On a Marlowe login node a
 Marlowe command (by `--site` or by configuration) runs locally by itself,
 while a command with neither stays a Sherlock command. A forced local
 executor (`--executor local`, `SHK_EXECUTOR=local`) where the selected site's
