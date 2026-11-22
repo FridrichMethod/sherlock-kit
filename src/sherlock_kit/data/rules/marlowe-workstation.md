@@ -16,6 +16,7 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 
 ### Jobs
 - Submit, update and cancel only through shk, never raw `sbatch`, `scontrol update` or `scancel`. Use `--partition preempt` with explicit CPUs, memory and walltime, GPUs with `--gpus N`. The account comes from the configuration's `account`: never `--account`, never a guess from `$PROJECT_ID`.
+- `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time`.
 - Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" can also mean that no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
 - No GPU model `--constraint` (Marlowe has no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
 - Site: limits are per project account, shared with its members and changed with demand. Every array element counts toward the submit limit, whatever the throttle.
@@ -24,7 +25,7 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 
 ### Cost and waiting
 - Site: usage is charged to the PI per GPU-hour and per CPU-hour, CPU-only jobs included. Treat every attempt as billed, failed and requeued ones too.
-- Owner: a real submit needs the user's authorization of that campaign. State the upper bound you ask for, tasks x GPUs x walltime plus the retry bound; the yes covers exactly that.
+- Owner: a real submit or allocation needs the user's authorization of that campaign. State the upper bound you ask for, tasks x GPUs x walltime plus the retry bound; the yes covers exactly that.
 - Owner: CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock.
 - The start time in a preflight or test-only reply is not a prediction on Marlowe; never relay it as one. Observed: small GPU requests usually start within hours, requests near a whole node can wait days, and shorter limits start sooner.
 - After a submit, report the job id and end the wait; check again when the user asks.

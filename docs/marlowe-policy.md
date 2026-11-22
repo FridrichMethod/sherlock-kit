@@ -115,6 +115,7 @@ file, "C" the cluster file.
 |---|---|---|---|
 | Submit, update and cancel only through shk | W, C | toolkit | as on Sherlock |
 | `--partition preempt` with explicit CPUs, memory and walltime, GPUs with `--gpus N` | W, C | toolkit, site | the partition table lists only `preempt`; SLURM on Marlowe: base (Basic Access) accounts use `preempt`; the owner's account holds QOS normal only ([accounts](validation/observed-marlowe.md#partitions-qos-and-accounts)) |
+| `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time` | W, C | toolkit | Apply for Access, recharge rates: usage is billed to the research account, and an allocation is usage; without `--time` the partition's time limit applies ([submission](validation/observed-marlowe.md#submission-verdicts)) |
 | The account comes from the configuration's `account`, never `--account`, never a guess from `$PROJECT_ID` | W, C | toolkit, site | SLURM on Marlowe and FAQ: every job must name a valid account; the submit plugin refuses jobs without one even when a default account exists ([submission](validation/observed-marlowe.md#submission-verdicts)) |
 | Submit first runs Slurm's test; a refusal is exit 3 with nothing staged | W, C | toolkit | every deterministic refusal on Marlowe is immediate at test time ([submission](validation/observed-marlowe.md#submission-verdicts)) |
 | "Requested node configuration is not available" can also mean no schedulable node; read `resources --partition preempt --summary` first | W, C | toolkit | Slurm can give the same message when no node is schedulable, for example while all are drained |
@@ -131,7 +132,7 @@ file, "C" the cluster file.
 |---|---|---|---|
 | Usage is charged to the PI per GPU-hour and per CPU-hour, CPU-only jobs included | W, C | site | Apply for Access, recharge rates: billing applies monthly to GPU-hours, CPU-hours and project storage, charged to the research account; FAQ; the site's chargeback script prices CPU and GPU time ([charging](validation/observed-marlowe.md#charging)) |
 | Treat every attempt as billed, failed and requeued ones too | W, C | toolkit | every attempt holds an allocation for its elapsed time |
-| A real submit needs the user's authorization of the campaign, stated as an upper bound (tasks x GPUs x walltime plus the retry bound) | W, C | owner | owner decision 2 below |
+| A real submit or allocation needs the user's authorization of the campaign, stated as an upper bound (tasks x GPUs x walltime plus the retry bound) | W, C | owner, toolkit | owner decision 2 below; that it covers `srun` and `salloc` allocations too is the toolkit's |
 | CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock | W, C | owner | owner decision 2 below |
 | The start time of a preflight or test-only reply is not a prediction; never relay it as one | W, C | observed | [test-only estimates](validation/observed-marlowe.md#test-only-estimates-and-real-starts) |
 | Small GPU requests usually start within hours, requests near a whole node can wait days, shorter limits start sooner | W, C | observed | [queue waits](validation/observed-marlowe.md#queue-waits) |
