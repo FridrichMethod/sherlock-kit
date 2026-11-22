@@ -132,7 +132,7 @@ file, "C" the cluster file.
 |---|---|---|---|
 | Usage is charged to the PI per GPU-hour and per CPU-hour, CPU-only jobs included | W, C | site | Apply for Access, recharge rates: billing applies monthly to GPU-hours, CPU-hours and project storage, charged to the research account; FAQ; the site's chargeback script prices CPU and GPU time ([charging](validation/observed-marlowe.md#charging)) |
 | Treat every attempt as billed, failed and requeued ones too | W, C | toolkit | every attempt holds an allocation for its elapsed time |
-| A real submit or allocation needs the user's authorization of the campaign, stated as an upper bound (tasks x GPUs x walltime plus the retry bound) | W, C | owner, toolkit | owner decision 2 below; that it covers `srun` and `salloc` allocations too is the toolkit's |
+| A real submit or allocation needs the user's authorization of the campaign, stated as an upper bound (tasks x GPUs and CPUs x walltime x (1 + retries)) | W, C | owner, toolkit | owner decision 2 below; that it covers `srun` and `salloc` allocations too is the toolkit's |
 | CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock | W, C | owner | owner decision 2 below |
 | The start time of a preflight or test-only reply is not a prediction; never relay it as one | W, C | observed | [test-only estimates](validation/observed-marlowe.md#test-only-estimates-and-real-starts) |
 | Small GPU requests usually start within hours, requests near a whole node can wait days, shorter limits start sooner | W, C | observed | [queue waits](validation/observed-marlowe.md#queue-waits) |
@@ -247,9 +247,9 @@ Decisions of the toolkit's owner, labeled `Owner:` in the rules:
    master, the same as an agent running on Marlowe; the site's restriction on
    access paths that bypass SUNet ID, password and Duo stays a site rule.
 2. A real submit needs the user's authorization of a campaign: the agent states
-   the upper bound (tasks x GPUs x walltime, and the retry bound) and the yes
-   covers exactly that; no numeric cap is coded. CPU-only work that is not the
-   preparation or check of a Marlowe GPU job runs on the workstation or on
+   the upper bound (tasks x GPUs and CPUs x walltime x (1 + retries)) and the
+   yes covers exactly that; no numeric cap is coded. CPU-only work that is not
+   the preparation or check of a Marlowe GPU job runs on the workstation or on
    Sherlock.
 3. Requeue is the default on `preempt`.
 4. Agent sessions on Marlowe login nodes are allowed, and environments may be
