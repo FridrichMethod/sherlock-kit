@@ -135,7 +135,7 @@ file, "C" the cluster file.
 | A real submit or allocation needs the user's authorization of the campaign, stated as an upper bound (tasks x GPUs and CPUs x walltime x (1 + retries)) | W, C | owner, toolkit | owner decision 2 below; that it covers `srun` and `salloc` allocations too is the toolkit's |
 | CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock | W, C | owner | owner decision 2 below |
 | The start time of a preflight or test-only reply is not a prediction; never relay it as one | W, C | observed | [test-only estimates](validation/observed-marlowe.md#test-only-estimates-and-real-starts) |
-| Small GPU requests usually start within hours, requests near a whole node can wait days, shorter limits start sooner | W, C | observed | [queue waits](validation/observed-marlowe.md#queue-waits) |
+| Small GPU requests usually start within hours, requests near a whole node can wait days, shorter limits tend to start sooner | W, C | observed | [queue waits](validation/observed-marlowe.md#queue-waits) |
 | After a submit report the job id and end the wait; check again when the user asks | W, C | toolkit | waits of hours to days make waiting in the session wasteful |
 
 ### Preemption

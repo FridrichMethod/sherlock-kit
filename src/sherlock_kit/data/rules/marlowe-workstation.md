@@ -29,7 +29,7 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 - Treat every attempt as billed, failed and requeued ones too.
 - Owner: a real submit or allocation needs the user's authorization of that campaign. State the upper bound you ask for, tasks x GPUs and CPUs x walltime x (1 + retries); the yes covers exactly that.
 - Owner: CPU-only work that is not the preparation or check of a Marlowe GPU job runs on the workstation or on Sherlock.
-- The start time in a preflight or test-only reply is not a prediction on Marlowe; never relay it as one. Observed: small GPU requests usually start within hours, requests near a whole node can wait days, and shorter limits start sooner.
+- The start time in a preflight or test-only reply is not a prediction on Marlowe; never relay it as one. Observed: small GPU requests usually start within hours, requests near a whole node can wait days, and shorter limits tend to start sooner.
 - After a submit, report the job id and end the wait; check again when the user asks.
 
 ### Preemption

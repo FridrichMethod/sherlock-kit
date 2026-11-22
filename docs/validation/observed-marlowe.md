@@ -255,7 +255,9 @@ accounting ending 2026-11-21:
   4.2 h). The weekly median for GPU jobs lay between 0.12 h and 2.9 h in the
   four most recent weeks.
 - By requested limit, GPU jobs waited a median 0.60 h with a limit up to 1 h,
-  2.2 h with 1 to 4 h and 5.9 h with 4 to 8 h.
+  2.2 h with 1 to 4 h, 5.9 h with 4 to 8 h and 1.90 h with 8 to 12 h (137
+  jobs, p90 87.8 h): the tendency of shorter limits to start sooner holds up
+  to 8 h.
 - For comparison, partition `batch` (QOS medium): 1 GPU median 0.19 h, p90
   4.4 h; 5 to 8 GPUs median 5.3 h.
 
@@ -272,8 +274,10 @@ Same window, partition `preempt`:
   completed and 60% were preempted.
 - One job id has 42 PREEMPTED rows and one has 327 accounting rows, so
   preemption requeues do not stop at MaxBatchRequeue (4).
-- Separate REQUEUED rows (21% of runs without a GPU, 92% of them shorter than
-  60 s) look like launch failures, not preemptions.
+- Without a GPU, separate REQUEUED rows (21% of runs, 92% of them shorter
+  than 60 s) look like launch failures, not preemptions. With 1 GPU, REQUEUED
+  rows are 5.3% of runs, with a median elapsed time of 23 minutes and none
+  shorter than 60 s.
 - The observation job's `PreemptEligibleTime` was its start plus 5 minutes:
   QOS normal's PreemptExemptTime (00:05:00) governs, not the cluster's
   00:14:59. Which grace time, the partition's 900 s or QOS normal's 00:05:05,
