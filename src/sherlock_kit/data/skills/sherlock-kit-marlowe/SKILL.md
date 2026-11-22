@@ -31,7 +31,7 @@ account = "marlowe-m000000"                # the base project account
 - `account` is required on Marlowe, dry run included, and never guessed from `$PROJECT_ID`. It must be the base account `marlowe-<project id>`: suffixed accounts and `marlowe-users` are refused. shk passes it to `sbatch` as `--account`; an `#SBATCH` line that sets the account is refused (exit 3).
 - A distinct `project` gives the two clusters different job names, so a command aimed at the wrong cluster finds nothing instead of the other cluster's job.
 - From the repository root, where the Sherlock table is nearest, `shk --site marlowe ...` is exit 1 `site_mismatch`: add `--project-dir marlowe`. An older shk that reads this file exits 1 `config_invalid`.
-- The configuration may set `site`, `project`, `remote_root`, `account`, `control_host` and `data_host` (both default to `marlowe-plain`; a Sherlock alias is refused), the timeouts, `cpu_thread_budget` and `[tool.sherlock-kit.validators]`; never partitions, QOS or Slurm paths. Unknown keys are errors. Never put secrets there.
+- The configuration may set `site`, `project`, `remote_root`, `account`, `control_host` and `data_host` (both default to `marlowe-plain`; a Sherlock alias is refused), the timeouts, `cpu_thread_budget` and a top-level `[validators]` table; never partitions, QOS or Slurm paths. Unknown keys are errors. Never put secrets there.
 
 ## Workflow
 
@@ -42,7 +42,7 @@ shk --site marlowe submit --task train-a --script job.sh --partition preempt --c
 shk --site marlowe submit --task train-a --script job.sh --partition preempt --cpus 8 --mem 64G --gpus 1 --time 2h
 shk --site marlowe status --task train-a
 mkdir -p results
-shk --site marlowe pull /scratch/m000000/USER/demo/runs/NAME/out results/NAME --validate bundle
+shk --site marlowe pull /scratch/m000000/USER/demo/runs/NAME/out results/NAME
 ```
 
 - `--dry-run` is offline and prints the job name, the `sbatch` argv (with `--account`) and the frozen spec. A real submit needs the user's authorization of the campaign, as the rules say.
@@ -98,7 +98,7 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 ## Data
 
 - `shk --site marlowe push LOCAL REMOTE` copies over the login-node master into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. REMOTE's parent must exist (otherwise exit 1 `transfer_failed`, rsync exit 11), so create `remote_root` once before the first push: push a directory that holds `inputs/` to `remote_root` itself, whose parent `/scratch/PROJECT/USER` exists, or run `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain mkdir -p /scratch/m000000/USER/demo`. Check that push exits 0 before submitting a job that reads REMOTE, since a failed push can leave a truncated file. Push and pull are for small and medium trees; large data goes through Globus, outside shk.
-- `shk --site marlowe pull REMOTE LOCAL [--validate NAME] [--replace]` needs `REMOTE/SHA256SUMS` and an existing parent of LOCAL, copies exactly the listed files into a private stage beside LOCAL, verifies every hash, runs the validator from `[tool.sherlock-kit.validators]` (the stage is its last argument, read-only), then renames the stage onto LOCAL and writes a receipt. `already_present` rests on that receipt; LOCAL is not verified again.
+- `shk --site marlowe pull REMOTE LOCAL [--validate NAME] [--replace]` needs `REMOTE/SHA256SUMS` and an existing parent of LOCAL, copies exactly the listed files into a private stage beside LOCAL, verifies every hash, runs validator NAME from the configuration's `[validators]` table (the stage is its last argument, read-only), then renames the stage onto LOCAL and writes a receipt. `already_present` rests on that receipt; LOCAL is not verified again.
 - The job writes the manifest over its output directory DIR (for example `out/` under the run directory, never the run directory itself): `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`.
 - On Marlowe itself push and pull are refused (exit 3 `transfer_on_marlowe`): transfers start outside Marlowe.
 - `/scratch/PROJECT` is shared by the project, not backed up and may be purged; `/projects/PROJECT` is backed up and billed; home is small.
