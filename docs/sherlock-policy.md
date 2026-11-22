@@ -12,7 +12,7 @@ recommended practice.
 
 The rules follow Sherlock's agent instructions, `/etc/agents/AGENTS.md` and the
 four topic files beside it, as last modified on the dates below. Both rules
-files carry `Reviewed 2026-11-21`, the date of their last comparison with those
+files carry `Reviewed 2026-11-22`, the date of their last comparison with those
 files; `tests/test_release_metadata.py` pins that date.
 
 | File | Last modified | Topics |

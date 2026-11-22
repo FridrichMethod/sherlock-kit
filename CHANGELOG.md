@@ -47,6 +47,8 @@ Guidance:
   and the skills changed, so `shk install-skill --check` reports installed
   copies as stale; run `shk install-skill` again, with the same `--rules`, to
   refresh them.
+- The Sherlock rules files carry `Reviewed 2026-11-22`, after a re-read of
+  the five site files, none of which had changed.
 
 Documentation:
 
