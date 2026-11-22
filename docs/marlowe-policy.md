@@ -70,7 +70,7 @@ file, "C" the cluster file.
 |---|---|---|---|
 | Marlowe only; Sherlock work follows the Sherlock rules; a task lives on one cluster | W, C | toolkit | one site per configuration and distinct `project` values per cluster |
 | Marlowe has no `/etc/agents`; the documentation is the policy and takes precedence, above all Usage Violations | W, C | observed, site | [hosts](validation/observed-marlowe.md#hosts-shells-and-identity); Usage Violations names the university policy and Marlowe's operating restrictions |
-| Do not carry over `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs; W also lists `/etc/agents`, which the sentence before it covers in C | W, C | toolkit | each is Sherlock's: the variables are absent on Marlowe ([storage](validation/observed-marlowe.md#storage)), Marlowe documents no purge period, it has no GPU model features ([nodes](validation/observed-marlowe.md#nodes)), and this release exports no site into jobs |
+| Do not carry over `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs (`/etc/agents` is covered by the sentence before) | W, C | toolkit | each is Sherlock's: the variables are absent on Marlowe ([storage](validation/observed-marlowe.md#storage)), Marlowe documents no purge period, it has no GPU model features ([nodes](validation/observed-marlowe.md#nodes)), and this release exports no site into jobs |
 | The labels; keep this in handoffs | W, C | toolkit | format of the rules files |
 | Reviewed date | W, C | toolkit | this guide |
 
@@ -93,7 +93,7 @@ file, "C" the cluster file.
 | Statement | File | Kind | Source |
 |---|---|---|---|
 | Agent sessions on the workstation may drive Marlowe over the open master, as a session on Marlowe would | W | owner | owner decision 1 below |
-| Every Marlowe command is `shk --site marlowe ...`, with `--project-dir DIR` when the Marlowe configuration is not the nearest; `site_mismatch` means the nearest one is another cluster's | W, C | toolkit | site selection by flag, then configuration, then Sherlock; a flag that names another site than the found configuration is refused |
+| Every Marlowe command is `shk --site marlowe ...`, with `--project-dir DIR` when the Marlowe configuration is not the nearest; W: `site_mismatch` means the nearest is another cluster's | W, C | toolkit | site selection by flag, then configuration, then Sherlock; a flag that names another site than the found configuration is refused |
 | A reply that names its `executor` without `"site": "marlowe"` came from Sherlock | W, C | toolkit | replies of a non-Sherlock site carry `site` beside `executor` |
 | Light reads may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`; that PATH has no Slurm clients | W | toolkit, observed | [Slurm client environment](validation/observed-marlowe.md#slurm-client-environment) |
 | Exit 4 handling: `auth_required`, a `~/.ssh/config` hint, sandbox and socket denials, other exit 4 | W | toolkit | the same handling as on Sherlock, with the Marlowe master and doctor command |

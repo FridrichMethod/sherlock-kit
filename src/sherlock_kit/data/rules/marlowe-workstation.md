@@ -1,28 +1,28 @@
 ## Marlowe from this workstation
 
-These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock rules, and a task lives on one cluster. Marlowe has no `/etc/agents`: its documentation is the policy and takes precedence, above all the Usage Violations page. Do not carry over Sherlock practice: `/etc/agents`, `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs. Site marks the documentation's rules, owner the user's choices; the rest are toolkit rules or observed facts. Keep this in handoffs. Reviewed 2026-11-21 against https://marlowe-research.stanford.edu/documentation/ .
+These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock rules, and a task lives on one cluster. Marlowe has no `/etc/agents`: its documentation is the policy and takes precedence, above all the Usage Violations page. Do not carry over Sherlock practice: `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs. Site marks the documentation's rules, owner the user's choices; the rest are toolkit rules or observed facts. Keep this in handoffs. Reviewed 2026-11-21 against https://marlowe-research.stanford.edu/documentation/ .
 
 ### Site rules
 - Site: run nothing that lets a person or a service reach Marlowe without SUNet ID, password and Duo: websocket tunnels and remote-control servers (SSHX, Claude Remote Control/Server), userspace VPNs (Tailscale, ZeroTier), editor web tunnels (VS Code, Cursor, Windsurf), own code servers on login nodes. The user's own SSH forwarding through that login is fine; open no tunnel or forward yourself.
 - Owner: the user may drive this workstation session remotely, also through a remote-control relay, and it may then still use the open master; the owner reads the rule above as covering what runs on Marlowe and access by others. Start no relay yourself, and never share the master, credentials or this session with anyone else.
-- Site: login nodes are shared and are for editing, compiling, submitting jobs and moving data, with short, light commands. Anything sustained, server-like or taking a large share of a node's CPU or memory runs on a compute node through Slurm.
+- Site: login nodes are shared, for editing, compiling, submitting jobs and moving data, with short, light commands. Anything sustained, server-like or taking a large share of a node's CPU or memory runs on a compute node through Slurm.
 - Never authenticate, retry a login or store passwords or Duo secrets; repeated failed logins can block the client address (site).
 - Never contact Marlowe staff or post in their channels; draft the message (symptoms, host, time, job id) for the user.
 
 ### Connection
 - Owner: agent sessions here may drive Marlowe over the user's open `marlowe-plain` master, as a session on Marlowe would.
-- Every Marlowe command is `shk --site marlowe ...`, plus `--project-dir DIR` when the Marlowe configuration is not the nearest one; exit 1 `site_mismatch` means the nearest one is another cluster's. A reply that names its `executor` without `"site": "marlowe"` came from Sherlock: stop and check.
+- Every Marlowe command is `shk --site marlowe ...`, plus `--project-dir DIR` when the Marlowe configuration is not the nearest; exit 1 `site_mismatch` means the nearest is another cluster's. A reply that names its `executor` without `"site": "marlowe"` came from Sherlock: stop and check.
 - Light reads may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`. That PATH has no Slurm clients: Slurm work goes through shk.
 - Exit 4 `auth_required`: ask the user to run the hint (`ssh marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the user fixes what it names; a new login will not help. A sandbox startup failure or local socket permission denial is not a missing master: request per-command approval and retry once; never disable the sandbox. Other exit 4: run `shk --site marlowe doctor`, retry once after a minute, then stop and report.
 
 ### Jobs
 - Submit, update and cancel only through shk, never raw `sbatch`, `scontrol update` or `scancel`. Use `--partition preempt` with explicit CPUs, memory and walltime, GPUs with `--gpus N`. The account comes from the configuration's `account`: never `--account`, never a guess from `$PROJECT_ID`.
 - `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time`.
-- Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" may also mean that no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
+- Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" may also mean no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
 - No GPU model `--constraint` (no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
 - Site: limits are per project account, shared with its members and changed with demand.
 - Every array element counts toward the submit limit, whatever the throttle.
-- Read status only when needed (a wait exited, the user asks, exit 5 `next` due; never resubmit blind), batched (`--all`), at least 60 s apart, ideally 10+ min; no watch or polling loops. Prefer `--after-ok`. Exit 6: stop and report.
+- Read status only when needed (wait exited, user asks, exit 5 `next` due; never resubmit blind), batched (`--all`), at least 60 s apart, ideally 10+ min; no watch or polling loops. Prefer `--after-ok`. Exit 6: stop and report.
 - Cancel only exact verified own jobs and say why. Never cancel and resubmit to adjust a queued job; `shk --site marlowe update` lowers its walltime or an array's throttle.
 
 ### Cost and waiting
