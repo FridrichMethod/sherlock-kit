@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Guidance:
+
+- The installation guide, the README and both skills say that `shk` releases
+  often and that a project names its version once: in the tag of the pin,
+  which the lock file records as a commit. The project's code, tests, job
+  scripts and guides do not repeat the version, compare `shk --version` with
+  a fixed string or bind the install by a wheel or hashes of their own; code
+  that reads replies relies on `schema_version` and the documented keys. An
+  upgrade then changes the tag and the lock. Both skills changed, so
+  `shk install-skill --check` reports installed copies as stale after an
+  upgrade to the release that carries this. No CLI change.
+
 ## 0.11.0
 
 Additions: `shk wait`, and `shk` inside Marlowe jobs. The `sbatch` argv of both

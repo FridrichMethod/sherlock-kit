@@ -50,6 +50,18 @@ serves. Neither replaces the other, and neither holds secrets.
   reinstalling, checking `shk --version`, and rerunning `install-skill` with
   the same options so that the copies match the new version.
 
+- **Name the version once.** `shk` releases often, and an upgrade should cost
+  one changed tag. The tag in the pin, and the commit the lock file records
+  for it, are the only places in a project that name the version. Do not
+  repeat it in the project's code, tests, job scripts or guides; record
+  `shk --version` where provenance needs it, but do not compare it with a
+  fixed string; and do not add a binding of the project's own, such as a
+  wheel it builds or hashes of the launcher and the package. Code that reads
+  replies relies on `schema_version` and on the keys the
+  [command reference](cli.md) documents, not on a version number, so it needs
+  no change when the version does. The changelog says what each release
+  changes in replies and exit codes.
+
 ## Install forms
 
 Install from a release tag, as below; `main` can be ahead of the latest release.
