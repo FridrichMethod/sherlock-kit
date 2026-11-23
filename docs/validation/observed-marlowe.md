@@ -1,11 +1,12 @@
 # Observed Marlowe and Slurm behavior
 
-Facts seen live on Marlowe from one user's account on 2026-11-21, on Slurm
+Facts seen live on Marlowe from one user's account on 2026-11-21 and, for
+[shk inside a batch job](#shk-inside-a-batch-job), on 2026-11-22, on Slurm
 25.05.2, grouped by topic and, where one exists, with the `shk` behavior that
-depends on it. They are observations of one day, not site guarantees: the site
-changes its limits with demand, so re-check a fact before building on it. Site
-policy is not taken from here; the [Marlowe policy guide](../marlowe-policy.md)
-names its sources.
+depends on it. They are observations of those days, not site guarantees: the
+site changes its limits with demand, so re-check a fact before building on it.
+Site policy is not taken from here; the
+[Marlowe policy guide](../marlowe-policy.md) names its sources.
 
 Identifiers are synthetic: `m000000` stands for the project id,
 `marlowe-m000000` for its Slurm account and `USER` for the user name. Job ids,
@@ -29,6 +30,9 @@ reproduced; other users' jobs appear only as counts and percentages.
   submitted by hand with `sbatch` from a shell that held the client environment
   below. Its fixed script printed what a job sees (variable names only, apart
   from a listed set of values) and completed in seconds.
+- On 2026-11-22 a CPU-only job that `shk` submitted from the workstation ran
+  `shk` inside itself and requeued itself once
+  ([shk inside a batch job](#shk-inside-a-batch-job)).
 - Queue waits and preemption come from 30 days of accounting for all users
   (`sacct -a -X --duplicates`, 74,325 rows), read without user names and
   summarized as counts.
@@ -322,9 +326,10 @@ Same window, partition `preempt`:
 
 ## shk on Marlowe
 
-`shk` ran from a development tree with a throwaway Marlowe configuration, from
-the workstation over the `marlowe-plain` master unless a bullet says
-otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
+`shk` ran on 2026-11-21 from a development tree with a throwaway Marlowe
+configuration, from the workstation over the `marlowe-plain` master unless a
+bullet says otherwise. One job that `shk` submitted ran: one CPU, for a few
+seconds.
 
 - `shk --site marlowe doctor`: both masters `running` from one check, and
   `"site": "marlowe"` after `executor`. With `--remote` the host was a login
@@ -391,20 +396,125 @@ otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
   `.claude/rules/`; `--site marlowe` in a Sherlock project was exit 1
   `site_mismatch`.
 
+## shk inside a batch job
+
+One CPU-only job on `preempt` (1 task, 1 CPU, 1 GB, a 10-minute limit,
+`--signal B:USR1@300`), submitted with `shk` from the workstation on
+2026-11-22, with the development tree of 0.11.0 and a Python 3.14 that `uv`
+installed on scratch. Its script was the Marlowe skill's walltime template
+with `max_restarts=2` around a stand-in workload (a counter that saved a
+checkpoint every second, stopped with a checkpoint on TERM, and in a later
+attempt ran ten more seconds and exited 0), plus read-only probes in the first
+attempt; it set no TERM trap. The job ran two attempts, one self-requeue, and
+completed. Everything below rests on this one job: a GPU job, an array
+element, a preempted attempt, a real `submit` from inside a job and an in-job
+`cancel`, `update` or `release` are not observed.
+
+### First attempt
+
+- `shk --site marlowe doctor --remote`, without `--executor`, on the compute
+  node: `"executor": "local"`, `"site": "marlowe"`, and `sbatch`, `squeue` and
+  `sacct` found under the Slurm bin directory. The on-cluster test holds on a
+  compute node, and the executor is local there by itself.
+- The batch script's environment: `SHK_NAME`, equal to the Slurm job name, was
+  the only `SHK_` variable; `SLURM_RESTART_COUNT` was unset; `SLURM_CONF` named
+  Marlowe's configuration file, a file on the node; `sbatch` was on PATH;
+  `SLURM_JOB_END_TIME` minus `SLURM_JOB_START_TIME` was the 600 s limit.
+- `/bin/sh` is bash, bash is 5.1.16, `/usr/bin/python3` is 3.10.12, and the
+  job's processes sit in cgroup v1 hierarchies.
+- `scontrol show config` in the job: `AuthInfo` `(null)`, `KillWait` 30 s,
+  `MaxBatchRequeue` 4, `ProctrackType` `proctrack/cgroup`, `PrologFlags`
+  `Alloc,Contain`. The site's `cgroup.conf` is readable and holds no
+  `SignalChildrenProcesses` line.
+- `scontrol pidinfo PID` printed two lines,
+  `Slurm JobId=N ends at <weekday month day time year>` and
+  `Job remaining time is N seconds`. `scontrol listpids JOBID` printed the
+  header `PID JOBID STEPID LOCALID GLOBALID`, one row per process of the batch
+  step (STEPID `batch`; LOCALID and GLOBALID `0` for the batch shell and `-`
+  for its children) and one row `-1 JOBID extern 0 0`. Both ran as the
+  unprivileged user.
+- `shk --site marlowe --executor local allocation --pid <batch shell> --job-id $SLURM_JOB_ID`:
+  exit 0, `complete` true, `"site": "marlowe"`, job membership verified
+  through `scontrol pidinfo`, state RUNNING, partition `preempt`, one node,
+  1 allocated CPU and 0 GPUs (`AllocTRES=cpu=1,mem=1G,node=1,billing=1`), one
+  CPU in the affinity; `gpu_sku_candidates`: `candidates` `[]`, `ambiguous`
+  false, source `ActiveFeatures` `location=local`, `Gres` `gpu:8(S:0-1)`,
+  `CfgTRES` `cpu=112,mem=1950000M,billing=112,gres/gpu=8`.
+- Inside one `srun -n1` step of the job's own allocation (no new allocation):
+  `scontrol show step JOB.0` printed
+  `StepId=JOB.0 UserId=... StartTime=... TimeLimit=UNLIMITED State=RUNNING Partition=preempt NodeList=... Nodes=1 CPUs=1 Tasks=1 Name=bash Network=(null) TRES=cpu=1,mem=1G,node=1 ResvPorts=(null) CPUFreqReq=Default Dist=Cyclic SrunHost:Pid=...:... TresPerTask=cpu=1`;
+  `scontrol listpids JOB.0` listed the step's two processes; and
+  `shk --site marlowe --executor local allocation --pid <step process> --job-id $SLURM_JOB_ID --step-id 0`
+  was exit 0 with `complete` true and step membership verified (1 task,
+  1 CPU, 0 GPUs).
+- `shk allocation --pid PID --job-id ID` without `--site`: exit 1
+  `site_mismatch`, message "this machine belongs to Marlowe, but the site is
+  Sherlock: --executor local (or SHK_EXECUTOR=local) would treat Marlowe's
+  Slurm as Sherlock's", hint "pass --site marlowe, or --project-dir DIR where
+  DIR holds the Marlowe configuration".
+- `shk --site marlowe --executor local status --job-id $SLURM_JOB_ID --details`:
+  exit 0, the name `live` with one running task.
+- `shk --site marlowe --executor local --project-dir DIR submit --preflight ...`,
+  DIR holding a Marlowe configuration on scratch: exit 0, `job_submitted`
+  false, Slurm's will-run line parsed, `estimate.note` present. So
+  `sbatch --test-only` is accepted from a compute node. No job was submitted
+  from inside the job.
+- With the 600 s limit and `--signal B:USR1@300`, USR1 reached the batch shell
+  299 s after the attempt started, 301 s before the limit. The handler sent
+  TERM to the workload, which saved its checkpoint and exited 0.
+- `shk --site marlowe --executor local requeue --self --expect-name "$SHK_NAME"`:
+  the complete reply reached its output file (`"action": "requeued"`,
+  `"executor": "local"`, `"site": "marlowe"`). The script line after the call
+  never ran: the batch step ended CANCELLED with exit code `0:15` (the shell
+  died of SIGTERM), and the job's stderr log holds
+  `*** JOB N ON nNN CANCELLED AT <time> DUE TO JOB REQUEUE ***`. The
+  accounting row of the attempt is `REQUEUED`, exit code `0:0`, elapsed 4:59.
+
+### Second attempt
+
+- It started 130 s after the requeue, on another node: the job's submit time
+  was reset to the second after the requeue, it became eligible 121 s after
+  that (Slurm's default credential lifetime of 120 s plus one; `AuthInfo` is
+  unset), and it started 8 s later.
+- `SLURM_RESTART_COUNT` was 1 and `scontrol show job` showed `Restarts=1`;
+  `BatchFlag` was 1 in both attempts; `SHK_NAME` was unchanged and still the
+  only `SHK_` variable; the attempt had its own 600 s limit and a
+  `PreemptEligibleTime` of its own start plus 5 minutes.
+- The workload resumed from the first attempt's checkpoint, ran ten seconds
+  and exited 0; `shk --site marlowe manifest out` wrote the manifest over 43
+  files; the job ended COMPLETED `0:0`.
+
+### From the workstation
+
+- The submit ran Slurm's test and was `submitted`; the first attempt started
+  21 s after the submit.
+- One `shk --site marlowe wait --task T --campaign C --timeout 40m --interval 2m`:
+  five reads, `wait.outcome` `settled`, exit 0, about nine minutes after the
+  submit; the name was `done` with `current.max_restart` 1 and `by_state`
+  `{"COMPLETED": 1}`.
+- `status --job-id N --details` afterwards: the queue row COMPLETED and the
+  accounting row of the first attempt REQUEUED; `cost.cpu_seconds` 312 for
+  both attempts, final.
+- `pull` of `out/` verified and copied the 43 listed files.
+
 ## Not observed
 
-- The signal sequence of a real preemption: whether and when a preempted job
-  receives SIGTERM, and which grace time applies. The rules require periodic
-  checkpoints and never rely on a signal.
-- A self-requeue on Marlowe (`shk requeue --self`, or any `scontrol requeue`
-  of a running job) and the delivery of a time-limit `--signal`: when it
-  arrives and which processes get it.
+- Anything about a preemption: whether and when a preempted job receives
+  SIGTERM, which grace time applies, the hold after exits during the grace
+  window, and the inferred start of a job once more after its work is done.
+  The rules require periodic checkpoints and never rely on a signal.
+- `KillWait` for a batch shell that survives SIGTERM: the one observed
+  self-requeue ended a shell without a TERM trap
+  ([shk inside a batch job](#shk-inside-a-batch-job)).
+- A self-requeue of an array element or of a GPU job, and whether the site
+  ever limits repeated self-requeues: one self-requeue of one CPU-only job is
+  observed.
 - The requeue-hold path: how a job reaches REQUEUE_HOLD or a launch-failure
   hold, what `squeue`, `scontrol` and `sacct` show for it, and the recovery the
   rules prescribe (cancel, then resubmit with the user's consent).
 - A GPU job, an array or a preempted job that `shk` submits and that then
   runs: every job on Marlowe is billed, and such a job needs the owner's
-  authorization. The one job of `shk` that ran had one CPU and was not
+  authorization. The two jobs of `shk` that ran had one CPU each and were not
   preempted.
 - `occupancy`, `release`, an `update` of the partition, the features or an
   array's throttle, and `status --details` of a queued job, on Marlowe.
@@ -412,8 +522,8 @@ otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
   node could hold while no node is schedulable: the message was seen only for
   requests that no node can satisfy, and the rules say only that it may also
   mean no schedulable node.
-- `shk` inside a Marlowe job (`requeue --self`, `allocation`, an in-job
-  `submit`): tested offline against Marlowe-shaped records, not run live.
+- A `submit` from inside a job that creates a job (only `submit --preflight`
+  ran there), and an in-job `cancel`, `update` or `release`.
 - A GPU job: what a job sees with `--gpus` (`CUDA_VISIBLE_DEVICES`, CUDA MPS).
 - An agent session on a login node: `shk` ran there, but not inside an agent
   session on that node.
@@ -425,9 +535,10 @@ otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
 The in-job guidance (the walltime template of the Marlowe skill, the rule
 never to rely on a signal) rests on these. They are confirmed in the official
 Slurm source at tag `slurm-25-05-2-1`, the release Marlowe runs, or inferred
-from it where a statement says so, and are not observed live. The Marlowe
-settings they use are those recorded above; a setting that was not read is
-named as such.
+from it where a statement says so, and are not observed live, except where an
+item says what [shk inside a batch job](#shk-inside-a-batch-job) observed. The
+Marlowe settings they use are those recorded above; a setting that was not
+read is named as such.
 
 - When a job is selected for preemption with a grace time, the controller
   sends SIGCONT and SIGTERM to the job's steps other than the batch step: the
@@ -454,16 +565,22 @@ named as such.
   [`src/slurmd/slurmd/req.c`, lines 4173-4185](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmd/req.c#L4173),
   [5428-5442](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmd/req.c#L5428)
   and [5492-5505](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmd/req.c#L5492)).
+  For an accepted self-requeue the batch step's SIGTERM is
+  [observed](#shk-inside-a-batch-job): the step ended CANCELLED with exit code
+  `0:15`.
 - A batch shell without a TERM trap dies of that SIGTERM (shell semantics),
   and slurmstepd then kills the rest of the step at once with SIGKILL, so
   KillWait applies only to a shell that survives SIGTERM
   ([`src/slurmd/slurmstepd/mgr.c`, lines 1751-1774](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmstepd/mgr.c#L1751)).
+  The shell's death is [observed](#shk-inside-a-batch-job) after an accepted
+  self-requeue: the script line after the request never ran.
 - With ProctrackType `proctrack/cgroup`, a signal to a step reaches only the
   processes that slurmstepd started, for the batch step the batch shell; their
-  children get only SIGKILL, unless Marlowe's cgroup.conf sets
-  `SignalChildrenProcesses` (not read)
+  children get only SIGKILL, unless cgroup.conf sets `SignalChildrenProcesses`
   ([`src/plugins/proctrack/cgroup/proctrack_cgroup.c`, lines 220-239](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/plugins/proctrack/cgroup/proctrack_cgroup.c#L220);
   [`doc/man/man5/cgroup.conf.5`, lines 228-231](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/doc/man/man5/cgroup.conf.5#L228)).
+  Marlowe's cgroup.conf, [read in a job](#shk-inside-a-batch-job), holds no
+  `SignalChildrenProcesses` line, so the manual's default, `no`, applies.
 - `srun` turns a SIGTERM it receives into SIGKILL of its tasks
   ([`src/srun/srun_job.c`, lines 2262-2268](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/srun/srun_job.c#L2262)).
 - A batch script that exits by itself during the window is requeued through
@@ -480,19 +597,26 @@ named as such.
   new attempt can still be held after a failed launch
   ([`src/slurmctld/job_mgr.c`, lines 17649-17654](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17649)
   and [17835-17857](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17835)).
+  [Observed](#shk-inside-a-batch-job) once: the self-requeue was accepted and
+  left `BatchFlag` unchanged, 1 in both attempts.
 - `SLURM_RESTART_COUNT` is unset in the first attempt and counts every restart
   afterwards, preemptions included: a requeue by the owner, a preemption and a
   completion-path requeue all raise it
   ([`src/common/env.c`, lines 810-813](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/common/env.c#L810);
   [`src/slurmctld/job_mgr.c`, line 17757](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17757)
   and [line 6080](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L6080)).
+  [Observed](#shk-inside-a-batch-job) for a requeue by the owner: unset in the
+  first attempt, 1 in the second, with `Restarts=1`.
 - A requeued job waits again: its begin time is the end of the attempt's
   cleanup plus the credential lifetime and one second, a delay of about two
-  minutes by Slurm's default credential lifetime (Marlowe's value not read),
-  and its submit time and its age priority start over, age being Marlowe's
-  largest priority weight
+  minutes by Slurm's default credential lifetime, which applies on Marlowe
+  (`AuthInfo` is unset), and its submit time and its age priority start over,
+  age being Marlowe's largest priority weight
   ([`src/slurmctld/job_mgr.c`, lines 16600-16630](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L16600);
   [`src/interfaces/cred.h`, line 67](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/cred.h#L67)).
+  [Observed](#shk-inside-a-batch-job) after a self-requeue: the submit time
+  was reset to the second after the requeue, the job became eligible 121 s
+  later and started 8 s after that.
 - With `--signal=B:SIG@T`, SIG goes to the batch shell alone, once per
   attempt, when about T to T+30 s remain before the time limit; the manual
   allows up to 60 s earlier, and a busy controller can send it later. The
@@ -503,6 +627,8 @@ named as such.
   and [9583-9598](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L9583);
   [`src/slurmd/slurmstepd/req.c`, lines 1220-1226](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmstepd/req.c#L1220);
   [`doc/man/man1/sbatch.1`, lines 2303-2304](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/doc/man/man1/sbatch.1#L2303)).
+  [Observed](#shk-inside-a-batch-job) with `--signal=B:USR1@300` and a 600 s
+  limit: USR1 reached the batch shell 301 s before the limit.
 - Inferred: after a preemption that ended at the end of its grace window, or a
   self-requeue during one, the job keeps a flag that only the completion path
   clears, so the next time the script exits by itself, with any exit code,
