@@ -517,7 +517,7 @@ element, a preempted attempt, a real `submit` from inside a job and an in-job
   authorization. The two jobs of `shk` that ran had one CPU each and were not
   preempted.
 - `occupancy`, `release`, an `update` of the partition, the features or an
-  array's throttle, and `status --details` of a queued job, on Marlowe.
+  array's throttle, and `status --details` of a pending job, on Marlowe.
 - "Requested node configuration is not available" for a request that some
   node could hold while no node is schedulable: the message was seen only for
   requests that no node can satisfy, and the rules say only that it may also
