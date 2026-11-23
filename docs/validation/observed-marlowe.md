@@ -434,8 +434,8 @@ element, a preempted attempt, a real `submit` from inside a job and an in-job
   for its children) and one row `-1 JOBID extern 0 0`. Both ran as the
   unprivileged user.
 - `shk --site marlowe --executor local allocation --pid <batch shell> --job-id $SLURM_JOB_ID`:
-  exit 0, `complete` true, `"site": "marlowe"`, job membership verified
-  through `scontrol pidinfo`, state RUNNING, partition `preempt`, one node,
+  exit 0, `complete` true, `"site": "marlowe"`, `job_membership_verified`
+  true from `scontrol pidinfo`, state RUNNING, partition `preempt`, one node,
   1 allocated CPU and 0 GPUs (`AllocTRES=cpu=1,mem=1G,node=1,billing=1`), one
   CPU in the affinity; `gpu_sku_candidates`: `candidates` `[]`, `ambiguous`
   false, source `ActiveFeatures` `location=local`, `Gres` `gpu:8(S:0-1)`,
@@ -445,8 +445,8 @@ element, a preempted attempt, a real `submit` from inside a job and an in-job
   `StepId=JOB.0 UserId=... StartTime=... TimeLimit=UNLIMITED State=RUNNING Partition=preempt NodeList=... Nodes=1 CPUs=1 Tasks=1 Name=bash Network=(null) TRES=cpu=1,mem=1G,node=1 ResvPorts=(null) CPUFreqReq=Default Dist=Cyclic SrunHost:Pid=...:... TresPerTask=cpu=1`;
   `scontrol listpids JOB.0` listed the step's two processes; and
   `shk --site marlowe --executor local allocation --pid <step process> --job-id $SLURM_JOB_ID --step-id 0`
-  was exit 0 with `complete` true and step membership verified (1 task,
-  1 CPU, 0 GPUs).
+  was exit 0 with `complete` true and `step_membership_verified` true
+  (1 task, 1 CPU, 0 GPUs).
 - `shk allocation --pid PID --job-id ID` without `--site`: exit 1
   `site_mismatch`, message "this machine belongs to Marlowe, but the site is
   Sherlock: --executor local (or SHK_EXECUTOR=local) would treat Marlowe's
@@ -495,7 +495,7 @@ element, a preempted attempt, a real `submit` from inside a job and an in-job
 - `status --job-id N --details` afterwards: the queue row COMPLETED and the
   accounting row of the first attempt REQUEUED; `cost.cpu_seconds` 312 for
   both attempts, final.
-- `pull` of `out/` verified and copied the 43 listed files.
+- `pull` of `out/` checked the hashes of the 43 listed files and copied them.
 
 ## Not observed
 
