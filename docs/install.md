@@ -296,7 +296,8 @@ run inside a Marlowe job. What a job may do with `shk` (steps of its own work,
 within the authorized bound, never a wait or a status loop) is in
 [controllers inside a job](cli.md#controllers-inside-a-job); the Marlowe
 skill's section "Inside a job" holds a job-script template for the walltime.
-The examples above allocate nothing and authorize no workload.
+The examples above authorize no workload; their `submit` and `requeue --self`
+lines start billed work.
 
 ## Agents in a sandbox
 
