@@ -287,8 +287,8 @@ Same window, partition `preempt`:
   QOS normal's PreemptExemptTime (00:05:00) governs, not the cluster's
   00:14:59. Which grace time, the partition's 900 s or QOS normal's 00:05:05,
   applies to a preempted job is not established.
-- The observed project's own 30-day accounting holds no preempted or requeued
-  row.
+- The observed project's own 30-day accounting, read on 2026-11-21, holds no
+  preempted or requeued row.
 
 ## Login nodes
 

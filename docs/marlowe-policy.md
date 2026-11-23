@@ -14,10 +14,10 @@ stands alone; the Sherlock rules and their provenance
 
 ## Source
 
-The rules follow these pages of <https://marlowe-research.stanford.edu>, all
-retrieved 2026-11-22, and one University IT page, retrieved 2026-11-21. The
-documentation carries no version or modification date of its own, so the
-retrieval date is the only version mark.
+The rules follow these pages of <https://marlowe-research.stanford.edu> and
+one University IT page, all retrieved 2026-11-22. The documentation carries no
+version or modification date of its own, so the retrieval date is the only
+version mark.
 
 | Page | Path | Used for |
 |---|---|---|
