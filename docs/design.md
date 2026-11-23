@@ -263,11 +263,14 @@ explicit `--executor local` makes a command on the wrong machine fail instead
 of dialing. `requeue --self`, `allocation`, `status --job-id`,
 `status --name` and `manifest` need no configuration; `submit`,
 `status --task` and `cancel --task` need `--project-dir` naming a Marlowe
-configuration on Marlowe. Beside `SHK_NAME`, the submission token and the
-thread defaults of a CPU thread budget
-([CPU thread budgets](cpu-threads.md)), `shk` puts no variable into a job, on
-either site, and none names the site. These paths are tested offline against
-Marlowe-shaped records and have not run on Marlowe.
+configuration on Marlowe. On either site a job carries `SHK_NAME`, the
+submission token and the thread defaults of a CPU thread budget
+([CPU thread budgets](cpu-threads.md)); a Marlowe job also carries the Slurm
+`PATH` entry and `SLURM_CONF` that `sbatch` ran with, since `--export=ALL`
+passes the prelude's environment on
+([remote environment](#remote-environment)). None of them names the site.
+These paths are tested offline against Marlowe-shaped records and have not
+run on Marlowe.
 
 On Sherlock a controller job may submit and poll its later stages. On
 Marlowe every job and every attempt is billed, CPU-only ones included, and a
