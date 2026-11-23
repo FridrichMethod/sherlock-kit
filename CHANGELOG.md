@@ -2,8 +2,13 @@
 
 ## Unreleased
 
-Additions. The other commands are unchanged apart from `shk --help`, which
-lists the new command.
+Additions: `shk wait`, and `shk` inside Marlowe jobs. The `sbatch` argv of both
+sites, the remote programs and the replies of the other commands are those of
+0.10.0, apart from `shk --help`, which lists the new command, and the change
+listed under "Visible on Sherlock". The Marlowe surface stays provisional and
+may change in a later release: the argv, the reply additions (`site`,
+`estimate.note`), the content paths and, from this release, the in-job command
+forms and the job-script template of the skill.
 
 - `shk wait (--task T ... | --name NAME ... | --all) --timeout DUR [--interval DUR] [--max-pending DUR]`
   repeats the read that `shk status` makes for the same selection
@@ -29,6 +34,69 @@ lists the new command.
   without a retry. It is read-only, writes nothing, and works on Sherlock and
   Marlowe with the ssh and the local executor.
 
+Marlowe:
+
+- `shk` may be called inside a Marlowe job, as
+  `shk --site marlowe --executor local ...` by the absolute path of an
+  environment with Python 3.11 or newer. No command needed a change for it:
+  with `--site marlowe` the executor is local by itself on a Marlowe node.
+  `requeue --self` (on `preempt`, the partition whose profile allows
+  requeue), `allocation`, `status --job-id`, `status --name` and `manifest`
+  need no configuration; `submit`, `status --task` and `cancel --task` need
+  `--project-dir DIR` naming a Marlowe configuration on Marlowe. Nothing is
+  exported into a job beside `SHK_NAME` and the submission token, and no
+  environment variable selects a site.
+- `requeue --self` and `allocation`, called with an executor other than the
+  local one on a machine of another packaged site, answer exit 1
+  `site_mismatch`, whose hint names that site, instead of exit 3 `self_only`
+  or `local_only`: inside a Marlowe job a call without `--site marlowe` gets
+  the hint that names the flag. On a workstation and on the selected site's
+  own machines the replies are unchanged.
+- The Marlowe rules files allow it in one sentence: "In jobs, bounded
+  deterministic scripts may run `shk --site marlowe` within the authorized
+  bound; no job that only waits or polls." They drop "shk inside jobs" from
+  the Sherlock practice not to carry over, and word four other sentences more
+  briefly to stay within the 7 KiB cap. Unlike on Sherlock, a Marlowe job does
+  not submit and poll later stages: every job and every attempt is billed, so
+  a job's `shk` calls are steps of its own work (`requeue --self` before the
+  walltime, `allocation`, `manifest`, `status --job-id` of itself, at most a
+  `submit` of one fixed next stage), stages are chained with `--after-ok`, and
+  waiting is done from the workstation or a login-node session.
+- The Marlowe skill gains "Inside a job": that rule, the command forms, what
+  needs a configuration, what a missing `--site` answers, and a job-script
+  template for the walltime case (`--signal B:USR1@300`, a checkpoint,
+  `requeue --self`, a bound on `SLURM_RESTART_COUNT`, which counts
+  preemptions too). The template covers one workload that the batch shell
+  starts directly.
+- Observed on Marlowe on 2026-11-22, in one CPU-only job with a ten-minute
+  limit that ran the template around a stand-in workload: the automatic
+  executor is local on a compute node; `allocation` proved the batch shell
+  and, with `--step-id`, a process of an `srun` step; the time-limit signal
+  reached the batch shell about 300 s before the limit; `requeue --self`
+  printed its reply, the batch shell then died of SIGTERM, and a second
+  attempt started about two minutes later with `SLURM_RESTART_COUNT` 1 and
+  resumed from the checkpoint; `manifest` ran in the job, and
+  `sbatch --test-only` was accepted from a compute node. A bounded `shk wait`
+  from the workstation watched the job to its end. Not observed: a GPU job, an
+  array element, a preempted attempt, and a `submit` that creates a job from
+  inside a job; those rest on the offline tests. The Marlowe observation
+  guide, `docs/validation/observed-marlowe.md`, holds the record.
+- Deferred on purpose: a job template that reacts to a preemption signal (by
+  Slurm's source the batch shell gets no signal at the start of a preemption's
+  grace window; the sequence of a real preemption is not observed), and any
+  export of the site or the executor into jobs.
+- The Marlowe rules files carry `Reviewed 2026-11-22`, after a re-read of
+  every page of the documentation site, none of which had changed. The pages
+  state no rule on a job that requeues itself or submits a job.
+
+Visible on Sherlock:
+
+- `shk --help` lists `wait`.
+- `requeue --self` and `allocation`, called with `--site marlowe` on a
+  Sherlock node, answer exit 1 `site_mismatch`, whose hint names
+  `--site sherlock`, instead of exit 3 `self_only` or `local_only`. Sherlock
+  commands on Sherlock and every command on a workstation answer as before.
+
 Guidance:
 
 - The rules files of both sites and both skills: after a submit, an agent
@@ -44,12 +112,13 @@ Guidance:
   agent ends the turn. To stay within the 7 KiB cap the rules files word
   other rules more briefly; the Sherlock cluster file leaves the limits of
   `shk update`, which `shk` enforces, and the Sherlock workstation file the
-  note that `submit --dry-run` needs no socket to the skill. The rules files
-  and the skills changed, so `shk install-skill --check` reports installed
-  copies as stale; run `shk install-skill` again, with the same `--rules`, to
-  refresh them.
+  note that `submit --dry-run` needs no socket to the skill.
 - The Sherlock rules files carry `Reviewed 2026-11-22`, after a re-read of
   the five site files, none of which had changed.
+- The rules files and both skills changed, so `shk install-skill --check`
+  reports installed copies as stale; run `shk install-skill` again, with the
+  same `--rules` (and `--site marlowe` for the Marlowe copies), to refresh
+  them.
 
 Documentation:
 
@@ -57,16 +126,17 @@ Documentation:
   README and both policy guides describe it as a bounded read loop over the
   status read and record how the rules carry Sherlock's site rules 1 and 10
   and its unattended-sessions policy for it.
-
-Documentation:
-
+- The command, installation, design and allocation guides describe `shk`
+  inside a Marlowe job; the Marlowe policy guide gives the in-job rule its
+  provenance; the Marlowe observation guide records the live check and, under
+  "Not observed", what Slurm's source says about signals and requeues.
 - The installation guide, the README and both skills describe how a project
   adopts `shk`: the pin, a project dependency on a release tag that a lock
   file records as its commit (a separate small environment only when the
   project environment cannot take `shk`), is separate from the configuration,
   `[tool.sherlock-kit]` in `pyproject.toml` when the project has one; an
   upgrade changes the tag, relocks or reinstalls and reruns `install-skill`
-  with the same options. Documentation only; no CLI change.
+  with the same options.
 
 ## 0.10.0
 
