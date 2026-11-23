@@ -276,8 +276,10 @@ of dialing. For example, with the project's pinned environment in
   the network.
 - `submit`, `status --task` and `cancel --task` need `--project-dir DIR`,
   where DIR holds a Marlowe configuration that exists on Marlowe, such as the
-  `marlowe` directory of a checkout of the project there. A submit from a
-  compute node is not observed; a refusal that Slurm's test before submit
+  `marlowe` directory of a checkout of the project there. From a compute
+  node Slurm's test (`sbatch --test-only`, through `submit --preflight`) is
+  [observed](validation/observed-marlowe.md#shk-inside-a-batch-job), a
+  submit that creates a job is not; a refusal that Slurm's test before submit
   reports is exit 3 with nothing staged. A restarted attempt (preemption or
   self-requeue) runs an in-job `submit` again, and `shk` refuses that
   duplicate with exit 3 and `error` `live` (or `done` or `failed` once the
@@ -297,9 +299,13 @@ of dialing. For example, with the project's pinned environment in
   which inside a Marlowe job means that `--site marlowe` is missing, not that
   a login is needed.
 
-These commands are tested offline against Marlowe-shaped records and have not
-run inside a Marlowe job. What a job may do with `shk` (steps of its own work,
-within the authorized bound, never a wait or a status loop) is in
+In one CPU-only Marlowe job, `allocation`, `status --job-id`,
+`requeue --self`, `manifest` and `submit --preflight` with `--project-dir`
+ran ([observed](validation/observed-marlowe.md#shk-inside-a-batch-job)); a
+`submit` that creates a job from inside one, array elements and GPU jobs are
+tested offline against Marlowe-shaped records only. What a job may do with
+`shk` (steps of its own work, within the authorized bound, never a wait or a
+status loop) is in
 [controllers inside a job](cli.md#controllers-inside-a-job); the Marlowe
 skill's section "Inside a job" holds a job-script template for the walltime.
 The examples above authorize no workload; their `submit` and `requeue --self`

@@ -268,9 +268,13 @@ submission token and the thread defaults of a CPU thread budget
 ([CPU thread budgets](cpu-threads.md)); a Marlowe job also carries the Slurm
 `PATH` entry and `SLURM_CONF` that `sbatch` ran with, since `--export=ALL`
 passes the prelude's environment on
-([remote environment](#remote-environment)). None of them names the site.
-These paths are tested offline against Marlowe-shaped records and have not
-run on Marlowe.
+([remote environment](#remote-environment)). None of them names the site. In
+one CPU-only job on Marlowe the automatic executor was local, and
+`allocation`, `status --job-id`, `submit --preflight`, `requeue --self` with
+its second attempt and `manifest` ran as described
+([observed](validation/observed-marlowe.md#shk-inside-a-batch-job)); a
+`submit` that creates a job from inside one, array elements and GPU jobs are
+tested offline against Marlowe-shaped records only.
 
 On Sherlock a controller job may submit and poll its later stages. On
 Marlowe every job and every attempt is billed, CPU-only ones included, and a
@@ -288,18 +292,19 @@ The Marlowe skill carries one job-script template, for the walltime:
 `--signal=B:USR1@T` before the time limit, the workload stopped with a
 checkpoint, then `requeue --self`. Its restart bound is on
 `SLURM_RESTART_COUNT`, which by Slurm's source counts every restart,
-preemptions and self-requeues alike: the user's authorization counts attempts
-of every kind (1 + retries), and a count of self-requeues alone would let
-preemptions add attempts without limit. The guard stops the work at the
-authorized bound; an attempt past it still starts and is billed for the
-seconds before the guard. The template sets no TERM trap: periodic
-checkpoints are what survive a preemption, a time limit or a cancel, and a
-trap that forwards SIGTERM to the workload would rest on a signal sequence
-not observed on Marlowe. It covers one workload that the batch shell starts
-directly. Through `srun`, the SIGTERM that should stop the workload becomes
-SIGKILL of its tasks, and a preemption ends the step at the start of its
-grace window, so the script exits by itself inside the window, which by
-Slurm's source counts toward the hold that MaxBatchRequeue sets
+preemptions and self-requeues alike (unset, then 1 after one self-requeue, is
+[observed](validation/observed-marlowe.md#shk-inside-a-batch-job)): the user's
+authorization counts attempts of every kind (1 + retries), and a count of
+self-requeues alone would let preemptions add attempts without limit. The
+guard stops the work at the authorized bound; an attempt past it still starts
+and is billed for the seconds before the guard. The template sets no TERM
+trap: periodic checkpoints are what survive a preemption, a time limit or a
+cancel, and a trap that forwards SIGTERM to the workload would rest on a
+signal sequence not observed on Marlowe. It covers one workload that the batch
+shell starts directly. Through `srun`, the SIGTERM that should stop the
+workload becomes SIGKILL of its tasks, and a preemption ends the step at the
+start of its grace window, so the script exits by itself inside the window,
+which by Slurm's source counts toward the hold that MaxBatchRequeue sets
 ([source-confirmed](validation/observed-marlowe.md#signals-and-requeues-in-slurms-source)).
 
 ### Deferred

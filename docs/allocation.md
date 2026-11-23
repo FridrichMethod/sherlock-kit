@@ -10,14 +10,16 @@ The caller supplies the worker PID, not the toolkit subprocess or its query
 shell. The command never uses SSH and requires no project configuration. On
 Marlowe it carries `--site marlowe`, which names the site where a job's run
 directory holds no configuration; without it the command is exit 1
-`site_mismatch` there. The Marlowe form is tested offline against
-Marlowe-shaped records and has not run on Marlowe. The
-worker must belong to the current Unix UID, exist on this host, and have the
-same Linux `/proc/PID/stat` start ticks before and after evidence collection.
-Ownership is checked before reading process contents. A dead, zombie or
-replaced process cannot produce complete success. The kernel CPU affinity is
-reported as read after collection; a worker may bind its threads meanwhile, so
-affinity is not part of its identity.
+`site_mismatch` there. The Marlowe form ran in one CPU-only job, for the batch
+shell and, with `--step-id`, for a process of an `srun` step
+([observed](validation/observed-marlowe.md#shk-inside-a-batch-job)); a GPU job
+and an array element are tested offline against Marlowe-shaped records only.
+The worker must belong to the current Unix UID, exist on this host, and have
+the same Linux `/proc/PID/stat` start ticks before and after evidence
+collection. Ownership is checked before reading process contents. A dead,
+zombie or replaced process cannot produce complete success. The kernel CPU
+affinity is reported as read after collection; a worker may bind its threads
+meanwhile, so affinity is not part of its identity.
 
 The command reads actual Slurm job, optional numeric step and local node
 records with fixed POSIX shell programs, all within the configured

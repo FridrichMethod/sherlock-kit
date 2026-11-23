@@ -1187,8 +1187,12 @@ profile allows requeue. The Marlowe skill
 (`src/sherlock_kit/data/skills/sherlock-kit-marlowe/SKILL.md`, section
 "Inside a job") holds a job-script template for the walltime, and
 [inside a Marlowe job](install.md#inside-a-marlowe-job) shows the commands
-and which of them need `--project-dir`. These in-job paths are tested offline
-against Marlowe-shaped records and have not run on Marlowe.
+and which of them need `--project-dir`. One CPU-only job on Marlowe ran
+`allocation`, `status --job-id`, `submit --preflight`, the template's
+`requeue --self` with a second attempt, and `manifest`
+([observed](validation/observed-marlowe.md#shk-inside-a-batch-job)); a
+`submit` that creates a job from inside one, array elements and GPU jobs are
+tested offline against Marlowe-shaped records only.
 
 ## `push`
 
