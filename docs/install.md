@@ -278,7 +278,11 @@ of dialing. For example, with the project's pinned environment in
   where DIR holds a Marlowe configuration that exists on Marlowe, such as the
   `marlowe` directory of a checkout of the project there. A submit from a
   compute node is not observed; a refusal that Slurm's test before submit
-  reports is exit 3 with nothing staged.
+  reports is exit 3 with nothing staged. A restarted attempt (preemption or
+  self-requeue) runs an in-job `submit` again, and `shk` refuses that
+  duplicate with exit 3 and `error` `live` (or `done` or `failed` once the
+  stage ended): treat that refusal as already submitted, and any other exit 3
+  as a failure.
 - A configuration of another site at or above the run directory, such as the
   Sherlock table of a two-cluster repository whose checkout holds the run
   directories, makes `--site marlowe` exit 1 `site_mismatch`; `--project-dir`
