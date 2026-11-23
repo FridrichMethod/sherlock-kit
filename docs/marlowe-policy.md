@@ -70,7 +70,7 @@ file, "C" the cluster file.
 |---|---|---|---|
 | Marlowe only; Sherlock work follows the Sherlock rules; a task lives on one cluster | W, C | toolkit | one site per configuration and distinct `project` values per cluster |
 | Marlowe has no `/etc/agents`; the documentation is the policy and takes precedence, above all Usage Violations | W, C | observed, site | [hosts](validation/observed-marlowe.md#hosts-shells-and-identity); Usage Violations names the university policy and Marlowe's operating restrictions |
-| Do not carry over `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs (`/etc/agents` is covered by the sentence before) | W, C | toolkit | each is Sherlock's: the variables are absent on Marlowe ([storage](validation/observed-marlowe.md#storage)), Marlowe documents no purge period, it has no GPU model features ([nodes](validation/observed-marlowe.md#nodes)), and this release exports no site into jobs |
+| Do not carry over `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers (`/etc/agents` is covered by the sentence before) | W, C | toolkit | each is Sherlock's: the variables are absent on Marlowe ([storage](validation/observed-marlowe.md#storage)), Marlowe documents no purge period, and it has no GPU model features ([nodes](validation/observed-marlowe.md#nodes)) |
 | The labels; keep this in handoffs | W, C | toolkit | format of the rules files |
 | Reviewed date | W, C | toolkit | this guide |
 
@@ -124,8 +124,9 @@ file, "C" the cluster file.
 | Job scripts: `module` under plain `#!/bin/bash`, Slurm clients on PATH, `TMPDIR` is `/tmp`, job-local space wiped at job end, no GPU without `--gpus`, internet from compute nodes, login-shell environment capture | C | observed, site | [inside a batch job](validation/observed-marlowe.md#inside-a-batch-job); FAQ (node-local scratch wiped at job end, GPUs only when requested) |
 | Limits are per project account, shared with its members and changed with demand | W, C | site, observed | SLURM on Marlowe and FAQ (the per-project GPU cap and time limit change with demand); [QOS limits](validation/observed-marlowe.md#partitions-qos-and-accounts) |
 | Every array element counts toward the submit limit, whatever the throttle | W, C | observed | an array larger than the account's submit limit was refused ([submission](validation/observed-marlowe.md#submission-verdicts)); a throttle limits running elements, not the elements submitted |
-| Reads by hand only when needed (a wait exited, the user asks, an exit 5 `next`), at least 60 s apart and otherwise rare; no `watch` or polling loops; W: prefer `--after-ok`; exit 5 runs `next`; exit 6 stops; C: a Slurm timeout is retried once after a minute | W, C | toolkit | as on Sherlock, where the cadence and the ban on polling loops rest on site rule 10 ([Sherlock policy](sherlock-policy.md#where-each-site-rule-lands)); the Marlowe documentation states no cadence |
+| Reads by hand only when needed (a wait exited, the user asks, an exit 5 `next`), at least 60 s apart and otherwise rare; no `watch` or polling loops; W: prefer `--after-ok`; exit 5 runs `next`; exit 6 stops; C: a Slurm timeout is retried once after a minute | W, C | toolkit | as on Sherlock, where the cadence and the ban on polling loops rest on site rule 10 ([Sherlock policy](sherlock-policy.md#where-each-site-rule-lands)); the Marlowe documentation states no cadence; unlike a Sherlock controller job, no Marlowe job polls at all (the row on jobs that run shk) |
 | Cancel only exact verified own jobs; never cancel and resubmit to adjust a queued job; `update` lowers walltime or an array's throttle | W, C | toolkit | a resubmission loses the queued job's age, the largest priority weight ([scheduler](validation/observed-marlowe.md#partitions-qos-and-accounts)) |
+| "In jobs, bounded deterministic scripts may run `shk --site marlowe` within the authorized bound; no job that only waits or polls." | W, C | toolkit | the bound is owner decision 2 below, and it covers every job a script can submit and every attempt, since each is usage billed to the research account (Apply for Access); the documentation states no rule on jobs that run the Slurm clients, requeue themselves or submit jobs, and welcomes work on compute nodes up to the allocation (Usage Violations); the clients work in a job ([inside a batch job](validation/observed-marlowe.md#inside-a-batch-job)); a job that only waits or polls is billed idle time, so the stricter reading of owner decision 2's CPU-only sentence excludes it: stages chain with `--after-ok`, and waits run from the workstation or a login-node session; "deterministic" excludes an agent or LLM session; on Sherlock, by contrast, site rule 1 allows a controller job that submits and polls ([Sherlock policy](sherlock-policy.md#where-each-site-rule-lands)) |
 
 ### Cost and waiting
 
@@ -148,7 +149,7 @@ file, "C" the cluster file.
 | Requeue stays on | W, C | owner, site | owner decision 3 below; Saving Checkpoints calls requeue the default on Marlowe |
 | Atomic checkpoints on scratch every few minutes, resume from the newest | W, C | site | Saving Checkpoints (write to scratch, replace atomically, load the newest on restart); FAQ |
 | The protected window is short | W, C | observed | a job becomes preemptible a few minutes after it starts ([preemption](validation/observed-marlowe.md#preemption-and-requeue)) |
-| Never rely on a signal | W, C | toolkit | the signal sequence of a real preemption is not observed on Marlowe, and no usable signal window was seen on Sherlock |
+| Never rely on a signal | W, C | toolkit | the signal sequence of a real preemption is not observed on Marlowe, and no usable signal window was seen on Sherlock; by Slurm's source the batch shell gets no signal at the start of a preemption's grace window and a `--signal` does not fire there ([source-confirmed](validation/observed-marlowe.md#signals-and-requeues-in-slurms-source)); the skill's walltime template uses `--signal`, Slurm's time-limit timer, only to save a checkpoint and requeue before the limit, and the periodic checkpoints stay the guarantee |
 | Stop when `SLURM_RESTART_COUNT` passes the authorized retry bound | W, C | toolkit, owner | preemption requeues a job many times ([preemption](validation/observed-marlowe.md#preemption-and-requeue)); the retry bound is part of the authorization (owner decision 2) |
 | A job in REQUEUE_HOLD or held after a failed launch is reported with its job id and restart count and recovered only with the user's consent by `cancel` then `submit --resubmit REASON`, never `shk release` | W, C | toolkit | such holds occur ([queue](validation/observed-marlowe.md#partitions-qos-and-accounts)); `shk release` releases only holds that `submit --hold` set |
 
@@ -234,14 +235,21 @@ These are `shk` decisions, not site requirements:
   site states no cadence. The one repeated read is a bounded
   `shk --site marlowe wait`: `--timeout` is required (at most 168 hours), it
   reads every 5 minutes by default and backs off to 30 minutes while nothing
-  runs or changes, and it runs in the attended session, never detached.
+  runs or changes, and it runs in the attended session, never detached and
+  never inside a Marlowe job.
 - A queued job is changed with `shk update`, never cancelled and resubmitted;
   a job held after a requeue is recovered by cancel and resubmit with the
   user's consent, never released.
 - Every attempt counts as billed.
 - `push` and `pull` are refused on Marlowe and use the login-node master from
   outside; there is no transfer-node alias in `shk`.
-- shk is not called inside Marlowe jobs in this release.
+- Inside a Marlowe job shk calls are steps of the job's own work:
+  `requeue --self` before the walltime, `allocation`, `manifest`,
+  `status --job-id` of the job itself, and at most a `submit` of a fixed next
+  stage, all within the authorized bound, which covers every job the script
+  can submit and every attempt. The stage list is fixed and finite, no job
+  submits its own kind again, and no job waits or polls (no `shk wait`, no
+  status loop). The site states no rule on such jobs.
 - Agents never authenticate and never contact Marlowe staff.
 
 ## Owner choices
