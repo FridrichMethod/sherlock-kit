@@ -286,10 +286,12 @@ of dialing. For example, with the project's pinned environment in
 - `requeue --self` needs `preempt`, the one Marlowe partition whose profile
   allows requeue, and the job name that `submit` exports as `SHK_NAME`.
 - Without `--site marlowe` (and with no Marlowe configuration in reach)
-  nothing reaches a cluster: `requeue --self` and `allocation` are exit 1
-  `site_mismatch`, whose hint names `--site marlowe`, and other commands are
-  exit 4 naming `sherlock-plain`, which inside a Marlowe job means that
-  `--site marlowe` is missing, not that a login is needed.
+  nothing reaches a cluster: with `--executor local`, as in the examples, and
+  for `requeue --self` and `allocation` in any case, a command is exit 1
+  `site_mismatch`, whose hint names `--site marlowe`; without either flag,
+  `status --job-id` and `status --name` are exit 4 naming `sherlock-plain`,
+  which inside a Marlowe job means that `--site marlowe` is missing, not that
+  a login is needed.
 
 These commands are tested offline against Marlowe-shaped records and have not
 run inside a Marlowe job. What a job may do with `shk` (steps of its own work,
