@@ -198,13 +198,19 @@ names (`login-0N`, `nNN`, the `cm.cluster` domain) and its Slurm ClusterName
 (`slurm`) are vendor defaults that do not identify it, so its test is whether
 its Slurm configuration file exists on the machine. That path is a vendor
 default too, so the test would also hold on another cluster managed the same
-way, which is why it never selects the site. On a Marlowe login node a
-Marlowe command (by `--site` or by configuration) runs locally by itself,
-while a command with neither stays a Sherlock command. A forced local
-executor (`--executor local`, `SHK_EXECUTOR=local`) where the selected site's
-test fails and another site's holds is exit 1 `site_mismatch`, whose hint
-names `--site` of that site: the Slurm of this machine would otherwise answer
-for the selected site. Where the test holds,
+way, which is why it never selects the site. On a Marlowe login or compute
+node, inside a job too, a Marlowe command (by `--site` or by configuration)
+runs locally by itself, while a command with neither stays a Sherlock command.
+A forced local executor (`--executor local`, `SHK_EXECUTOR=local`) where the
+selected site's test fails and another site's holds is exit 1
+`site_mismatch`, whose hint names `--site` of that site: the Slurm of this
+machine would otherwise answer for the selected site. `requeue --self` and
+`allocation` work only with the local executor; with another one they run
+that forced-local check before they refuse, so on a machine of another
+packaged site they answer `site_mismatch` with that hint, and only elsewhere,
+on a workstation, exit 3 `self_only` or `local_only`. Inside a Marlowe job
+every retry is billed time, so the first answer names the missing flag.
+Where the test holds,
 the data executor is local and refuses push and pull; on Marlowe that is
 `transfer_on_marlowe`, a toolkit choice: transfers start outside Marlowe.
 
@@ -245,17 +251,70 @@ its hints and exit 5 `next` carry `--site NAME` (`sites.selector`,
 `status --details`, which keep the read's `executor` and `site`. Sherlock adds
 nothing, so its replies, hints and `next` are those of a kit without sites.
 
+### Inside a Marlowe job
+
+A job's working directory, its run directory on scratch, holds no
+configuration, and no environment variable selects a site, so a command
+inside a Marlowe job names its site like every other Marlowe command:
+`shk --site marlowe --executor local ...`, called by the absolute path of an
+environment with Python 3.11 or newer. On a compute node the executor is
+local by itself, since the Slurm configuration file exists there too; the
+explicit `--executor local` makes a command on the wrong machine fail instead
+of dialing. `requeue --self`, `allocation`, `status --job-id`,
+`status --name` and `manifest` need no configuration; `submit`,
+`status --task` and `cancel --task` need `--project-dir` naming a Marlowe
+configuration on Marlowe. Nothing is exported into a job beside `SHK_NAME`
+and the submission token, on either site. These paths are tested offline
+against Marlowe-shaped records and have not run on Marlowe.
+
+On Sherlock a controller job may submit and poll its later stages. On
+Marlowe every job and every attempt is billed, CPU-only ones included, and a
+job that waits is billed idle time, so the toolkit is stricter there: `shk`
+calls inside a job are steps of the job's own work (`requeue --self` before
+the walltime, `allocation`, `manifest`, `status --job-id` of itself, and at
+most a `submit` of a fixed next stage); the authorized bound covers every job
+the script can submit and every attempt; and no job waits or polls: stages
+chain with `--after-ok`, and the wait runs on the workstation or in a
+login-node session. The site's documentation states no rule on such jobs;
+this is the stricter reading of the owner's rule that CPU-only work which
+neither prepares nor checks a Marlowe GPU job runs off Marlowe.
+
+The Marlowe skill carries one job-script template, for the walltime:
+`--signal=B:USR1@T` before the time limit, the workload stopped with a
+checkpoint, then `requeue --self`. Its restart bound is on
+`SLURM_RESTART_COUNT`, which by Slurm's source counts every restart,
+preemptions and self-requeues alike: the user's authorization counts attempts
+of every kind (1 + retries), and a count of self-requeues alone would let
+preemptions add attempts without limit. The guard stops the work at the
+authorized bound; an attempt past it still starts and is billed for the
+seconds before the guard. The template sets no TERM trap: periodic
+checkpoints are what survive a preemption, a time limit or a cancel, and a
+trap that forwards SIGTERM to the workload would rest on a signal sequence
+not observed on Marlowe. It covers one workload that the batch shell starts
+directly. Through `srun`, the SIGTERM that should stop the workload becomes
+SIGKILL of its tasks, and a preemption ends the step at the start of its
+grace window, so the script exits by itself inside the window, which by
+Slurm's source counts toward the hold that MaxBatchRequeue sets
+([source-confirmed](validation/observed-marlowe.md#signals-and-requeues-in-slurms-source)).
+
 ### Deferred
 
-Marlowe support covers commands from a workstation and from a login node.
-Left out on purpose:
+Marlowe support covers commands from a workstation, from a login node and
+inside a job. Left out on purpose:
 
-- controllers inside Marlowe jobs: site selection inside a job without a
-  configuration, site and executor exports into jobs, `requeue --self`,
-  allocation proofs, and a grace-window job template, which waits for a
-  consumer that has seen a real preemption;
-- `SHK_SITE` or any other environment selection, and a configuration layout
-  with several sites;
+- a job template that reacts to a preemption signal. By Slurm's source (not
+  observed on Marlowe) the batch shell gets no signal at the start of a
+  preemption's grace window and `--signal` does not fire there, so its only
+  notice is the SIGTERM at the end of the window, and the signal sequence of
+  a real preemption is not observed
+  ([not observed](validation/observed-marlowe.md#not-observed)). Such a
+  template waits for a consumer that has seen one;
+- an export of the site or the executor into jobs, and selection of the site
+  by an environment variable (`SHK_SITE` or another): every Marlowe command
+  writes `--site marlowe`, inside a job too, so none needs one; an exported
+  value would read as a selector that `shk` does not honor, and it can be
+  added later without breaking a script. Also a configuration layout with
+  several sites;
 - partitions `batch` and `hero`, suffixed accounts and `--qos`;
 - detection of Marlowe by host name;
 - a `site` key in the frozen spec or in error replies;
@@ -281,9 +340,9 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    batch jobs (`batch: false` for `dev`, where Sherlock rejects every sbatch
    job; `occupancy` and `resources` still read it); GPUs only
    where the profile allows them; requeue only where the profile allows it
-   (today `owners`), else `--no-requeue`. A `--partition` value with a comma
-   is a partition list, Slurm's own syntax (`gpu,bioe,stat`), on `submit` and
-   on `update` (for a pending job) only:
+   (Sherlock's `owners`, Marlowe's `preempt`), else `--no-requeue`. A
+   `--partition` value with a comma is a partition list, Slurm's own syntax
+   (`gpu,bioe,stat`), on `submit` and on `update` (for a pending job) only:
    `resources` and `occupancy` take one name per flag and refuse a comma as
    exit 3 `unknown_partition`, and a repeated `--partition` flag is not a list
    (argparse keeps the last one). A value without a comma takes the

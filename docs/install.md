@@ -108,7 +108,9 @@ status calls. Allocation evidence requires the actual worker PID; self-requeue
 requires the job identity, partition and checkpoint/retry conditions documented
 in [release and requeue](cli.md#release-and-requeue). These examples do not
 allocate resources or authorize a workload; see
-[controllers inside a job](cli.md#controllers-inside-a-job).
+[controllers inside a job](cli.md#controllers-inside-a-job). Inside a
+Marlowe job the commands carry `--site marlowe`: see
+[inside a Marlowe job](#inside-a-marlowe-job).
 
 ## SSH control masters
 
@@ -244,8 +246,57 @@ exists on the machine: the programs run locally through the same prelude, and
 `doctor` reports `"executor": "local"` with no masters. `push` and `pull` are
 refused there (exit 3 `transfer_on_marlowe`): start transfers from the
 workstation, or copy with `cp` or `rsync` on Marlowe without `shk`. The rules
-for an agent session there are `shk --site marlowe rules cluster`. Do not call
-`shk` inside Marlowe jobs: this release exports no site into a job.
+for an agent session there are `shk --site marlowe rules cluster`. A job
+calls `shk` as [inside a Marlowe job](#inside-a-marlowe-job) shows.
+
+### Inside a Marlowe job
+
+A Marlowe job calls `shk` by the absolute path of an environment with Python
+3.11 or newer, since the system `python3` of a compute node is 3.10
+([observed](validation/observed-marlowe.md#inside-a-batch-job)). Keep that
+environment under `/projects/PROJECT`, which is backed up, rather than on
+scratch, which may be purged. Every command that reaches Slurm carries
+`--site marlowe --executor local`: the job's run directory holds no
+configuration, and no environment variable selects a site. With
+`--site marlowe` the executor is local by itself on a compute node; the
+explicit `--executor local` makes a command on the wrong machine fail instead
+of dialing. For example, with the project's pinned environment in
+`/projects/m000000/USER/demo/.venv-shk`:
+
+```sh
+/projects/m000000/USER/demo/.venv-shk/bin/shk --site marlowe --executor local allocation --pid "$WORKER_PID" --job-id "$SLURM_JOB_ID"
+/projects/m000000/USER/demo/.venv-shk/bin/shk --site marlowe --executor local status --job-id "$SLURM_JOB_ID"
+/projects/m000000/USER/demo/.venv-shk/bin/shk --site marlowe --executor local requeue --self --expect-name "$SHK_NAME"
+/projects/m000000/USER/demo/.venv-shk/bin/shk --site marlowe --executor local --project-dir /projects/m000000/USER/demo/marlowe submit --task stage-2 --script /projects/m000000/USER/demo/stage-2.sh --partition preempt --cpus 8 --mem 64G --gpus 1 --time 2h --after-ok "$SLURM_JOB_ID"
+/projects/m000000/USER/demo/.venv-shk/bin/shk manifest out
+```
+
+- `requeue --self`, `allocation`, `status --job-id`, `status --name` and
+  `manifest` need no configuration; `manifest` reads no site and never uses
+  the network.
+- `submit`, `status --task` and `cancel --task` need `--project-dir DIR`,
+  where DIR holds a Marlowe configuration that exists on Marlowe, such as the
+  `marlowe` directory of a checkout of the project there. A submit from a
+  compute node is not observed; a refusal that Slurm's test before submit
+  reports is exit 3 with nothing staged.
+- A configuration of another site at or above the run directory, such as the
+  Sherlock table of a two-cluster repository whose checkout holds the run
+  directories, makes `--site marlowe` exit 1 `site_mismatch`; `--project-dir`
+  is the way out there too.
+- `requeue --self` needs `preempt`, the one Marlowe partition whose profile
+  allows requeue, and the job name that `submit` exports as `SHK_NAME`.
+- Without `--site marlowe` (and with no Marlowe configuration in reach)
+  nothing reaches a cluster: `requeue --self` and `allocation` are exit 1
+  `site_mismatch`, whose hint names `--site marlowe`, and other commands are
+  exit 4 naming `sherlock-plain`, which inside a Marlowe job means that
+  `--site marlowe` is missing, not that a login is needed.
+
+These commands are tested offline against Marlowe-shaped records and have not
+run inside a Marlowe job. What a job may do with `shk` (steps of its own work,
+within the authorized bound, never a wait or a status loop) is in
+[controllers inside a job](cli.md#controllers-inside-a-job); the Marlowe
+skill's section "Inside a job" holds a job-script template for the walltime.
+The examples above allocate nothing and authorize no workload.
 
 ## Agents in a sandbox
 

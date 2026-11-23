@@ -3,10 +3,15 @@
 ```sh
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK \
   [--step-id NUMERIC_STEP] [--hostlist EXPRESSION [--hostlist EXPRESSION ...]]
+shk --site marlowe --executor local allocation --pid PID --job-id N_OR_N_TASK ...
 ```
 
 The caller supplies the worker PID, not the toolkit subprocess or its query
-shell. The command never uses SSH and requires no project configuration. The
+shell. The command never uses SSH and requires no project configuration. On
+Marlowe it carries `--site marlowe`, which names the site where a job's run
+directory holds no configuration; without it the command is exit 1
+`site_mismatch` there. The Marlowe form is tested offline against
+Marlowe-shaped records and has not run on Marlowe. The
 worker must belong to the current Unix UID, exist on this host, and have the
 same Linux `/proc/PID/stat` start ticks before and after evidence collection.
 Ownership is checked before reading process contents. A dead, zombie or
@@ -53,7 +58,10 @@ substitutes for job identity.
 Success has `ok: true`, `action: "allocation"`, `executor: "local"`,
 `complete: true` and a UTC `queried_at`. Failure produces the ordinary error
 object, never a partially successful allocation proof. Unsupported SSH
-execution exits 3 (`local_only`); invalid exact job selectors use
+execution exits 3 (`local_only`), except on a machine of another packaged
+site, such as a Marlowe node without `--site marlowe`: there the command
+first runs the forced-local site check and exits 1 (`site_mismatch`, whose
+hint names that site's `--site`). Invalid exact job selectors use
 `spec_invalid`. Invalid or contradictory evidence exits 1
 (`allocation_invalid`), including a query that Slurm answers with an error,
 such as an unknown job or a PID outside every job; the message carries Slurm's
@@ -118,6 +126,11 @@ Its `queried_at` equals the reply's. Each entry of `nodes` belongs to the
 - `candidates` are the sorted distinct values after the prefix `GPU_SKU:`
   among the comma-separated `ActiveFeatures` of that node record, `[]` when
   there is none; a CPU-only job on a node without GPUs still gets an entry.
+  On Marlowe every entry has `candidates: []` and `ambiguous: false`: its
+  nodes carry no `GPU_SKU:` feature (the only one is `location=local`) and
+  their GRES is untyped (`Gres=gpu:8(S:0-1)`), so the empty list says that
+  Slurm names no model, not that the node has no GPU
+  ([nodes](validation/observed-marlowe.md#nodes)).
 - `ambiguous` is true when there are several candidates, when the node's
   `Gres` and `CfgTRES` together name more than one GPU type, or when a
   candidate or a GPU type carries a MIG marker; false otherwise. GPU types are

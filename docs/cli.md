@@ -130,11 +130,18 @@ are refused. On Marlowe they run locally where Marlowe's Slurm configuration
 file (`/cm/shared/apps/slurm/var/etc/slurm/slurm.conf`) exists, that is on a
 Marlowe login or compute node, and `push` and `pull` are refused there (exit 3
 `transfer_on_marlowe`). That test chooses the executor for the selected site,
-never the site: on a Marlowe login node, a command without `--site marlowe`
-and without a Marlowe configuration is a Sherlock command. With
-`--executor local` or `SHK_EXECUTOR=local` such a command is exit 1
+never the site: on a Marlowe login or compute node, a command without
+`--site marlowe` and without a Marlowe configuration is a Sherlock command.
+With `--executor local` or `SHK_EXECUTOR=local` such a command is exit 1
 `site_mismatch`, whose hint names `--site marlowe`: a forced local executor
-on a machine of another site would read that site's Slurm.
+on a machine of another site would read that site's Slurm. `requeue --self`
+and `allocation`, which need the local executor, run that check before they
+refuse another executor, so on a Marlowe node without `--site marlowe` they
+too are exit 1 `site_mismatch` (on a workstation they stay exit 3
+`self_only` and `local_only`). Without a forced local executor every other
+such command takes the ssh executor and, with no master on that node, is
+exit 4 naming `sherlock-plain`: inside a Marlowe job that means that
+`--site marlowe` is missing, not that a login is needed.
 
 ## Sites
 
@@ -729,7 +736,9 @@ it. It is never detached so that it outlives the session (`nohup`, `setsid`,
 `&`, a `tmux` or `screen` session left running, cron) and never used to prompt
 an agent again; see the rules.
 Inside a Sherlock allocation a bounded deterministic controller may run
-`shk --executor local wait` ([controllers inside a job](#controllers-inside-a-job)).
+`shk --executor local wait` ([controllers inside a job](#controllers-inside-a-job));
+no wait runs inside a Marlowe job, where it would be billed idle time: there
+it runs on the workstation or in a login-node session.
 
 ## `cancel`
 
@@ -931,6 +940,9 @@ identity, current host and optional numeric step membership.
 - Its `gpu_sku_candidates` list the `GPU_SKU:` features of each node record as
   candidates for the GPU model, with an `ambiguous` flag and the source fields;
   it never states which device the job got.
+- On Marlowe it is `shk --site marlowe --executor local allocation ...`, and
+  every entry of `gpu_sku_candidates` has empty `candidates`: Marlowe's nodes
+  carry no `GPU_SKU:` feature, and their GRES is untyped.
 
 See [the allocation contract](allocation.md) for the JSON schema.
 
@@ -945,7 +957,8 @@ immediately before `scontrol release`.
 - actual Slurm PID membership in that physical job;
 - current UID and name, and the token only when `--expect-token` is given;
 - RUNNING state;
-- a partition whose profile allows requeue (today `owners`) and Requeue=1.
+- a partition whose profile allows requeue (Sherlock's `owners`, Marlowe's
+  `preempt`) and Requeue=1.
 
 These are read from Slurm's record of that physical job, which also names the
 target: an array element is requeued as its `ArrayJobId_ArrayTaskId`, never the
@@ -1149,17 +1162,33 @@ partially. For these, cancel the job (`shk cancel`) and submit it again with
 
 ## Controllers inside a job
 
-A bounded deterministic workflow manager may run inside its allocated Slurm
-job and call `shk --executor local` to submit/poll authorized later compute
-stages at intervals of at least 60 seconds, with no workstation dependency;
-`shk --executor local wait` is such a poll. This does not authorize
-scheduling future agent or LLM sessions. Controllers own their bounded
-retries, checkpointing, scientific validation and accounting.
+On Sherlock a bounded deterministic workflow manager may run inside its
+allocated Slurm job and call `shk --executor local` to submit/poll authorized
+later compute stages at intervals of at least 60 seconds, with no workstation
+dependency; `shk --executor local wait` is such a poll. This does not
+authorize scheduling future agent or LLM sessions. Controllers own their
+bounded retries, checkpointing, scientific validation and accounting.
 Call the project's pinned install by its absolute path, as
 [inside jobs and controllers](install.md#inside-jobs-and-controllers) shows.
-Controllers inside Marlowe jobs are not supported in this release: `shk`
-exports no site into a job, and the Marlowe rules say not to call `shk`
-inside one.
+
+Inside a Marlowe job, where every job and every attempt is billed, the
+toolkit is stricter. `shk` calls are steps of the job's own work, written
+`shk --site marlowe --executor local ...` and called by the absolute path of
+an environment with Python 3.11 or newer: `requeue --self` before the
+walltime, `allocation`, `manifest`, `status --job-id` of the job itself, and
+at most a `submit` of a fixed next stage. The user's authorized bound covers
+every job the script can submit and every attempt; the stage list is fixed
+and finite, and no job submits its own kind again. No `shk wait` and no
+status loop run inside a Marlowe job, since a job that waits is billed idle
+time: stages chain with `--after-ok`, and the wait runs on the workstation or
+in a login-node session. No job starts or schedules an agent or LLM session.
+`requeue --self` there needs `preempt`, the one Marlowe partition whose
+profile allows requeue. The Marlowe skill
+(`src/sherlock_kit/data/skills/sherlock-kit-marlowe/SKILL.md`, section
+"Inside a job") holds a job-script template for the walltime, and
+[inside a Marlowe job](install.md#inside-a-marlowe-job) shows the commands
+and which of them need `--project-dir`. These in-job paths are tested offline
+against Marlowe-shaped records and have not run on Marlowe.
 
 ## `push`
 

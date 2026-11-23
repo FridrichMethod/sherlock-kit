@@ -66,7 +66,10 @@ flowchart LR
 - Data moves through the data transfer node with `rsync`; a pull is verified
   against the manifest the job wrote before it appears locally.
 - On Sherlock, on a login node or inside a job, the same programs run locally,
-  so a controller job can submit and poll its own later stages.
+  so a controller job can submit and poll its own later stages. On Marlowe
+  they run locally there too, but a job's `shk` calls are steps of its own
+  work and no job waits or polls
+  ([controllers inside a job](docs/cli.md#controllers-inside-a-job)).
 
 ## Install
 
@@ -238,8 +241,9 @@ takes precedence over the packaged rules.
 
 Marlowe is the second packaged site. Every Marlowe command is
 `shk --site marlowe ...`, over the user's `marlowe-plain` master (one alias
-for commands and rsync) or locally on a Marlowe login node. A project on both
-clusters adds a Marlowe configuration in its own directory:
+for commands and rsync) or locally on a Marlowe login node or inside a
+Marlowe job. A project on both clusters adds a Marlowe configuration in its
+own directory:
 
 ```toml
 # <repo>/marlowe/sherlock-kit.toml
