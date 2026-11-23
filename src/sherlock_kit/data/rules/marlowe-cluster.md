@@ -1,6 +1,6 @@
 ## Marlowe: agent running on Marlowe
 
-These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlock work follows the Sherlock rules, and a task lives on one cluster. Marlowe has no `/etc/agents`: its documentation is the policy and takes precedence, above all the Usage Violations page. Do not carry over Sherlock practice: `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers, shk inside jobs. Site marks the documentation's rules, owner the user's choices; the rest are toolkit rules or observed facts. Keep this in handoffs. Reviewed 2026-11-21 against https://marlowe-research.stanford.edu/documentation/ .
+These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlock work follows the Sherlock rules, and a task lives on one cluster. Marlowe has no `/etc/agents`: its documentation is the policy and takes precedence, above all the Usage Violations page. Do not carry over Sherlock practice: `sh_*` helpers, `$GROUP_HOME`, `$OAK`, `$L_SCRATCH_JOB`, the 90-day purge and its sanction, `sherlock-dtn`, GPU model constraints, `--prefer` tiers. Site marks the documentation's rules, owner the user's choices; the rest are toolkit rules or observed facts. Keep this in handoffs. Reviewed 2026-11-21 against https://marlowe-research.stanford.edu/documentation/ .
 
 ### Site rules
 - Site: run nothing that lets a person or a service reach Marlowe without SUNet ID, password and Duo: websocket tunnels and remote-control servers (SSHX, Claude Remote Control/Server: never start one for this session), userspace VPNs (Tailscale, ZeroTier), editor web tunnels (VS Code, Cursor, Windsurf), own code servers on login nodes. The user's own SSH forwarding through that login is fine; open no tunnel or forward yourself. Never share credentials or this session.
@@ -21,13 +21,14 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 ### Jobs
 - Submit, update and cancel only through shk, never raw `sbatch`, `scontrol update` or `scancel`. Use `--partition preempt` with explicit CPUs, memory and walltime, GPUs with `--gpus N`. The account comes from the configuration's `account`: never `--account`, never a guess from `$PROJECT_ID`.
 - `srun` and `salloc` allocations are billed jobs too: only with the user's authorization and an explicit `--time`.
-- Submit first runs Slurm's test (`sbatch --test-only`); a refusal is exit 3 with nothing staged: change the request. "Requested node configuration is not available" may also mean no node is schedulable now: read `shk --site marlowe resources --partition preempt --summary` before changing the request.
+- Submit first runs `sbatch --test-only`; a refusal is exit 3, nothing staged: change the request. "Requested node configuration is not available" may also mean no schedulable node: first read `shk --site marlowe resources --partition preempt --summary`.
 - No GPU model `--constraint` (no such features), typed GRES or `--tmp` (Slurm refuses them), no `#SBATCH --exclusive` (it takes and bills a whole node's CPUs).
 - Job scripts: `module` works under plain `#!/bin/bash` and the Slurm clients are on PATH. `TMPDIR` is `/tmp`; job-local space is `/local_scratch/$USER.$SLURM_JOB_ID`, wiped at job end. No GPU is visible without `--gpus`. Compute nodes reach the internet. The job environment is captured from a login shell: keep login startup files light and quiet.
+- In jobs, bounded deterministic scripts may run `shk --site marlowe` within the authorized bound; no job that only waits or polls.
 - Site: limits are per project account, shared with its members and changed with demand.
 - Every array element counts toward the submit limit, whatever the throttle.
 - Read status only when needed (wait exited, user asks, exit 5 `next` due; never resubmit blind), at least 60 s apart, ideally 10+ min; no watch or polling loops. Retry a Slurm timeout once after a minute; then, or on exit 6, stop and report.
-- Cancel only exact verified own jobs and say why. Never cancel and resubmit to adjust a queued job; `shk --site marlowe update` lowers its walltime or an array's throttle.
+- Cancel only exact verified own jobs and say why. Never cancel and resubmit to adjust a queued job; `update` lowers its walltime or an array's throttle.
 
 ### Cost and waiting
 - Site: usage is charged to the PI per GPU-hour and per CPU-hour, CPU-only jobs included.
@@ -42,7 +43,7 @@ These rules cover an agent session on a Marlowe login node. Marlowe only: Sherlo
 - Preemption is routine, not an anomaly.
 - Owner: requeue stays on (the `preempt` default; no `--no-requeue`).
 - Scripts write atomic checkpoints (write, then rename) on scratch every few minutes, since the protected window is short, resume from the newest one, never rely on a signal, and stop when `SLURM_RESTART_COUNT` passes the authorized retry bound.
-- A job in REQUEUE_HOLD (`current.tasks.by_state`) or held after a failed launch (its reason in `status --details`) is reported with its job id and restart count (`current.max_restart`). Recover it only with the user's consent: `shk --site marlowe cancel`, then `shk --site marlowe submit --resubmit REASON`; never `shk release`.
+- A job in REQUEUE_HOLD (`current.tasks.by_state`) or held after a failed launch (its reason in `status --details`) is reported with its job id and restart count (`current.max_restart`). Recover it only with the user's consent: `cancel`, then `submit --resubmit REASON`; never `shk release`.
 
 ### Data
 - `remote_root` lies under `/scratch/PROJECT/USER`.
