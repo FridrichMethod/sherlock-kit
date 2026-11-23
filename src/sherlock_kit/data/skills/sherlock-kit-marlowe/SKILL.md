@@ -14,7 +14,7 @@ Every Marlowe command is `shk --site marlowe ...`. The examples below run where 
 1. Prefer the project environment's `shk` (`.venv/bin/shk`, or `shk` in the activated environment), not `uv run shk`. Ask before any install, upgrade or version switch. `shk --version` prints `sherlock-kit X.Y.Z (FORM)`; never use a `source` (development) checkout for real work. A release whose `shk --help` lists no `--site` cannot drive Marlowe. A project without `shk` gets, once the user agrees, a dependency on a release tag (0.10.0 or newer), never a branch: `sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@vX.Y.Z`. An upgrade changes that tag, relocks or reinstalls, and reruns `shk --site marlowe install-skill` with the same options.
 2. `shk --site marlowe doctor` is read-only and offline: it checks Python, ssh, rsync, the configuration and the `marlowe-plain` master without dialing. `--remote` adds one read-only call on Marlowe.
 3. In Codex, a sandbox startup failure or local SSH socket `Permission denied` / `Operation not permitted` is not a missing master: request per-command approval for the blocked command and retry once; never disable the sandbox or grant writes to all of HOME.
-4. On a Marlowe login node shk needs Python 3.11 or newer, and the system `python3` is older: use the `uv` module or a micromamba or conda environment. There `shk --site marlowe ...` runs Slurm locally (no ssh) by itself.
+4. On a Marlowe login or compute node shk needs Python 3.11 or newer, and the system `python3` is older: use the `uv` module or a micromamba or conda environment (a job calls that environment's shk by its absolute path). On a login node `shk --site marlowe ...` runs Slurm locally (no ssh) by itself.
 
 ## Two-cluster layout
 
@@ -61,9 +61,9 @@ shk --site marlowe pull /scratch/m000000/USER/demo/runs/NAME/out results/NAME
 | Code | Meaning | Do |
 |---|---|---|
 | 0 | ok | continue |
-| 1 | configuration (missing `account`, `site_mismatch`, `config_invalid`), spec, verification, validator, malformed reply, failed remote read | fix the input; for `site_mismatch` pass `--project-dir` to the Marlowe configuration; for `malformed_read` follow its hint (one read retry after 60 s) |
+| 1 | configuration (missing `account`, `site_mismatch`, `config_invalid`), spec, verification, validator, malformed reply, failed remote read | fix the input; for `site_mismatch` follow its hint (`--project-dir` to the Marlowe configuration, or the missing `--site marlowe` inside a job); for `malformed_read` follow its hint (one read retry after 60 s) |
 | 2 | usage error | read `shk <cmd> --help` |
-| 3 | refused, and nothing was submitted, staged, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, an unlisted partition, an `#SBATCH` directive shk owns, a request that Slurm's test refuses (plain submit or `--preflight`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, push or pull on Marlowe | read the message; change the request, not the guard |
+| 3 | refused, and nothing was submitted, staged, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, an unlisted partition, an `#SBATCH` directive shk owns, a request that Slurm's test refuses (plain submit or `--preflight`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, push or pull on Marlowe, `requeue --self` outside a job (`self_only`) | read the message; change the request, not the guard |
 | 4 | SSH transport or master check unavailable | `auth_required`: ask the user to run the hint (`ssh marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the client config needs fixing; logging in again does not help. Local permission denial: Setup check 3. Other `unavailable` or `timeout`: run `shk --site marlowe doctor`, retry once after about a minute, then stop and tell the user |
 | 5 | outcome unknown after a dispatched submit, cancel, release, requeue or update: `sbatch` ran without printing a strict job id, `scancel` or `scontrol` exited nonzero, an update's re-read did not confirm it, or the reply was lost; `detail` carries the evidence | run the command in the reply's `next`, not before the time it names (at least 60 s); never resubmit or repeat a mutation blind |
 | 6 | status ok, but the newest job of a name has an anomaly | stop and report it to the user |
@@ -94,15 +94,57 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 - `TMPDIR` is `/tmp`, not a job directory. Job-local space is `/local_scratch/$USER.$SLURM_JOB_ID`, visible only in the job and wiped when it ends: copy what must survive to scratch.
 - No GPU is visible without `--gpus`. Compute nodes reach the internet.
 - The job environment is captured from a login shell plus the exported variables, so keep login startup files light and quiet: a slow or failing capture can leave a job requeued and held.
-- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json`; `$SHK_NAME` holds the job name. `#SBATCH` lines may not set what shk owns (account, exclude, GPUs or gres, partition, array, dependency, begin, job name, hold). No GPU model `--constraint`, `--tmp` or `#SBATCH --exclusive`.
-- Preemption restarts the script from the top. Write atomic checkpoints (write, then rename) under `/scratch/PROJECT/USER` every few minutes, resume from the newest one on start, do not depend on a signal, and stop at the authorized retry bound, for example `[ "${SLURM_RESTART_COUNT:-0}" -le 3 ] || exit 1` near the top.
-- Do not call shk inside a Marlowe job: this release exports no site into jobs. Write the manifest with the one-liner below as the job's last step.
+- The job runs in `--run-dir` (default `<remote_root>/runs/<name>`), which keeps `.shk/<name>.<jobid>.sh` and `.json`. `$SHK_NAME` holds the job name and `$SHK_SUBMISSION_TOKEN` the token of `--submission-token`; shk exports no other variable into the job, and none names the site. `#SBATCH` lines may not set what shk owns (account, exclude, GPUs or gres, partition, array, dependency, begin, job name, hold). No GPU model `--constraint`, `--tmp` or `#SBATCH --exclusive`.
+- Preemption restarts the script from the top. Write atomic checkpoints (write, then rename) under `/scratch/PROJECT/USER` every few minutes, resume from the newest one on start, do not depend on a signal, and stop at the authorized retry bound, for example `[ "${SLURM_RESTART_COUNT:-0}" -le 3 ] || exit 1` near the top. By Slurm's source (not observed on Marlowe), `SLURM_RESTART_COUNT` is unset in the first attempt and counts every restart after it: preemptions, failed launches and self-requeues alike.
+
+## Inside a job
+
+The in-job commands and the template below are tested offline against Marlowe-shaped records, not run on Marlowe.
+
+- shk calls inside a Marlowe job are steps of the job's own work: `requeue --self` before the walltime, `allocation`, `manifest`, `status --job-id` of the job itself, and at most a `submit` of a fixed next stage. The bound the user authorized covers every job the script can submit and every attempt; the stage list is fixed and finite, and no job submits its own kind again. No `shk wait` and no status loop inside a job (a job that waits is billed idle time): chain stages with `--after-ok` and wait from the workstation or a login-node session with `shk --site marlowe wait`. Never start or schedule an agent or LLM session from a job.
+- Write every call as `shk --site marlowe --executor local ...` by the absolute path of the environment of Setup check 4, under `/projects/PROJECT` or scratch. With `--site marlowe` the executor is local by itself on a Marlowe node; the explicit flag makes a wrong machine fail instead of dialing. shk reads no site from the environment.
+- `requeue --self --expect-name "$SHK_NAME"`, `allocation --pid PID --job-id ID`, `status --job-id ID`, `status --name "$SHK_NAME"` and `manifest DIR` (the job's last step, see Data) need no configuration; `submit`, `status --task` and `cancel --task` need `--project-dir DIR` naming a Marlowe configuration that exists on Marlowe. A configuration of another site at or above the run directory (a whole repository pushed under `remote_root`) makes `--site marlowe` exit 1 `site_mismatch`: pass `--project-dir` naming the Marlowe configuration's directory or one without a configuration, such as the run directory.
+- Without `--site` an in-job command reaches no cluster: `requeue --self` and `allocation` answer exit 1 `site_mismatch` with a hint that names `--site marlowe`; `status --job-id`, `status --name`, `cancel --name`, `update`, `release` and `doctor` answer exit 4 naming `sherlock-plain`, which here means the missing flag, not a missing login.
+- `requeue --self` needs real Slurm PID membership in the current physical allocation, the current UID and name, RUNNING, a `requeue=yes` partition (`preempt`) and Requeue=1; the token is compared with Slurm Comment only when given, and an array element is requeued as `ARRAYJOBID_TASKID`, never the whole array. Every requeued attempt is billed and is one of the authorized retries, and by Slurm's source (not observed on Marlowe) the job queues again like a new submission. Nothing after an accepted requeue is sure to run: checkpoint first, request last. A lost reply is exit 5: never retry blind.
+- `allocation --pid PID --job-id ID [--step-id N]` proves that a PID of the current UID belongs to the job (and step) on this node and reports the allocated CPUs, GPUs and nodes; on Marlowe `gpu_sku_candidates` holds empty `candidates` (untyped GPUs, no `GPU_SKU:` feature).
+
+```bash
+#!/bin/bash
+# Submit with --time T --signal B:USR1@300, 300 s being well above the time a checkpoint
+# save takes: Slurm sends USR1 to this shell alone about 300 s (up to a minute more)
+# before the time limit, never during a preemption's grace window. Every other end
+# (preemption, time limit, scancel) kills the workload at once: its periodic
+# checkpoints are what survive.
+shk=/projects/m000000/USER/demo/.venv-shk/bin/shk   # absolute path, Python 3.11 or newer
+max_restarts=3                                       # authorized retries; preemptions count too
+[ "${SLURM_RESTART_COUNT:-0}" -le "$max_restarts" ] || exit 1
+
+requeue() {
+    kill -TERM "$work" 2>/dev/null                   # the workload saves a checkpoint and exits
+    wait "$work"
+    [ "${SLURM_RESTART_COUNT:-0}" -lt "$max_restarts" ] || exit 1
+    "$shk" --site marlowe --executor local requeue --self --expect-name "$SHK_NAME"
+    exit                                             # nothing after an accepted requeue is sure to run
+}
+trap requeue USR1
+
+./work --resume &                                    # directly, not through srun; in the background
+work=$!
+wait "$work"
+status=$?
+trap '' USR1                                         # past the workload: finish, never requeue
+exit "$status"
+```
+
+- The template covers one workload that the batch shell starts directly. By Slurm's source (not observed on Marlowe), started through `srun` the `kill -TERM` becomes SIGKILL of the tasks, and a preemption makes the script exit by itself during the grace window, which counts toward a hold (the fourth such exit holds the job until an operator releases it). Such scripts are outside the template.
+- Choose the signal's lead (300 above) longer than a checkpoint save plus about a minute and well below `--time`: with `--time` at or under the lead every attempt requeues itself at once until the bound. Set `max_restarts` to the authorized retries, which cover the planned walltime segments plus preemptions, routine on `preempt`. The guard stops the work at the authorized bound; an attempt past it still starts and is billed for the seconds before the guard. A job stopped at the bound ends failed with its checkpoint and is resubmitted only with the user's consent. Make a later start of a finished workload cheap (`./work --resume` exits 0 at once): a job can be started again after its work is done (inferred from Slurm's source).
+- By Slurm's source (not observed on Marlowe) the batch shell gets no signal at the start of a preemption's grace window, and `--signal` does not fire there; it gets SIGTERM only at the end and is then killed. Periodic checkpoints stay the only guarantee, and a script must not exit by itself when its workload is signaled.
 
 ## Data
 
 - `shk --site marlowe push LOCAL REMOTE` copies over the login-node master into REMOTE (absolute, under `remote_root` unless `--anywhere`) and never deletes. REMOTE's parent must exist (otherwise exit 1 `transfer_failed`, rsync exit 11), so create `remote_root` once before the first push: push a directory that holds `inputs/` to `remote_root` itself, whose parent `/scratch/PROJECT/USER` exists, or run `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain mkdir -p /scratch/m000000/USER/demo`. Check that push exits 0 before submitting a job that reads REMOTE, since a failed push can leave a truncated file. Push and pull are for small and medium trees; large data goes through Globus, outside shk.
 - `shk --site marlowe pull REMOTE LOCAL [--validate NAME] [--replace]` needs `REMOTE/SHA256SUMS` and an existing parent of LOCAL, copies exactly the listed files into a private stage beside LOCAL, verifies every hash, runs validator NAME from the configuration's `[validators]` table (the stage is its last argument, read-only), then renames the stage onto LOCAL and writes a receipt. `already_present` rests on that receipt; LOCAL is not verified again.
-- The job writes the manifest over its output directory DIR (for example `out/` under the run directory, never the run directory itself): `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`.
+- The job writes the manifest over its output directory DIR (for example `out/` under the run directory, never the run directory itself) as its last step: `shk --site marlowe manifest DIR` when shk's environment is available in the job (see Inside a job), else `(cd DIR && find . -name '.shk*' -prune -o -type f ! -name SHA256SUMS -printf '%P\0' | sort -z | xargs -0r sha256sum --) > DIR/SHA256SUMS`.
 - On Marlowe itself push and pull are refused (exit 3 `transfer_on_marlowe`): transfers start outside Marlowe.
 - `/scratch/PROJECT` is shared by the project, not backed up and may be purged; `/projects/PROJECT` is backed up and billed; home is small.
 - Marlowe takes Low and Moderate Risk data only, never High Risk data or PHI; ask the user when the classification is unclear.
@@ -113,6 +155,7 @@ A plain `submit` first runs Slurm's test (`sbatch --test-only`), after the dupli
 - Start a tunnel, VPN, relay or code server that reaches Marlowe without SUNet ID, password and Duo, or run one on Marlowe.
 - Run raw `sbatch`, `scancel`, `squeue` loops or `scontrol update` when shk covers the task, or `scancel -u $USER`.
 - Poll with `watch` or a status loop, detach a wait so that it outlives the session, or use a wait to re-prompt an agent.
+- Run a Marlowe job that only waits or polls or that submits its own kind again, or start or schedule an agent or LLM session from a job.
 - Release a job held after a requeue (`shk release` is only for holds that `submit --hold` set); report it and recover it with the user's consent by `shk --site marlowe cancel` and `shk --site marlowe submit --resubmit REASON`.
 - Resubmit after exit 5 or a failure without checking status and finding the cause.
 - Wrap shk in an outer timeout shorter than its own: a mutation in flight then becomes outcome unknown.
