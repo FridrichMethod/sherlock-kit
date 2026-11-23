@@ -438,9 +438,11 @@ named as such.
   ([`src/plugins/preempt/qos/preempt_qos.c`, lines 107-113](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/plugins/preempt/qos/preempt_qos.c#L107)).
 - A `--signal` is not sent during that window: the user signal goes out at
   selection only with the PreemptParameters option `send_user_signal`, which
-  Marlowe does not set, and the time-limit check skips a job selected for
-  preemption
-  ([`src/interfaces/preempt.c`, lines 425-431](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/preempt.c#L425);
+  Marlowe does not set, or the older SlurmctldParameters option
+  `preempt_send_user_signal` (Marlowe's SlurmctldParameters not read), and
+  the time-limit check skips a job selected for preemption
+  ([`src/slurmctld/node_scheduler.c`, lines 2130-2137](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/node_scheduler.c#L2130);
+  [`src/interfaces/preempt.c`, lines 425-431](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/preempt.c#L425);
   [`src/slurmctld/job_mgr.c`, lines 9248-9253](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L9248)
   and [line 9269](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L9269)).
 - At the end of the window the job is requeued: every step, the batch step
