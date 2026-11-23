@@ -384,8 +384,14 @@ def sku_candidates(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def allocation(args: argparse.Namespace, ctx: Context) -> Outcome:
-    """Produce complete evidence only after stable own worker identity is verified."""
+    """Produce complete evidence only after stable own worker identity is verified.
+
+    Before refusing another executor, the forced-local site check runs: on a machine of another
+    packaged site (a Marlowe job without --site marlowe) the cause is the site, and its
+    site_mismatch names it; everywhere else the refusal stays local_only.
+    """
     if ctx.executor().kind != "local":
+        executor.detect(ctx.settings, "local", ctx.env, ctx.hostname)
         raise ShkError(EXIT_REFUSED, "local_only", "allocation requires --executor local")
     pid = number(args.pid, "worker PID", positive=True)
     if pid is None or pid == os.getpid():

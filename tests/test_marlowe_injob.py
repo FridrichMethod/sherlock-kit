@@ -8,7 +8,7 @@ prelude against the argv-exact fake scontrol of test_control; allocation runs al
 against the fake scontrol of test_allocation for a real sleeping worker. Job and node records
 have the shapes read on Marlowe; listpids and pidinfo follow the 25.05.2 source
 (tests/fakes/marlowe.py). Marlowe's sh is bash, so the requeue cases also run under bash as
-sh.
+sh. MissingSite pins which refusal a missing or misplaced --site gets on each kind of machine.
 """
 
 import io
@@ -281,3 +281,88 @@ class MarloweAllocation(InJob):
         self.assertEqual(
             (job["allocated_cpus"], job["allocated_gpus"], job["allocated_gpu_tres"]), (1, 0, 0)
         )
+
+
+def refusal(code, token, message, hint=None):
+    """An error reply as shk prints it."""
+    return code, {
+        "schema_version": 1,
+        "ok": False,
+        "error": token,
+        "message": message,
+        "hint": hint,
+    }
+
+
+def mismatch(machine, selected):
+    """The site_mismatch of a forced local executor on a machine of another packaged site."""
+    return refusal(
+        1,
+        "site_mismatch",
+        f"this machine belongs to {machine}, but the site is {selected}: --executor local (or "
+        f"SHK_EXECUTOR=local) would treat {machine}'s Slurm as {selected}'s",
+        f"pass --site {machine.lower()}, or --project-dir DIR where DIR holds the {machine} "
+        "configuration",
+    )
+
+
+EXPECTED = {
+    "gate": {  # the executor check itself refuses
+        "requeue": refusal(
+            3, "self_only", "self requeue requires --executor local inside the allocation"
+        ),
+        "allocation": refusal(3, "local_only", "allocation requires --executor local"),
+    },
+    "past": {  # the executor check passed; the next check answers (no allocation, no worker)
+        "requeue": refusal(3, "self_only", "no physical current allocation id"),
+        "allocation": refusal(1, "allocation_invalid", "an explicit worker PID is required"),
+    },
+    "Marlowe": dict.fromkeys(("requeue", "allocation"), mismatch("Marlowe", "Sherlock")),
+    "Sherlock": dict.fromkeys(("requeue", "allocation"), mismatch("Sherlock", "Marlowe")),
+}
+MACHINES = {  # hostname, environment, whether Marlowe's on-cluster predicate holds
+    "workstation": ("lab-ubuntu", {}, False),
+    "Marlowe job": ("n31", {"SLURM_JOB_ID": "44", "SLURM_CLUSTER_NAME": "slurm"}, True),
+    "Marlowe login node": ("login-01", {}, True),
+    "Sherlock job": ("sh03-12n05", {"SLURM_JOB_ID": "44", "SLURM_CLUSTER_NAME": "sherlock"}, False),
+    "Sherlock login node": ("sh02-ln04", {}, False),
+}
+ROWS = (  # machine, --site, --executor, more environment, expected answer
+    ("workstation", None, "auto", {}, "gate"),
+    ("workstation", "marlowe", "auto", {}, "gate"),
+    ("workstation", None, "ssh", {}, "gate"),
+    ("workstation", None, "auto", {"SHK_EXECUTOR": "ssh"}, "gate"),
+    ("Marlowe job", None, "auto", {}, "Marlowe"),
+    ("Marlowe job", None, "ssh", {}, "Marlowe"),
+    ("Marlowe job", None, "local", {}, "Marlowe"),
+    ("Marlowe job", "marlowe", "auto", {}, "past"),
+    ("Marlowe job", "marlowe", "ssh", {}, "gate"),
+    ("Marlowe login node", None, "auto", {}, "Marlowe"),
+    ("Sherlock job", None, "auto", {}, "past"),
+    ("Sherlock job", None, "ssh", {}, "gate"),
+    ("Sherlock job", "marlowe", "auto", {}, "Sherlock"),
+    ("Sherlock login node", "marlowe", "auto", {}, "Sherlock"),
+)
+
+
+class MissingSite(InJob):
+    """Without the local executor, requeue and allocation name the site of the machine first."""
+
+    def test_each_machine_gets_the_refusal_that_names_its_cause(self):
+        self.scontrol({})  # any Slurm call would be recorded, and none may happen
+        commands = {
+            "requeue": ("requeue", "--self", "--expect-name", NAME),
+            "allocation": ("allocation", "--pid", str(os.getpid()), "--job-id", "44"),
+        }
+        for machine, site, executor, more, answer in ROWS:
+            hostname, env, on_marlowe = MACHINES[machine]
+            for command, argv in commands.items():
+                with (
+                    self.subTest(machine, site=site, executor=executor, env=more, command=command),
+                    marlowe_site(on_cluster=on_marlowe),
+                ):
+                    found = self.shk(
+                        *argv, site=site, executor=executor, hostname=hostname, env={**env, **more}
+                    )
+                    self.assertEqual(found, EXPECTED[answer][command])
+        self.assertEqual(self.calls(), [])

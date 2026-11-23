@@ -232,8 +232,13 @@ def requeue(args: argparse.Namespace, ctx: Context) -> Outcome:
     The shell reads Slurm's record of SLURM_JOB_ID and requeues an array element as its
     ArrayJobId_ArrayTaskId: the bare id of the element that keeps the array's meta record would
     requeue every element, and inherited SLURM_ARRAY_* variables can name another job.
+
+    Before refusing another executor, the forced-local site check runs: on a machine of another
+    packaged site (a Marlowe job without --site marlowe) the cause is the site, and its
+    site_mismatch names it; everywhere else the refusal stays self_only.
     """
     if ctx.executor().kind != "local":
+        executor.detect(ctx.settings, "local", ctx.env, ctx.hostname)
         raise ShkError(
             EXIT_REFUSED,
             "self_only",
