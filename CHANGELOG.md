@@ -1,11 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.11.0
 
 Additions: `shk wait`, and `shk` inside Marlowe jobs. The `sbatch` argv of both
 sites, the remote programs and the replies of the other commands are those of
-0.10.0, apart from `shk --help`, which lists the new command, and the change
-listed under "Visible on Sherlock". The Marlowe surface stays provisional and
+0.10.0, apart from the version text, `shk --help`, which lists the new
+command, and the change listed under "Visible on Sherlock". The Marlowe surface stays provisional and
 may change in a later release: the argv, the reply additions (`site`,
 `estimate.note`), the content paths and, from this release, the in-job command
 forms and the job-script template of the skill.
