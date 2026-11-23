@@ -5,10 +5,12 @@ SLURM_JOB_ID and SLURM_CLUSTER_NAME=slurm, Marlowe's on-cluster predicate true
 (fakes.marlowe_site), and a working directory with no configuration at or above it, as a run
 directory on scratch has none. requeue --self runs the real control.sh behind the Marlowe
 prelude against the argv-exact fake scontrol of test_control; allocation runs allocation.sh
-against the fake scontrol of test_allocation for a real sleeping worker. Job and node records
-have the shapes read on Marlowe; listpids and pidinfo follow the 25.05.2 source
-(tests/fakes/marlowe.py). Marlowe's sh is bash, so the requeue cases also run under bash as
-sh. MissingSite pins which refusal a missing or misplaced --site gets on each kind of machine.
+against the fake scontrol of test_allocation for a real sleeping worker. A CPU-only job's
+record, the node record, pidinfo's two lines and a job's listpids rows (the batch shell, its
+children, the extern row) have the shapes read in a Marlowe job; an array element's record and
+a GPU job's AllocTRES follow the 25.05.2 source (tests/fakes/marlowe.py). Marlowe's sh is bash,
+so the requeue cases also run under bash as sh. MissingSite pins which refusal a missing or
+misplaced --site gets on each kind of machine.
 """
 
 import io
@@ -33,8 +35,9 @@ from sherlock_kit import cli
 from sherlock_kit.config import discover
 
 TOKEN = "tok-1"
-# The process of control.sh and its ancestors (the fake expands @PPID@): no task of the step.
-PROGRAM = ("@PPID@", "batch", "-", "-")
+# The batch shell (ids 0), then the process of control.sh and its ancestors as its children (ids
+# "-"; the fake expands @PPID@); listpids adds the extern row.
+PROGRAM = (("4242", "batch", "0", "0"), ("@PPID@", "batch", "-", "-"))
 
 
 def run(argv, ctx):
@@ -89,7 +92,7 @@ class MarloweSelfRequeue(InJob):
     def test_a_running_job_on_preempt_is_requeued(self):
         self.allocation("44")
         self.scontrol({
-            "listpids 44": {"out": listpids("44", PROGRAM)},
+            "listpids 44": {"out": listpids("44", *PROGRAM)},
             "show job 44 --oneliner": {"out": job_record("44", NAME, token=TOKEN) + "\n"},
             "requeue 44": {},
         })
@@ -113,7 +116,7 @@ class MarloweSelfRequeue(InJob):
         self.allocation("51", "50", "0")
         record = job_record("51", NAME, array="50", task="0", token=TOKEN)
         self.scontrol({
-            "listpids 51": {"out": listpids("51", PROGRAM)},
+            "listpids 51": {"out": listpids("51", *PROGRAM)},
             "show job 51 --oneliner": {"out": record + "\n"},
             "requeue 50_0": {},
         })
@@ -133,7 +136,7 @@ class MarloweSelfRequeue(InJob):
             with self.subTest(partition=partition):
                 self.calls_file.unlink(missing_ok=True)
                 self.scontrol({
-                    "listpids 44": {"out": listpids("44", PROGRAM)},
+                    "listpids 44": {"out": listpids("44", *PROGRAM)},
                     "show job 44 --oneliner": {
                         "out": job_record("44", NAME, token=TOKEN, Partition=partition) + "\n"
                     },
@@ -148,7 +151,7 @@ class MarloweSelfRequeue(InJob):
     def test_a_failed_requeue_is_unknown_and_its_next_replays_without_configuration(self):
         self.allocation("44")
         self.scontrol({
-            "listpids 44": {"out": listpids("44", PROGRAM)},
+            "listpids 44": {"out": listpids("44", *PROGRAM)},
             "show job 44 --oneliner": {"out": job_record("44", NAME, token=TOKEN) + "\n"},
             "requeue 44": {
                 "err": "Requested operation is presently disabled for job 44\n",

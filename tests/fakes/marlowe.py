@@ -12,9 +12,14 @@ accounting (AccountingStoreFlags=job_comment).
 - ``node(name, state, ...)``: one ``scontrol show nodes --oneliner`` line;
 - ``queue(...)`` and ``account(...)``: one details.sh squeue and sacct row (field lists for
   ``CannedSlurm``), and ``tres(cpus, gpus)`` the TRES string of such a job;
-- ``pidinfo(job)`` and ``listpids(job, *rows)``: ``scontrol pidinfo`` and ``scontrol listpids``
-  in the printf formats of the Slurm 25.05.2 source (src/scontrol/info_job.c), which were not
-  read on Marlowe; the same functions print the text observed on Sherlock.
+- ``pidinfo(job)`` and ``listpids(job, *rows)``: ``scontrol pidinfo`` and ``scontrol listpids
+  JOBID`` as read in a Marlowe job (docs/validation/observed-marlowe.md, "shk inside a batch
+  job"): pidinfo's two lines, and listpids' header, the batch step's rows and the extern row; the
+  column widths follow the printf formats of the Slurm 25.05.2 source (src/scontrol/info_job.c).
+
+A running CPU-only job's record and AllocTRES were read on Marlowe; an array element's record
+(ArrayJobId, ArrayTaskId) and a GPU job's AllocTRES follow the Slurm source, not a record read
+there.
 """
 
 import os
@@ -151,13 +156,15 @@ def pidinfo(job, remaining=594):
 
 
 def listpids(job, *rows):
-    """scontrol listpids JOB: the header, then a row per (pid, step, local id, global id).
+    """scontrol listpids JOB: the header, a row per (pid, step, local id, global id), the extern row.
 
-    A process of a step that is not one of its tasks prints "-" for both ids.
+    As read on Marlowe: the batch shell prints step "batch" with ids 0, each of its children
+    "-" for both ids, and the job's extern step one row with PID -1 and ids 0.
     """
     header = f"{'PID':<8} {'JOBID':<8} {'STEPID':<8} {'LOCALID':<7} {'GLOBALID':<8}\n"
     return header + "".join(
-        f"{pid:<8} {job:<8} {step:<8} {local:<7} {task:<8} \n" for pid, step, local, task in rows
+        f"{pid:<8} {job:<8} {step:<8} {local:<7} {task:<8} \n"
+        for pid, step, local, task in (*rows, ("-1", "extern", "0", "0"))
     )
 
 
