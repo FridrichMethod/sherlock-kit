@@ -13,7 +13,8 @@ directory holds no configuration; without it the command is exit 1
 `site_mismatch` there. The Marlowe form ran in one CPU-only job, for the batch
 shell and, with `--step-id`, for a process of an `srun` step
 ([observed](validation/observed-marlowe.md#shk-inside-a-batch-job)); a GPU job
-and an array element are tested offline against Marlowe-shaped records only.
+is tested offline against Marlowe-shaped records only, and an array element
+only against Sherlock-shaped records.
 The worker must belong to the current Unix UID, exist on this host, and have
 the same Linux `/proc/PID/stat` start ticks before and after evidence
 collection. Ownership is checked before reading process contents. A dead,
