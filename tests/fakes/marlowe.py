@@ -11,7 +11,10 @@ accounting (AccountingStoreFlags=job_comment).
   after WorkDir and TresPerJob before TresPerTask, where the Slurm formatter puts them;
 - ``node(name, state, ...)``: one ``scontrol show nodes --oneliner`` line;
 - ``queue(...)`` and ``account(...)``: one details.sh squeue and sacct row (field lists for
-  ``CannedSlurm``), and ``tres(cpus, gpus)`` the TRES string of such a job.
+  ``CannedSlurm``), and ``tres(cpus, gpus)`` the TRES string of such a job;
+- ``pidinfo(job)`` and ``listpids(job, *rows)``: ``scontrol pidinfo`` and ``scontrol listpids``
+  in the printf formats of the Slurm 25.05.2 source (src/scontrol/info_job.c), which were not
+  read on Marlowe; the same functions print the text observed on Sherlock.
 """
 
 import os
@@ -136,6 +139,25 @@ def node(name, state="MIXED", *, cpus=0, memory_mb=0, gpus=0, partitions="hero,b
         "SlurmdStartTime=2026-11-01T08:05:00 LastBusyTime=2026-11-21T17:00:00 "
         "ResumeAfterTime=None CfgTRES=cpu=112,mem=1950000M,billing=112,gres/gpu=8 "
         f"AllocTRES={allocated} CurrentWatts=0 AveWatts=0"
+    )
+
+
+def pidinfo(job, remaining=594):
+    """scontrol pidinfo of a process of job: its end (END in ctime form) and remaining seconds."""
+    return (
+        f"Slurm JobId={job} ends at Sat Nov 21 17:15:34 2026\n"
+        f"Job remaining time is {remaining} seconds"
+    )
+
+
+def listpids(job, *rows):
+    """scontrol listpids JOB: the header, then a row per (pid, step, local id, global id).
+
+    A process of a step that is not one of its tasks prints "-" for both ids.
+    """
+    header = f"{'PID':<8} {'JOBID':<8} {'STEPID':<8} {'LOCALID':<7} {'GLOBALID':<8}\n"
+    return header + "".join(
+        f"{pid:<8} {job:<8} {step:<8} {local:<7} {task:<8} \n" for pid, step, local, task in rows
     )
 
 
