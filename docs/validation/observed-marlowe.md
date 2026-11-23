@@ -95,6 +95,7 @@ Values observed 2026-11-21.
 - Scheduler: PreemptType `preempt/qos`, PreemptMode `REQUEUE`,
   PreemptExemptTime 00:14:59, PreemptParameters `youngest_first` (no
   `send_user_signal`), JobRequeue 1, MaxBatchRequeue 4, KillWait 30 s,
+  ProctrackType `proctrack/cgroup`,
   MaxArraySize 1001, TmpFS `/tmp`, JobSubmitPlugins `lua`,
   AccountingStorageEnforce `associations,limits,qos,safe`, EnforcePartLimits
   `ALL`, SelectTypeParameters `CR_CORE_MEMORY`. Priority weights
