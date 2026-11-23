@@ -395,6 +395,9 @@ otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
 - The signal sequence of a real preemption: whether and when a preempted job
   receives SIGTERM, and which grace time applies. The rules require periodic
   checkpoints and never rely on a signal.
+- A self-requeue on Marlowe (`shk requeue --self`, or any `scontrol requeue`
+  of a running job) and the delivery of a time-limit `--signal`: when it
+  arrives and which processes get it.
 - The requeue-hold path: how a job reaches REQUEUE_HOLD or a launch-failure
   hold, what `squeue`, `scontrol` and `sacct` show for it, and the recovery the
   rules prescribe (cancel, then resubmit with the user's consent).
@@ -408,9 +411,99 @@ otherwise. One job that `shk` submitted ran: one CPU, for a few seconds.
   node could hold while no node is schedulable: the message was seen only for
   requests that no node can satisfy, and the rules say only that it may also
   mean no schedulable node.
-- `shk` inside a Marlowe job, which this release does not support.
+- `shk` inside a Marlowe job (`requeue --self`, `allocation`, an in-job
+  `submit`): tested offline against Marlowe-shaped records, not run live.
 - A GPU job: what a job sees with `--gpus` (`CUDA_VISIBLE_DEVICES`, CUDA MPS).
 - An agent session on a login node: `shk` ran there, but not inside an agent
   session on that node.
 - The source of `PROJECT_ID`, `SCRATCH` and `PROJECTS` in non-login shells, the
   lua job-submit plugin, the sshd configuration and the transfer node.
+
+### Signals and requeues in Slurm's source
+
+The in-job guidance (the walltime template of the Marlowe skill, the rule
+never to rely on a signal) rests on these. They are confirmed in the official
+Slurm source at tag `slurm-25-05-2-1`, the release Marlowe runs, or inferred
+from it where a statement says so, and are not observed live. The Marlowe
+settings they use are those recorded above; a setting that was not read is
+named as such.
+
+- When a job is selected for preemption with a grace time, the controller
+  sends SIGCONT and SIGTERM to the job's steps other than the batch step: the
+  batch shell and the processes it started directly get nothing
+  ([`src/interfaces/preempt.c`, lines 416-432](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/preempt.c#L416);
+  [`src/slurmctld/job_mgr.c`, lines 17062-17067](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17062)).
+  With PreemptType `preempt/qos` the grace time is the GraceTime of the job's
+  QOS
+  ([`src/plugins/preempt/qos/preempt_qos.c`, lines 107-113](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/plugins/preempt/qos/preempt_qos.c#L107)).
+- A `--signal` is not sent during that window: the user signal goes out at
+  selection only with the PreemptParameters option `send_user_signal`, which
+  Marlowe does not set, and the time-limit check skips a job selected for
+  preemption
+  ([`src/interfaces/preempt.c`, lines 425-431](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/preempt.c#L425);
+  [`src/slurmctld/job_mgr.c`, lines 9248-9253](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L9248)
+  and [line 9269](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L9269)).
+- At the end of the window the job is requeued: every step, the batch step
+  included, gets SIGCONT and SIGTERM, and whatever is left gets SIGKILL after
+  KillWait. An accepted `scontrol requeue` and the time limit end an attempt
+  the same way
+  ([`src/interfaces/preempt.c`, lines 498-501](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/preempt.c#L498);
+  [`src/slurmd/slurmd/req.c`, lines 4173-4185](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmd/req.c#L4173),
+  [5428-5442](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmd/req.c#L5428)
+  and [5492-5505](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmd/req.c#L5492)).
+- A batch shell without a TERM trap dies of that SIGTERM (shell semantics),
+  and slurmstepd then kills the rest of the step at once with SIGKILL, so
+  KillWait applies only to a shell that survives SIGTERM
+  ([`src/slurmd/slurmstepd/mgr.c`, lines 1751-1774](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmstepd/mgr.c#L1751)).
+- With ProctrackType `proctrack/cgroup`, a signal to a step reaches only the
+  processes that slurmstepd started, for the batch step the batch shell; their
+  children get only SIGKILL, unless Marlowe's cgroup.conf sets
+  `SignalChildrenProcesses` (not read)
+  ([`src/plugins/proctrack/cgroup/proctrack_cgroup.c`, lines 220-239](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/plugins/proctrack/cgroup/proctrack_cgroup.c#L220);
+  [`doc/man/man5/cgroup.conf.5`, lines 228-231](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/doc/man/man5/cgroup.conf.5#L228)).
+- `srun` turns a SIGTERM it receives into SIGKILL of its tasks
+  ([`src/srun/srun_job.c`, lines 2262-2268](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/srun/srun_job.c#L2262)).
+- A batch script that exits by itself during the window is requeued through
+  the completion path and recorded PREEMPTED, which raises the count that
+  MaxBatchRequeue bounds: with MaxBatchRequeue 4 the fourth such exit holds
+  the job (REQUEUE_HOLD) until an operator releases it. Failed launches raise
+  the same count
+  ([`src/slurmctld/proc_req.c`, lines 2128-2131](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/proc_req.c#L2128);
+  [`src/slurmctld/job_mgr.c`, lines 6046-6101](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L6046),
+  [5957-5972](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L5957)
+  and [14024-14029](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L14024)).
+- An owner's `scontrol requeue` of the own running job is accepted when the
+  job's Requeue flag is set and does not count toward MaxBatchRequeue; the
+  new attempt can still be held after a failed launch
+  ([`src/slurmctld/job_mgr.c`, lines 17649-17654](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17649)
+  and [17835-17857](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17835)).
+- `SLURM_RESTART_COUNT` is unset in the first attempt and counts every restart
+  afterwards, preemptions included: a requeue by the owner, a preemption and a
+  completion-path requeue all raise it
+  ([`src/common/env.c`, lines 810-813](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/common/env.c#L810);
+  [`src/slurmctld/job_mgr.c`, line 17757](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17757)
+  and [line 6080](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L6080)).
+- A requeued job waits again: its begin time is the end of the attempt's
+  cleanup plus the credential lifetime and one second, a delay of about two
+  minutes by Slurm's default credential lifetime (Marlowe's value not read),
+  and its submit time and its age priority start over, age being Marlowe's
+  largest priority weight
+  ([`src/slurmctld/job_mgr.c`, lines 16600-16630](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L16600);
+  [`src/interfaces/cred.h`, line 67](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/cred.h#L67)).
+- With `--signal=B:SIG@T`, SIG goes to the batch shell alone, once per
+  attempt, when about T to T+30 s remain before the time limit; the manual
+  allows up to 60 s earlier, and a busy controller can send it later. The
+  time limit ends the attempt as TIMEOUT, with no requeue, so a requeue for
+  the walltime has to come before the limit
+  ([`src/slurmctld/job_mgr.c`, lines 19237-19264](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L19237),
+  [17808-17809](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L17808)
+  and [9583-9598](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L9583);
+  [`src/slurmd/slurmstepd/req.c`, lines 1220-1226](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmd/slurmstepd/req.c#L1220);
+  [`doc/man/man1/sbatch.1`, lines 2303-2304](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/doc/man/man1/sbatch.1#L2303)).
+- Inferred: after a preemption that ended at the end of its grace window, or a
+  self-requeue during one, the job keeps a flag that only the completion path
+  clears, so the next time the script exits by itself, with any exit code,
+  the attempt can be recorded PREEMPTED and the script started once more
+  ([`src/interfaces/preempt.c`, line 432](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/interfaces/preempt.c#L432);
+  [`src/slurmctld/job_mgr.c`, lines 6053-6057](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/job_mgr.c#L6053);
+  [`src/slurmctld/proc_req.c`, lines 2128-2131](https://github.com/SchedMD/slurm/blob/slurm-25-05-2-1/src/slurmctld/proc_req.c#L2128)).
