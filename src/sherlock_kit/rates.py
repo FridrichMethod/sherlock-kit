@@ -19,8 +19,10 @@ and on one side of firm_until. An end that is None or after today means now: the
 to the end of today and its last segment has end None. A segment from firm_until on is
 provisional (priced, but the site may have announced a new rate since read_on); one outside every
 period has period None and is not priced. site_today(table, now) is the date at the aware instant
-now in the table's time zone, never the machine's. cost prices seconds in Decimal without
-rounding; money and hours round half up to 0.01 and return strings.
+now in the table's time zone, never the machine's. numerator(gpu_seconds, cpu_seconds, period)
+is the exact Decimal gpu_seconds x gpu_hour + cpu_seconds x cpu_hour, and cost divides it by
+3600 once, so a cost that lies exactly on a half cent stays there; a sum of costs adds the
+numerators and divides once. money and hours round half up to 0.01 and return strings.
 """
 
 from __future__ import annotations
@@ -214,10 +216,14 @@ def segments(table: RateTable, start: date, end: date | None, today: date) -> li
     ]
 
 
+def numerator(gpu_seconds: Decimal | int, cpu_seconds: Decimal | int, period: Period) -> Decimal:
+    """gpu_seconds x gpu_hour + cpu_seconds x cpu_hour: the cost times HOUR, exact."""
+    return Decimal(gpu_seconds) * period.gpu_hour + Decimal(cpu_seconds) * period.cpu_hour
+
+
 def cost(gpu_seconds: Decimal | int, cpu_seconds: Decimal | int, period: Period) -> Decimal:
-    """The price of GPU-seconds and CPU-seconds at the period's rates, unrounded."""
-    gpu = Decimal(gpu_seconds) / HOUR * period.gpu_hour
-    return gpu + Decimal(cpu_seconds) / HOUR * period.cpu_hour
+    """The price of GPU-seconds and CPU-seconds at the period's rates: one division, unrounded."""
+    return numerator(gpu_seconds, cpu_seconds, period) / HOUR
 
 
 def _hundredths(value: Decimal) -> str:

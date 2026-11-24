@@ -2,7 +2,10 @@
 
 Read-only and free: one run of data/remote/usage.sh prints the caller's login, the caller's
 association with the configured account (sacctmgr), the account's sreport rows for each
-segment and the caller's runs over the whole range (sacct -X -D) as SHK_ records. Before any
+segment and the caller's runs over the whole range (sacct -X -D) as SHK_ records. Its first
+argument is the rate table's time zone, which it exports as TZ whatever TZ the remote
+environment holds, so sreport reads the segment dates as site-local midnights and sacct prints
+Start and End in site-local time, the zone this module reads them in. Before any
 remote call, a site without a packaged rate table (Site.rates None: Sherlock) is
 ShkError(3, "no_rates") and a range that rates.segments leaves empty is
 ShkError(2, "invalid_range"); then the configuration's account is required. An incomplete read
@@ -24,17 +27,19 @@ overlaps, in proportion to the overlap (all of it to the segment holding Start w
 Start), times its AllocTRES cpu and gres/gpu counts, and summed per first word of State.
 
 Seconds stay unrounded Decimal values; the reply rounds them half up to integers, and hours
-and money (rates.cost of the unrounded seconds) to 0.01, and totals sum unrounded values. A segment
-outside every rate period is not priced (cost null) and makes total.cost_complete false; a
-segment from firm_until on is provisional, priced and also summed in provisional_cost.
-ASSUMPTIONS states, in every reply, what the estimate counts and leaves out.
+and money to 0.01. A segment's cost is rates.cost of its seconds, one division of an exact
+numerator; totals sum unrounded seconds, and their costs sum the exact rates.numerator values
+of the priced segments and divide once, so a cost on a half cent rounds up. A segment outside
+every rate period is not priced (cost null) and makes total.cost_complete false; a segment
+from firm_until on is provisional, priced and also summed in provisional_cost. ASSUMPTIONS
+states, in every reply, what the estimate counts and leaves out.
 """
 
 from __future__ import annotations
 
 import argparse
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -293,25 +298,29 @@ def _own_runs(runs: list[Run], bounds: Bounds) -> list[dict[str, Any]]:
     ]
 
 
-def _price(seconds: Seconds, period: rates.Period | None) -> Decimal | None:
-    return None if period is None else rates.cost(seconds.gpu, seconds.cpu, period)
-
-
 def _amount(seconds: Seconds, period: rates.Period | None) -> dict[str, Any]:
     """AMOUNT: seconds, hours and the cost at the period's prices (null without a period)."""
-    cost = _price(seconds, period)
-    return {**_hours(seconds), "cost": None if cost is None else rates.money(cost)}
+    cost = None if period is None else rates.money(rates.cost(seconds.gpu, seconds.cpu, period))
+    return {**_hours(seconds), "cost": cost}
+
+
+def _money(numerators: Iterable[Decimal]) -> str:
+    """The cost of a sum of exact rates.numerator values: one division, rounded half up."""
+    return rates.money(sum(numerators, ZERO) / rates.HOUR)
 
 
 def _total(used: list[Seconds], segments: list[rates.Segment]) -> dict[str, Any]:
     """TOTAL: AMOUNT over every segment, its cost over the priced ones, and their parts."""
-    costs = [_price(seconds, s.period) for seconds, s in zip(used, segments)]
-    provisional = [cost for cost, s in zip(costs, segments) if cost is not None and s.provisional]
+    priced = [
+        (rates.numerator(seconds.gpu, seconds.cpu, s.period), s.provisional)
+        for seconds, s in zip(used, segments)
+        if s.period is not None
+    ]
     unpriced = sum((seconds for seconds, s in zip(used, segments) if s.period is None), Seconds())
     return {
         **_hours(sum(used, Seconds())),
-        "cost": rates.money(sum((cost for cost in costs if cost is not None), ZERO)),
-        "provisional_cost": rates.money(sum(provisional, ZERO)),
+        "cost": _money(value for value, _ in priced),
+        "provisional_cost": _money(value for value, provisional in priced if provisional),
         "unpriced_gpu_hours": rates.hours(unpriced.gpu),
         "unpriced_cpu_hours": rates.hours(unpriced.cpu),
     }
@@ -390,7 +399,8 @@ def usage(args: argparse.Namespace, ctx: Context) -> Outcome:
     segments = _segments(table, args, rates.site_today(table, now))
     account = ctx.require("account").account
     boundaries = [segments[0].start.isoformat(), *(_end(s) for s in segments)]
-    program = executor.run_program(ctx.executor(), "usage", [account, *boundaries])
+    arguments = [table.timezone, account, *boundaries]
+    program = executor.run_program(ctx.executor(), "usage", arguments)
     result = executor.check(program, "usage")
     lines = _records(result)
     try:

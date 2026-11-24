@@ -124,6 +124,11 @@ class UsageCase(unittest.TestCase):
         (sacct,) = self.fake.calls("sacct")
         return windows, (sacct["argv"][9], sacct["argv"][11])
 
+    def zones(self):
+        """The TZ of every sreport and sacct call, in call order."""
+        calls = [*self.fake.calls("sreport"), *self.fake.calls("sacct")]
+        return [call["env"].get("TZ") for call in calls]
+
 
 class LiveShapes(UsageCase):
     def test_november_matches_the_live_sample(self):
@@ -236,6 +241,7 @@ class LiveShapes(UsageCase):
         self.assertEqual(
             self.boundaries(), ([("Start=2026-11-01", "End=now")], ("2026-11-01", "now"))
         )
+        self.assertEqual(self.zones(), ["America/Los_Angeles", "America/Los_Angeles"])
 
     def test_others_are_aggregated_without_names(self):
         code, reply, text = self.shk(
@@ -396,6 +402,34 @@ class Segments(UsageCase):
                         self.boundaries(),
                         ([("Start=2026-11-01", "End=now")], ("2026-11-01", "now")),
                     )
+                    # Slurm reads the dates and prints the times in the site's zone, not in
+                    # the TZ the caller's environment holds.
+                    self.assertEqual(self.zones(), ["America/Los_Angeles", "America/Los_Angeles"])
+
+    def test_a_total_on_a_half_cent_rounds_up(self):
+        # August at 0.20 per GPU-hour and September at 0.25 add up to exactly 6.465: the total
+        # sums the exact numerators of its segments and divides once, so it rounds up.
+        reply = self.ok(
+            "--start",
+            "2026-08-01",
+            "--end",
+            "2026-10-01",
+            sreport={
+                ("2026-08-01", "2026-09-01"): used(68462, 6171),
+                ("2026-09-01", "2026-10-01"): used(242798, 81934),
+            },
+        )
+        august, september = reply["segments"]
+        self.assertEqual(
+            [(s["month"], s["rate"]["gpu_hour"]) for s in (august, september)],
+            [("2026-08", "0.20"), ("2026-09", "0.25")],
+        )
+        self.assertEqual(
+            (august["account"]["cost"], september["account"]["cost"]), ("0.44", "6.03")
+        )
+        for party in ("account", "own"):
+            with self.subTest(party=party):
+                self.assertEqual(reply["total"][party]["cost"], "6.47")
 
     def test_a_closed_range_ends_on_its_date(self):
         reply = self.ok(
@@ -443,6 +477,42 @@ class OwnRuns(UsageCase):
                     {"runs": 1, "by_state": {"COMPLETED": by_state(1, 3600, 7200, "1.00", "2.00")}},
                 )
                 self.assertEqual(segment["own"]["gpu_seconds"], 0)
+
+    def test_run_across_firm_until_is_split(self):
+        # firm_until (2026-12-23) splits December in two segments of one month: a run from
+        # 23:00 on December 22 to 01:00 on December 23 holds one hour in each.
+        self.now = datetime(2027, 1, 15, 20, 0, tzinfo=UTC)
+        reply = self.ok(
+            "--start",
+            "2026-12-01",
+            sacct=[
+                run(
+                    100003,
+                    "COMPLETED",
+                    7200,
+                    "2026-12-22T23:00:00",
+                    "2026-12-23T01:00:00",
+                    "cpu=2,gres/gpu=1",
+                )
+            ],
+            now_end="2027-01-15T12:59:59",
+        )
+        firm, provisional, january = reply["segments"]
+        self.assertEqual(
+            [(s["month"], s["start"], s["end"], s["provisional"]) for s in reply["segments"]],
+            [
+                ("2026-12", "2026-12-01", "2026-12-23", False),
+                ("2026-12", "2026-12-23", "2027-01-01", True),
+                ("2027-01", "2027-01-01", "now", True),
+            ],
+        )
+        for segment in (firm, provisional):
+            with self.subTest(provisional=segment["provisional"]):
+                self.assertEqual(
+                    segment["own_runs"],
+                    {"runs": 1, "by_state": {"COMPLETED": by_state(1, 3600, 7200, "1.00", "2.00")}},
+                )
+        self.assertEqual(january["own_runs"], {"runs": 0, "by_state": {}})
 
     def test_a_run_across_the_end_of_daylight_saving_time_is_split_in_real_seconds(self):
         # 22:00 PDT on October 31 to 03:00 PST on November 1 is six real hours (five on the wall
