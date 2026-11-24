@@ -1,9 +1,10 @@
 # Observed Marlowe and Slurm behavior
 
-Facts seen live on Marlowe from one user's account on 2026-11-21 and, for
-[shk inside a batch job](#shk-inside-a-batch-job), on 2026-11-22, on Slurm
-25.05.2, grouped by topic and, where one exists, with the `shk` behavior that
-depends on it. They are observations of those days, not site guarantees: the
+Facts seen live on Marlowe from one user's account on 2026-11-21, for
+[shk inside a batch job](#shk-inside-a-batch-job) on 2026-11-22 and for
+[usage accounting](#usage-accounting) on 2026-11-23, on Slurm 25.05.2,
+grouped by topic and, where one exists, with the `shk` behavior that depends
+on it. They are observations of those days, not site guarantees: the
 site changes its limits with demand, so re-check a fact before building on it.
 Site policy is not taken from here; the
 [Marlowe policy guide](../marlowe-policy.md) names its sources.
@@ -22,7 +23,7 @@ reproduced; other users' jobs appear only as counts and percentages.
   ([shk on Marlowe](#shk-on-marlowe)).
 - Read-only commands: `scontrol show config`, `partition`, `node` and `job`,
   `sacctmgr show qos`, `assoc` and `user`, `sinfo`, `squeue`, `sacct`,
-  `sshare`, `module`, environment and filesystem reads.
+  `sreport`, `sshare`, `module`, environment and filesystem reads.
 - Submission verdicts came from `sbatch --test-only`, which validates a request
   and prints an estimate without creating a job.
 - One CPU-only batch job ran: 1 CPU, 1 GB, a 10-minute limit, partition
@@ -318,11 +319,71 @@ Same window, partition `preempt`:
   builds a Bright `cmsh wlm chargeback` report for a project and a date range,
   at the basic access (preempt) prices or at the medium and large prices, each
   with a price per CPU-hour and per GPU-hour: Marlowe charges CPU time and GPU
-  time, CPU-only jobs included. It needs `module load cmsh` and creates and
-  removes a temporary chargeback object. Its prices are not reproduced here;
-  the recharge page states the current ones.
+  time, CPU-only jobs included. It needs `module load cmsh`, and to build the
+  report it adds, commits and removes a `cmsh wlm chargeback` object, a write
+  to the cluster management state. Its prices are not reproduced here;
+  compared on 2026-11-23, they differ from the published 2026 recharge rates.
+  `shk` does not run it: `shk usage` prices Slurm accounting from its own
+  packaged table of the published rates ([usage accounting](#usage-accounting);
+  [Marlowe policy](../marlowe-policy.md#left-out-of-the-rules-files)).
 - Billing TRES equals the CPU count for CPU-only jobs, and no partition sets
   TRESBillingWeights.
+
+## Usage accounting
+
+Values observed 2026-11-23 on a login node, through the prelude of
+[the Slurm client environment](#slurm-client-environment);
+`marlowe-m000000` stands for the base account and `USER` for the caller.
+
+- The login node's time zone is `America/Los_Angeles`, and `sreport` and
+  `sacct` read the dates of `Start=` and `End=` as midnight there. `shk usage`
+  therefore takes its dates, and today, in that zone, whatever the
+  workstation's.
+- `sreport -P -t seconds -T cpu,gres/gpu cluster AccountUtilizationByUser Accounts=marlowe-m000000 Start=D1 End=D2`
+  prints a dashed line, `Cluster/Account/User Utilization START - END (N secs)`
+  with both times as `YYYY-MM-DDTHH:MM:SS`, `Usage reported in TRES Seconds`,
+  a dashed line and the header `Cluster|Account|Login|Proper Name|TRES Name|Used`,
+  then one account row per TRES with empty Login and Proper Name
+  (`slurm|marlowe-m000000|||cpu|N`) and one row per user and TRES
+  (`slurm|marlowe-m000000|USER|USER|gres/gpu|N`), N in seconds. With `-n`
+  only the rows remain.
+- With `End=now` the banner's end is the end of the current hour (a read at
+  19:32 showed 19:59:59). sreport rolls usage up hourly, so the newest hour
+  can be missing.
+- An account that does not exist and a range without usage both print no
+  rows and exit 0. Only the caller's associations tell them apart:
+  `sacctmgr -nP show assoc where user=USER account=marlowe-m000000 format=account`
+  is empty without an association. `shk usage` refuses an account without
+  one (`account_not_found`).
+- `scontrol show config` shows `PrivateData = none`: sreport shows every
+  member's usage of an account, with logins and names. `shk usage` prints the
+  account total, the caller's share and the rest as one anonymous sum.
+- The base account's parent is `root`, and it has no child account, so its
+  sreport account row is the base account's own usage. It has several user
+  members.
+- The free introductory GPU-hours are a separate account,
+  `marlowe-m000000-free`, a sibling of the base account under `root`, with QOS
+  `medium` (partition `batch`) and `GrpTRESMins=gres/gpu=300000`: 5,000
+  GPU-hours that Slurm enforces. All 121 `-free` accounts on the cluster carry
+  such a cap. The caller is not a member of the observed project's `-free`
+  account, which showed no usage. Usage of the base account on `preempt` is
+  therefore not drawn from the free hours (an inference from the separate
+  account and its cap), and `shk usage` does not apply them.
+- For November 2026 up to the read, the account's sreport GPU and CPU seconds
+  equaled, to the second, the sums over the caller's runs from `sacct -X -D`
+  (ElapsedRaw times the `gres/gpu` and `cpu` counts of AllocTRES); the
+  account's usage that month was the caller's alone.
+- `sacct -X -D -S D1 -E D2` selects runs by overlap with the window and prints
+  whole runs: Start, End and ElapsedRaw of the run, not clipped to the window.
+  With `-D` each earlier run of a requeued job is a row of its own, with its
+  own Start and End. A running row has End `Unknown`, and a row that never
+  started has Start `None` or `Unknown`. AllocTRES reads like
+  `billing=2,cpu=2,gres/gpu=1,mem=24G,node=1`. `shk usage` shares each run
+  among its segments in proportion to the wall-clock overlap.
+- QOS `normal` preempts by requeue
+  ([partitions, QOS and accounts](#partitions-qos-and-accounts)), so a
+  preempted run held its allocation for its whole elapsed time. `shk usage`
+  counts every run in full and breaks the caller's runs down by final state.
 
 ## shk on Marlowe
 
@@ -529,6 +590,9 @@ element, a preempted attempt, a real `submit` from inside a job and an in-job
   session on that node.
 - The source of `PROJECT_ID`, `SCRATCH` and `PROJECTS` in non-login shells, the
   lua job-submit plugin, the sshd configuration and the transfer node.
+- The bill: how the site's monthly charge to the research account relates to
+  `sreport`, and whether it counts preempted, failed and requeued runs.
+  `shk usage` counts them in full and says so in its assumptions.
 
 ### Signals and requeues in Slurm's source
 

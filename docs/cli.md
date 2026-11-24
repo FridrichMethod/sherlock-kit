@@ -13,6 +13,7 @@ flag list. [Installation and connection](install.md) covers setup; the
 - Jobs: [submit](#submit), [status](#status), [wait](#wait),
   [cancel](#cancel), [update](#update), [occupancy](#occupancy)
 - Capacity: [resources](#resources), [resource summary](#resource-summary)
+- Accounting: [usage](#usage), Marlowe only
 - Inside a job: [allocation](#allocation),
   [release and requeue](#release-and-requeue),
   [controllers inside a job](#controllers-inside-a-job)
@@ -33,6 +34,7 @@ shk submit --task T [--campaign C] --script FILE --partition P[,P...] --cpus N [
            [--after-ok JOBID ...] [--run-dir PATH] [--courtesy-ack] [--resubmit REASON] [--submission-token TOKEN] [--hold] [--dry-run|--preflight]
 shk resources --partition P [--partition P ...]
               [--summary [--by sku|class ...] [--shape NAME:cpus=N,mem=SIZE[,gpus=N] ...]]
+shk usage --start YYYY-MM-DD [--end YYYY-MM-DD]
 shk --executor local allocation --pid PID --job-id N_OR_N_TASK [--step-id NUMERIC_STEP] [--hostlist EXPRESSION [--hostlist EXPRESSION ...]]
 shk release --job-id ID --expect-name NAME --expect-token TOKEN
 shk requeue --self --expect-name NAME [--expect-token TOKEN]
@@ -53,8 +55,10 @@ shk manifest DIR
 
 - Operational results print one JSON document with `schema_version: 1` on
   stdout; `rules`, `--version` and help print text, and usage errors print
-  text on stderr (exit 2).
-- `submit`, `status`, `cancel`, `occupancy` and `resources` report
+  text on stderr (exit 2). The `invalid_range` error of `usage` is exit 2 as
+  well, but it is checked after the arguments parse and prints the JSON error
+  document on stdout.
+- `submit`, `status`, `cancel`, `occupancy`, `resources` and `usage` report
   `next_check_after`, 60 s after they ran; `wait` reports that of its last
   read.
 - Errors print `{"ok": false, "error": TOKEN, "message": ..., "hint": ...}`.
@@ -70,9 +74,9 @@ shk manifest DIR
 | Code | Meaning |
 |---|---|
 | 0 | ok |
-| 1 | local error: configuration, spec, verification, validator, malformed reply, failed remote read; this includes `site_mismatch` and a Marlowe submit without `account` (`config_required`) |
-| 2 | usage error |
-| 3 | refused, and nothing was submitted, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, an incompatible partition list (`partitions_incompatible`), an `update` to a borrowed partition (`borrowed_not_allowed`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock; on Marlowe also a plain `submit` that Slurm's test rejects (the preflight reply, nothing staged) and push or pull on Marlowe (`transfer_on_marlowe`) |
+| 1 | local error: configuration, spec, verification, validator, malformed reply, failed remote read (`malformed_read`); this includes `site_mismatch`, a Marlowe `submit` or `usage` without `account` (`config_required`) and `account_not_found` (the configured account is not one of the caller's associations) |
+| 2 | usage error; also the `invalid_range` of `usage` |
+| 3 | refused, and nothing was submitted, cancelled, released, requeued or updated: live duplicate, finished task without `--resubmit`, missing `--courtesy-ack`, an `#SBATCH` directive `shk` owns, an incompatible partition list (`partitions_incompatible`), an `update` to a borrowed partition (`borrowed_not_allowed`), a remote guard that stopped before `sbatch`, `scancel` or `scontrol` ran, a `--preflight` request that Slurm rejects, push or pull on Sherlock; on Marlowe also a plain `submit` that Slurm's test rejects (the preflight reply, nothing staged) and push or pull on Marlowe (`transfer_on_marlowe`); `no_rates` (`usage` on a site without a packaged rate table, decided before any remote call) |
 | 4 | SSH transport or master check unavailable: `auth_required` (ask the user to open the master); `unavailable` with a local permission denial (check the sandbox; request per-command approval in Codex); `unavailable` with a `~/.ssh/config` hint (fix the client config); other `unavailable` or `timeout`, hint `run shk doctor` (run it, retry once after a minute, then stop), on Marlowe `run shk --site marlowe doctor` |
 | 5 | outcome unknown after a dispatched mutation: `sbatch` ran without printing a strict job id (its exit code and stderr are in `detail`, and the staged script, spec and stderr are kept), `scancel` exited nonzero, `scontrol` exited nonzero in `release` or `requeue`, the re-read after `scontrol update` in `update` failed or does not show the requested value on every record (whatever `scontrol` returned), or the reply was lost. Run the `shk status` command in the reply's `next`, not before the time it names (at least 60 s) |
 | 6 | status ok, but the newest job of a requested name has an anomaly; `wait` ends there with outcome `anomaly` |
@@ -98,7 +102,7 @@ bundle = ["python", "-m", "demo.validate_bundle"]
 | `site` | `sherlock`; `sherlock` or `marlowe` | every command that reaches a cluster; see [Sites](#sites) |
 | `project` | none; `^[a-z0-9][a-z0-9-]{0,23}$` | `submit`, `status --task`, `wait --task`, `cancel --task`; `status --all` and `wait --all` list only this project's names |
 | `remote_root` | none; absolute, no `..` | `submit` (default run directories, also for `status` and `wait`), `push` (unless `--anywhere`) |
-| `account` | none; Marlowe only, fully matching `marlowe-[a-z]+[0-9]+` | `submit` on Marlowe, required there (`--account=` in the argv) |
+| `account` | none; Marlowe only, fully matching `marlowe-[a-z]+[0-9]+` | `submit` on Marlowe, required there (`--account=` in the argv); `usage`, required |
 | `control_host` | `sherlock-plain`; on Marlowe `marlowe-plain` | every remote call |
 | `data_host` | `sherlock-dtn`; on Marlowe `marlowe-plain` | `push`, `pull` |
 | `connect_timeout`, `command_timeout`, `transfer_timeout` | 15, 60, 3600 s | ssh and rsync |
@@ -168,8 +172,9 @@ What the site sets:
 | | Sherlock | Marlowe |
 |---|---|---|
 | Default `control_host`, `data_host` | `sherlock-plain`, `sherlock-dtn` | `marlowe-plain` for both: rsync goes through a login node |
-| `account` | refused | required by `submit`, dry run included |
+| `account` | refused | required by `submit`, dry run included, and by `usage` |
 | Partition table | `data/partitions.json` | `data/partitions-marlowe.json`: `preempt` only |
+| Rate table | none: `usage` is exit 3 `no_rates` | `data/rates-marlowe.json`, read by `usage` |
 | Slurm clients | on the login `PATH` | `/cm/shared/apps/slurm/current/bin` appended to `PATH`, `SLURM_CONF` set |
 | Local executor | an `sh<N>-ln<N>` login node, `SLURM_CLUSTER_NAME=sherlock`, or an `sh<N>-` compute node inside a job | Marlowe's Slurm configuration file exists on the machine |
 | Before a submit is staged | nothing | Slurm's test, `sbatch --test-only` |
@@ -186,10 +191,10 @@ For a site other than Sherlock:
 
 - Every reply that prints `executor` adds `"site": "marlowe"` directly after
   it: both `status` forms, `wait`, the `submitted` and preflight replies of
-  `submit`, `cancel`, `occupancy`, `resources`, `release`, `requeue`,
-  `update` and `allocation`; `doctor` adds it after `executor` at the top
-  level and in `remote`. A reply that prints `executor` without `site` came
-  from Sherlock.
+  `submit`, `cancel`, `occupancy`, `resources`, `usage`, `release`,
+  `requeue`, `update` and `allocation`; `doctor` adds it after `executor`
+  at the top level and in `remote`. A reply that prints `executor` without
+  `site` came from Sherlock.
 - The `dry_run`, `pushed`, `pulled` and `already_present` replies and the
   exit 5 reply print neither. Error replies carry no `site` either, except
   the errors of `status --details` (a failed read, a selected name none of
@@ -926,6 +931,180 @@ object:
     exact set of feature values."
 - The summary ranks nothing: no recommended partition, shape or GPU model, no
   sorting by capacity, no lowered floor.
+
+## `usage`
+
+`usage` estimates what the configured Marlowe project account has used and
+what that costs at the packaged recharge rates, per calendar month and rate
+period, for the whole account, for the caller and for the other members as
+one sum:
+
+```text
+shk --site marlowe usage --start YYYY-MM-DD [--end YYYY-MM-DD]
+```
+
+It is an estimate from Slurm accounting and the packaged rates, not the bill:
+the site bills the research account (PTA) monthly, and `usage` shows no
+balance and no invoice. It is read-only and free: one remote read per call,
+which submits nothing and writes nothing, locally or remotely. Run it at
+least 60 s apart, never before the `next_check_after` of the previous reply.
+
+### Range and errors
+
+- Marlowe only: on Sherlock, or any site without a packaged rate table, it
+  is exit 3 `no_rates`, decided before any remote call; the hint names
+  `shk --site marlowe usage`.
+- The account is the configuration's `account`, required as for `submit`
+  (exit 1 `config_required` without it); there is no `--account`.
+- `--start` (required) and `--end` (optional) are dates `YYYY-MM-DD` in the
+  site's time zone, `America/Los_Angeles`, whatever the time zone of the
+  machine that runs `shk`; a date stands for midnight there. `--end` is
+  exclusive and defaults to now; an `--end` after today is treated as now. A
+  value that is not a date is a usage error (exit 2, text on stderr).
+- `--start` must lie before the end of the range; otherwise the reply is
+  exit 2 `invalid_range`, a JSON error document on stdout, before any remote
+  call.
+- Exit 1 `account_not_found`: the configured account is not one of the
+  caller's associations. An unknown account and a range without usage both
+  make `sreport` print no rows; only the association check tells them apart
+  ([observed](validation/observed-marlowe.md#usage-accounting)).
+- Exit 1 `malformed_read`: the read is incomplete (no end marker, or a Slurm
+  client exited nonzero); as for `resources`, the hint says to retry once
+  after 60 s.
+
+### Segments
+
+The range is split into segments at these site-local dates, where they fall
+inside it:
+
+- every first day of a month;
+- every start and end of a period of the rate table;
+- the table's `firm_until`: its `read_on` date plus one calendar month, the
+  same day, clamped to the month's last day (`2026-11-23` gives
+  `2026-12-23`; `2027-01-31` would give `2027-02-28`).
+
+Each segment lies in one month and either in one rate period or outside
+every period. The last segment of a range that ends now ends `"now"`. A
+segment that starts on or after `firm_until` is provisional: the site gives
+at least one month's notice before an increase, so the table is known to
+hold only until then. The packaged table, its source page and the date it
+was read are recorded in
+[Marlowe policy](marlowe-policy.md#left-out-of-the-rules-files).
+
+### What it reads
+
+The one remote read runs `usage.sh` behind Marlowe's Slurm prelude. It
+prints the caller's login (`id -un`) and the output and exit code of:
+
+- `sacctmgr -nP show assoc where user=LOGIN account=ACCOUNT format=account`,
+  the association check;
+- for each segment,
+  `sreport -P -t seconds -T cpu,gres/gpu cluster AccountUtilizationByUser Accounts=ACCOUNT Start=FROM End=TO`,
+  with `End=now` for the last segment of a range that ends now;
+- `sacct -X -D -n -P -u LOGIN -A ACCOUNT -S START -E END --format=JobIDRaw,State,AllocTRES,ElapsedRaw,Start,End`
+  over the whole range: the caller's runs in this account, each run of a
+  requeued job on a row of its own, whole runs selected by overlap.
+
+### Usage and cost
+
+- `account` is the account's sreport row (empty Login), `own` the row of the
+  caller's login (`user`), and `others` the account minus `own`. Other
+  members are never named: no other login or name appears in the reply.
+- `own_runs` comes from `sacct`. A row without a known Start (a job that
+  never started) is skipped, and a running row (End `Unknown`) ends now.
+  Each run counts once in every segment that its wall-clock interval
+  overlaps: its ElapsedRaw is shared among those segments in proportion to
+  the overlap (all of it when Start equals End), times the `cpu` and
+  `gres/gpu` counts of its AllocTRES. Runs are summed per segment and per
+  first word of State (`COMPLETED`, `PREEMPTED`, `FAILED`, `CANCELLED` and so
+  on). `own_runs` shows how much of the caller's usage came from preempted,
+  failed and requeued runs; `own` does not use it, and the two come from
+  different Slurm reads, so near the end of a range that ends now, which
+  sreport rolls up hourly, they can differ.
+- A segment's cost is `gpu_seconds / 3600 x gpu_hour + cpu_seconds / 3600 x cpu_hour`
+  at the prices of its period, in exact decimal arithmetic. Hours and money
+  are strings rounded half up to 0.01 (hours and dollars); seconds are
+  integers. Totals sum the unrounded values, so a total need not equal the
+  sum of the rounded segment strings.
+- A segment without a packaged rate (before the table's first period, in a
+  gap between periods or after its last end) has `rate` null and every
+  `cost` null. Its usage counts in the seconds and hours of `total` and in
+  `unpriced_gpu_hours` and `unpriced_cpu_hours`, and `total.cost_complete` is
+  false: every cost of `total` sums the priced segments only and is a lower
+  bound.
+- A provisional segment is priced at its period's prices; its cost counts in
+  the cost of `total` and, separately, in `provisional_cost`.
+
+### Reply keys
+
+After `schema_version` and `ok`:
+
+```text
+{"executor": ..., "site": "marlowe", "account": ACCOUNT, "user": LOGIN,
+ "range": {"start": "YYYY-MM-DD", "end": "YYYY-MM-DD" | "now"},
+ "rates": {"source": URL, "read_on": DATE, "firm_until": DATE, "tier": "basic",
+           "tier_text": TEXT, "currency": "USD", "covered": {"start": DATE, "end": DATE}},
+ "segments": [SEGMENT, ...],
+ "total": {"account": TOTAL, "own": TOTAL, "others": TOTAL, "cost_complete": BOOL},
+ "warnings": [TEXT, ...], "assumptions": [TEXT, ...],
+ "queried_at": ..., "next_check_after": ...}
+
+SEGMENT = {"month": "YYYY-MM", "start": DATE, "end": DATE | "now",
+           "reported": {"start": TIME, "end": TIME} | null,
+           "rate": {"gpu_hour": PRICE, "cpu_hour": PRICE} | null, "provisional": BOOL,
+           "account": AMOUNT, "own": AMOUNT, "others": AMOUNT,
+           "own_runs": {"runs": N, "by_state": {STATE: {"runs": N, "gpu_seconds": N,
+                        "cpu_seconds": N, "gpu_hours": HOURS, "cpu_hours": HOURS}, ...}}}
+AMOUNT  = {"gpu_seconds": N, "cpu_seconds": N, "gpu_hours": HOURS, "cpu_hours": HOURS,
+           "cost": MONEY | null}
+TOTAL   = AMOUNT + {"provisional_cost": MONEY, "unpriced_gpu_hours": HOURS,
+                    "unpriced_cpu_hours": HOURS}
+```
+
+- `range.end` is `--end`, or `"now"` without it or when it lies after today.
+- `rates` describes the packaged table: the page it was read from
+  (`source`), the date it was read (`read_on`), `firm_until`, the tier
+  (`basic`; `tier_text` "Basic Access: base project account, QOS normal,
+  partition preempt"), the currency and `covered`, from the start of its
+  first period to the end of its last.
+- `segments` are in date order. `reported` is the window that the segment's
+  sreport banner names, site-local times as sreport prints them, and null
+  when sreport printed no banner; for a segment that ends now, its end is the
+  end of the current hour. `rate` holds the period's prices, null for an
+  unpriced segment.
+- `cost_complete` is false when a segment has no packaged rate.
+  `provisional_cost` sums the costs of the provisional segments, and
+  `unpriced_gpu_hours` and `unpriced_cpu_hours` the hours of the unpriced
+  ones.
+- N is an integer; PRICE, MONEY and HOURS are decimal strings, MONEY and
+  HOURS with two decimals (`"3.50"`); `rate` keeps the table's prices as
+  written (`"0.25"`, `"0.005"`).
+
+`warnings` holds, in this order, with the values of the reply in place of
+the uppercase words:
+
+1. for each segment without a packaged rate, "START to END: no packaged
+   rate; usage shown, not priced", with that segment's start and end;
+2. once, when a segment is provisional, "usage from FIRM_UNTIL on is priced
+   at the table read on READ_ON; the site may have announced a new rate
+   since: check SOURCE or upgrade shk";
+3. once, when a segment lies after the table's last end, "the rate table
+   ends END: upgrade shk for later rates", END being `covered.end`.
+
+`assumptions` holds five fixed sentences:
+
+1. "An estimate from Slurm accounting and the packaged rates, not the bill;
+   the site bills the research account (PTA) monthly."
+2. "Every run counts for its whole elapsed time, preempted, failed and
+   requeued runs included; own_runs.by_state shows their share."
+3. "CPU time and GPU time are both priced, the CPUs of GPU jobs included."
+4. "The 5,000 free introductory GPU-hours are not applied: they are a
+   separate -free account (QOS medium, partition batch), not this account."
+5. "sreport rolls usage up hourly, so the newest hour may be missing."
+
+Report the warnings and the assumptions together with the numbers. Whether
+the site bills preempted, failed and requeued runs is not known; `usage`
+counts them, and `own_runs` shows their share.
 
 ## `allocation`
 
