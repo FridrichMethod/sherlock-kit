@@ -17,9 +17,11 @@ observed on Marlowe (``docs/validation/observed-marlowe.md``, "Usage accounting"
 - ``sacct -X -D -n -P -u U -A A -S D -E D|now --format=JobIDRaw,State,AllocTRES,ElapsedRaw,
   Start,End`` prints the ``sacct`` rows, whole runs that overlap the window.
 
-Any other argv exits 2 with a message on stderr, so a changed remote program cannot pass by
-accident. ``rc`` maps a tool to an exit status with which every call of it fails like an
-unreachable database.
+Dates and times are site-local, as Slurm reads and prints them under the
+TZ=America/Los_Angeles that usage.sh exports; the fake records the TZ each call saw (tests
+assert it) but does not read it. Any other argv exits 2 with a message on stderr, so a changed
+remote program cannot pass by accident. ``rc`` maps a tool to an exit status with which every
+call of it fails like an unreachable database.
 """
 
 import json

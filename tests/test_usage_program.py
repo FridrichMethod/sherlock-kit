@@ -40,6 +40,7 @@ NOVEMBER_BANNER = (
 )
 SREPORT_HEAD = ["-P", "-t", "seconds", "-T", "cpu,gres/gpu", "cluster", "AccountUtilizationByUser"]
 SACCT_FORMAT = "--format=JobIDRaw,State,AllocTRES,ElapsedRaw,Start,End"
+ZONE = "America/Los_Angeles"  # the time zone of the Marlowe rate table
 
 
 class UsageProgram(unittest.TestCase):
@@ -49,11 +50,11 @@ class UsageProgram(unittest.TestCase):
         self.tmp = Path(temporary.name)
 
     def usage(self, *boundaries, env=None, **knobs):
-        """(fake, records) of one run of usage.sh ACCOUNT BOUNDARIES... on Marlowe."""
+        """(fake, records) of one run of usage.sh ZONE ACCOUNT BOUNDARIES... on Marlowe."""
         fake = UsageSlurm(self.tmp, **knobs)
         ex = executor.LocalExecutor(command_timeout=30, site=sites.MARLOWE)
         with patch.dict(os.environ, {**fake.env(), **(env or {})}):
-            result = executor.run_program(ex, "usage", [MARLOWE_ACCOUNT, *boundaries])
+            result = executor.run_program(ex, "usage", [ZONE, MARLOWE_ACCOUNT, *boundaries])
         self.assertEqual((result.status, result.returncode, result.stderr), ("complete", 0, ""))
         return fake, executor.records(result.stdout)
 
@@ -162,7 +163,7 @@ class UsageProgram(unittest.TestCase):
                 ex = executor.LocalExecutor(command_timeout=30, site=sites.MARLOWE)
                 with patch.dict(os.environ, fake.env()):
                     result = executor.run_program(
-                        ex, "usage", [MARLOWE_ACCOUNT, "2026-10-01", "2026-11-01", "now"]
+                        ex, "usage", [ZONE, MARLOWE_ACCOUNT, "2026-10-01", "2026-11-01", "now"]
                     )
                 self.assertEqual((result.status, result.returncode), ("complete", 0))
                 self.assertIn(f"{tool}: error: Problem talking to the database", result.stderr)
@@ -175,11 +176,15 @@ class UsageProgram(unittest.TestCase):
                     self.assertEqual(len(fake.calls("sreport")), 2)
 
     def test_inherited_slurm_variables_are_scrubbed(self):
+        # An inherited TZ (exported by ~/.bashrc, or the environment of a login node or a job)
+        # gives way to ZONE: sreport reads Start= and End= dates as midnights there and sacct
+        # prints Start and End there, the zone shk usage reads them in.
         inherited = {
             "SACCT_FORMAT": "JobID,State",
             "SLURM_TIME_FORMAT": "relative",
             "SLURM_CONF": "/etc/slurm/elsewhere.conf",
             "LC_ALL": "en_US.UTF-8",
+            "TZ": "UTC",
         }
         fake, _ = self.usage("2026-11-01", "now", env=inherited)
         for tool in ("sacctmgr", "sreport", "sacct"):
@@ -188,7 +193,8 @@ class UsageProgram(unittest.TestCase):
                 self.assertNotIn("SACCT_FORMAT", env)
                 self.assertNotIn("SLURM_TIME_FORMAT", env)
                 self.assertEqual(
-                    (env["LC_ALL"], env["SLURM_CONF"]), ("C", sites.MARLOWE.slurm.conf)
+                    (env["LC_ALL"], env["SLURM_CONF"], env["TZ"]),
+                    ("C", sites.MARLOWE.slurm.conf, ZONE),
                 )
 
 

@@ -194,10 +194,9 @@ class SegmentTests(RatesCase):
 
     def test_cost_and_rounding(self):
         value = rates.cost(220812, 443956, self.p2)
-        self.assertEqual(
-            value,
-            Decimal(220812) / 3600 * Decimal("0.25") + Decimal(443956) / 3600 * Decimal("0.005"),
-        )
+        numerator = Decimal(220812) * Decimal("0.25") + Decimal(443956) * Decimal("0.005")
+        self.assertEqual(rates.numerator(220812, 443956, self.p2), numerator)
+        self.assertEqual(value, numerator / 3600)
         self.assertIsInstance(value, Decimal)
         self.assertEqual(rates.money(value), "15.95")
         self.assertEqual(rates.hours(220812), "61.34")
@@ -205,6 +204,17 @@ class SegmentTests(RatesCase):
         self.assertEqual(rates.money(Decimal("0.005")), "0.01")
         self.assertEqual(rates.money(Decimal(0)), "0.00")
         self.assertEqual(rates.hours(0), "0.00")
+
+    def test_a_cost_on_a_half_cent_rounds_up(self):
+        # 3602 / 3600 x 0.25 + 4006700 / 3600 x 0.005 is exactly 5.815. Dividing each term
+        # by 3600 first rounds the GPU quotient and lands just below the half cent, at 5.81.
+        value = rates.cost(3602, 4006700, self.p2)
+        self.assertEqual(value, Decimal("5.815"))
+        self.assertEqual(rates.money(value), "5.82")
+        # A total adds the exact numerators of its segments and divides once.
+        total = rates.numerator(6171, 68462, self.p1) + rates.numerator(81934, 242798, self.p2)
+        self.assertEqual(total / 3600, Decimal("6.465"))
+        self.assertEqual(rates.money(total / 3600), "6.47")
 
 
 if __name__ == "__main__":
