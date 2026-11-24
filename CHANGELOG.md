@@ -14,6 +14,53 @@ Guidance:
   `shk install-skill --check` reports installed copies as stale after an
   upgrade to the release that carries this. No CLI change.
 
+Additions: `shk usage`, for Marlowe.
+
+- `shk --site marlowe usage --start YYYY-MM-DD [--end YYYY-MM-DD]`
+  estimates the configured project account's GPU-hours, CPU-hours and cost
+  per calendar month and rate period, for the whole account, for the caller
+  and for the other members as one sum that names nobody. One read-only,
+  free remote call reads the caller's association with the account
+  (`sacctmgr`), one `sreport` per segment and the caller's runs
+  (`sacct -X -D`), which it shares among the segments in proportion to their
+  wall-clock overlap and breaks down by final state. Dates are site-local
+  (`America/Los_Angeles`), `--end` is exclusive and defaults to now, and the
+  reply reports `next_check_after`. Prices come from a packaged table,
+  `data/rates-marlowe.json`: the Basic Access rates of
+  <https://marlowe-research.stanford.edu/access/>, read 2026-11-23, that is
+  0.20 USD per GPU-hour and 0.005 USD per CPU-hour from 2026-01-01, and
+  0.25 USD and 0.005 USD from 2026-09-01 to 2027-09-01. Costs are exact
+  decimals, rounded half up to cents. Usage from one month after the read
+  date on (2026-12-23) is priced but provisional, summed apart and warned
+  about; usage outside the table's periods is shown unpriced, and the total
+  cost is then a lower bound (`cost_complete` false). Five fixed assumptions
+  in the reply say, among other things, that it is an estimate and not the
+  bill and that every run counts for its whole elapsed time. Errors: exit 3
+  `no_rates` on a site without a rate table, before any remote call; exit 2
+  `invalid_range`, as a JSON reply, when `--start` is not before the end;
+  exit 1 `config_required` without `account`, `account_not_found` when the
+  account is not one of the caller's associations, and `malformed_read` for
+  an incomplete read.
+- The Marlowe skill describes `shk usage`. It changed, so
+  `shk install-skill --check` reports installed Marlowe copies as stale; run
+  `shk --site marlowe install-skill` again, with the same `--rules`, to
+  refresh them. No rules file changed.
+
+Visible on Sherlock:
+
+- `shk --help` lists `usage`, which refuses there with exit 3 `no_rates`.
+
+Documentation:
+
+- The command reference describes `shk usage`. The Marlowe policy guide
+  records the rate table's source and read date and cites the free
+  introductory GPU-hours to the observed `-free` accounts instead of
+  suffixed accounts on `batch`. The Marlowe observation guide gains "Usage
+  accounting" (the `sreport` and `sacct` formats, the association check,
+  `PrivateData`, the `-free` accounts) and records that the site's
+  chargeback script, which `shk` does not run, uses other prices than the
+  published ones and writes cluster management state.
+
 ## 0.11.0
 
 Additions: `shk wait`, and `shk` inside Marlowe jobs. The `sbatch` argv of both

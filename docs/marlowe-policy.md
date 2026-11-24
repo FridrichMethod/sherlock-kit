@@ -190,13 +190,29 @@ By design, the rules files leave out these site statements:
 - the site's advice to check current limits with `sinfo` and `sacctmgr`: the
   Slurm clients are not on the PATH of a plain ssh command, and the test before
   submit and `shk resources` cover the agent's needs;
-- the recharge rates and the free introductory GPU-hours for new PIs: rates
-  change (the site gives notice), the free hours belong to suffixed accounts on
-  `batch`, and the rules say only that usage is charged;
+- the recharge rates and the free introductory GPU-hours for new PIs: the
+  rules say only that usage is charged. Rates change, with at least one
+  month's notice before an increase, so `shk --site marlowe usage` prices
+  usage from a packaged table instead, `src/sherlock_kit/data/rates-marlowe.json`:
+  the Basic Access rates (base project account, QOS normal, partition
+  `preempt`) under "Recharge rates" on the Apply for Access page,
+  <https://marlowe-research.stanford.edu/access/>, read 2026-11-23. They are
+  0.20 USD per GPU-hour and 0.005 USD per CPU-hour from 2026-01-01 to
+  2026-09-01, and 0.25 USD and 0.005 USD from 2026-09-01 to 2027-09-01
+  (site-local dates, end exclusive). The page lists no earlier period, so
+  older usage is shown unpriced, and so is usage after 2027-09-01 until a
+  release extends the table; usage from one month after the read date
+  (2026-12-23) is priced, but flagged provisional, since the site may have
+  announced a new rate by then. `shk usage` does not apply the free hours:
+  they are a separate `marlowe-<project>-free` account with QOS `medium`
+  (partition `batch`) and a Slurm cap of 5,000 GPU-hours
+  ([observed](validation/observed-marlowe.md#usage-accounting)), not the
+  base account. It does not run the site's chargeback script either, whose
+  prices differ from the published ones and which writes cluster management
+  state ([charging](validation/observed-marlowe.md#charging));
 - suffixed accounts (`-pmNN`, `-plNN`, `-free`), the `batch` and `hero`
-  partitions, the charging of a `-pl` account's GPU-hours on `preempt`, and
-  `sreport` usage checks: this release covers `preempt` with the base account
-  only;
+  partitions and the charging of a `-pl` account's GPU-hours on `preempt`:
+  this release covers `preempt` with the base account only;
 - `squeue --start` and pending reasons for a start estimate: test-only
   estimates proved unrelated to real starts, and the pending reason is in
   `shk status --details`;

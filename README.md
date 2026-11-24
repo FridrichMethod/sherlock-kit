@@ -198,6 +198,7 @@ how `shk` finds the task in Slurm.
 | | `shk update` | Change one field of an identity-verified job in place: a shorter time limit, the partition or the features while it pends, or an array's throttle |
 | Capacity | `shk occupancy` | Running and pending jobs per user; required before borrowed partitions |
 | | `shk resources` | Configured minus allocated node capacity, per node or as a `--summary` |
+| Accounting | `shk usage` | Marlowe usage and estimated cost per month and rate period |
 | Data | `shk push` | rsync a local directory to Sherlock through the DTN; never deletes |
 | | `shk pull` | Fetch the files `SHA256SUMS` lists, verify and validate them, then create LOCAL |
 | | `shk manifest` | Write `DIR/SHA256SUMS` inside a job |
@@ -265,7 +266,10 @@ shk --site marlowe install-skill --project . --rules workstation
 On Marlowe `shk` passes the account to `sbatch`, lists only the partition
 `preempt`, and tests every submit with `sbatch --test-only` before staging it,
 so a request that Slurm refuses is exit 3 with nothing staged. Replies carry
-`"site": "marlowe"`. Every job there is charged per CPU-hour and GPU-hour.
+`"site": "marlowe"`. Every job there is charged per CPU-hour and GPU-hour;
+`shk --site marlowe usage --start YYYY-MM-DD` estimates the project
+account's usage and its cost per month and rate period from Slurm accounting
+and a packaged, dated rate table, an estimate and not the bill.
 Marlowe support needs a release whose `shk --help` lists `--site`;
 [Installation and connection](docs/install.md#marlowe) covers the setup and
 [Marlowe policy](docs/marlowe-policy.md) the provenance of its rules.
