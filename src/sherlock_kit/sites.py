@@ -17,6 +17,8 @@ change with demand:
 - the site instructions file that doctor checks, or None;
 - whether submit runs sbatch --test-only before staging;
 - the packaged partition table, the rules files by kind and the skill name;
+- rates: the packaged rate table that usage prices with, or None for a site without a
+  recharge (Sherlock, where usage refuses with no_rates); the record names the file only;
 - estimate_note: None, or the note a preflight reply carries as estimate.note where the start
   that sbatch --test-only prints is no wait prediction (Marlowe).
 
@@ -57,6 +59,7 @@ class Site:
     instructions: str | None
     test_before_submit: bool
     partitions: str
+    rates: str | None
     rules: Mapping[str, str]
     skill: str
     estimate_note: str | None
@@ -94,6 +97,7 @@ SHERLOCK = Site(
     instructions="/etc/agents/AGENTS.md",
     test_before_submit=False,
     partitions="partitions.json",
+    rates=None,
     rules=MappingProxyType({"workstation": "workstation.md", "cluster": "cluster.md"}),
     skill="sherlock-kit",
     estimate_note=None,
@@ -109,6 +113,7 @@ MARLOWE = Site(
     instructions=None,
     test_before_submit=True,
     partitions="partitions-marlowe.json",
+    rates="rates-marlowe.json",
     rules=MappingProxyType({
         "workstation": "marlowe-workstation.md",
         "cluster": "marlowe-cluster.md",
