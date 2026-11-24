@@ -14,7 +14,7 @@ from unittest.mock import patch
 from fakes import SRC, TRIPWIRE
 
 sys.path.insert(0, str(SRC))
-from sherlock_kit import executor, sites
+from sherlock_kit import executor, rates, sites
 
 DATA = SRC / "sherlock_kit" / "data"
 PRELUDE = "PATH=$PATH:$1\nSLURM_CONF=$2\nexport PATH SLURM_CONF\nshift 2\n"
@@ -48,6 +48,7 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(found.instructions, "/etc/agents/AGENTS.md")
         self.assertFalse(found.test_before_submit)
         self.assertEqual(found.partitions, "partitions.json")
+        self.assertIsNone(found.rates)
         self.assertEqual(
             dict(found.rules), {"workstation": "workstation.md", "cluster": "cluster.md"}
         )
@@ -70,6 +71,8 @@ class RecordTests(unittest.TestCase):
         self.assertIsNone(found.instructions)
         self.assertTrue(found.test_before_submit)
         self.assertEqual(found.partitions, "partitions-marlowe.json")
+        self.assertEqual(found.rates, "rates-marlowe.json")
+        self.assertEqual(rates.load(found.rates).currency, "USD")
         self.assertEqual(
             dict(found.rules),
             {"workstation": "marlowe-workstation.md", "cluster": "marlowe-cluster.md"},

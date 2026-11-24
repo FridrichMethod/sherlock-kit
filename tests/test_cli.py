@@ -222,6 +222,7 @@ class FrameTests(TempCase):
                 "status",
                 "submit",
                 "update",
+                "usage",
                 "wait",
             ],
         )

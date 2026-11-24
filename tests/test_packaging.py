@@ -28,6 +28,7 @@ CONTENT = (
     "skills/sherlock-kit/SKILL.md",
     "partitions.json",
     "partitions-marlowe.json",
+    "rates-marlowe.json",
     "remote/site-env.sh",
     "rules/marlowe-workstation.md",
     "rules/marlowe-cluster.md",
