@@ -20,14 +20,17 @@ default site.
 | `sites.py` | the packaged site records (Sherlock, Marlowe) and the helpers that add a site to replies, hints and `next` |
 | `executor.py` | `SshExecutor` and `LocalExecutor`, the master preflight, detection, `run_program` |
 | `partitions.py` | the packaged partition table of each site and the generated rules block |
+| `rates.py` | the packaged rate table of a site with a recharge (checked once on load, `firm_until`), the split of a usage range into segments, the site-local date, and cost and rounding |
 | `doctor.py` | read-only checks |
 | `spec.py`, `cpu_threads.py`, `slurm.py`, `details.py`, `node_resources.py`, `control.py` | resources (one partition or a compatible partition list), job name, sbatch argv and its optional thread-budget `env` prefix; `submit` (with the `--preflight` estimate), `status`, `cancel`, `occupancy`, `resources` (per node or `--summary`), `release`, `requeue`, `update` |
 | `wait.py` | `wait`: a bounded loop over the `status` read, with the outcome decision and the backoff |
+| `usage.py` | `usage`: the one `usage.sh` read, its record parsing and association check, the sharing of the caller's runs among segments, and the priced reply |
 | `allocation.py` | local worker PID and allocation/step evidence, strict field parsing, actual resources and GPU SKU candidates of the node records |
 | `transfer.py` | `push`, payload-only `pull`, `manifest` |
 | `install.py` | `rules`, `install-skill` |
 | `data/remote/*.sh` | the fixed POSIX `sh` programs run on the login node, and `site-env.sh`, the prelude for a site whose Slurm clients are not on the login `PATH` |
 | `data/partitions.json`, `data/partitions-marlowe.json` | the partition table of each site |
+| `data/rates-marlowe.json` | Marlowe's rate table, read by `rates.py` |
 | `data/rules/*.md`, `data/skills/*/SKILL.md` | agent content of each site, delivered by `install-skill` or read with `shk rules` |
 
 `bin/shk` is a stdlib-only entry point: it follows symlinks to the repository,
@@ -125,9 +128,9 @@ with demand:
   project accounts only);
 - the on-cluster test, the site instructions file that `doctor` reads
   (Sherlock's `/etc/agents/AGENTS.md`, none on Marlowe), whether `submit`
-  tests a request before staging, the partition table file, the rules files
-  by kind, the skill name, and the note a preflight estimate carries (Marlowe
-  only).
+  tests a request before staging, the partition table file, the rate table
+  file (none for Sherlock), the rules files by kind, the skill name, and the
+  note a preflight estimate carries (Marlowe only).
 
 Functions without a `Context` (partition lookups, spec helpers) take the
 site as a parameter that defaults to Sherlock, so the Sherlock paths and their
