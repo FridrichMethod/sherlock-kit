@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "currency": "USD",
+  "timezone": "America/Los_Angeles",
+  "tier": "basic",
+  "tier_text": "Basic Access: base project account, QOS normal, partition preempt",
+  "source": "https://marlowe-research.stanford.edu/access/",
+  "read_on": "2026-11-23",
+  "periods": [
+    {
+      "start": "2026-01-01",
+      "end": "2026-09-01",
+      "gpu_hour": "0.20",
+      "cpu_hour": "0.005"
+    },
+    {
+      "start": "2026-09-01",
+      "end": "2027-09-01",
+      "gpu_hour": "0.25",
+      "cpu_hour": "0.005"
+    }
+  ]
+}
