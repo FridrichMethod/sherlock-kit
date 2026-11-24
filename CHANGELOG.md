@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.12.0
+
+This release adds `shk usage`, an estimate of a Marlowe project account's
+usage and cost, and guidance that a project names its `shk` version once. The `sbatch`
+argv of both sites, the existing remote programs and the replies of the other
+commands are those of 0.11.0, apart from the version text, `shk --help`,
+which lists the new command, and the change listed under "Visible on
+Sherlock". The Marlowe surface, `usage` and its packaged rate table included,
+stays provisional and may change in a later release.
 
 Guidance:
 
