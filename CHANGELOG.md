@@ -23,14 +23,18 @@ Additions: `shk usage`, for Marlowe.
   free remote call reads the caller's association with the account
   (`sacctmgr`), one `sreport` per segment and the caller's runs
   (`sacct -X -D`), which it shares among the segments in proportion to their
-  wall-clock overlap and breaks down by final state. Dates are site-local
-  (`America/Los_Angeles`), `--end` is exclusive and defaults to now, and the
-  reply reports `next_check_after`. Prices come from a packaged table,
+  wall-clock overlap and breaks down by final state. The remote program runs
+  these tools with `TZ` set to the rate table's time zone, so their dates
+  and times are the site's whatever `TZ` the caller's environment holds.
+  Dates are site-local (`America/Los_Angeles`), `--end` is exclusive and
+  defaults to now, and the reply reports `next_check_after`. Prices come from a packaged table,
   `data/rates-marlowe.json`: the Basic Access rates of
   <https://marlowe-research.stanford.edu/access/>, read 2026-11-23, that is
   0.20 USD per GPU-hour and 0.005 USD per CPU-hour from 2026-01-01, and
-  0.25 USD and 0.005 USD from 2026-09-01 to 2027-09-01. Costs are exact
-  decimals, rounded half up to cents. Usage from one month after the read
+  0.25 USD and 0.005 USD from 2026-09-01 to 2027-09-01. Each cost is one
+  division by 3600 of an exact numerator, GPU-seconds times the GPU-hour
+  price plus CPU-seconds times the CPU-hour price (summed over the segments
+  for a total), rounded half up to cents. Usage from one month after the read
   date on (2026-12-23) is priced but provisional, summed apart and warned
   about; usage outside the table's periods is shown unpriced, and the total
   cost is then a lower bound (`cost_complete` false). Five fixed assumptions
@@ -40,7 +44,8 @@ Additions: `shk usage`, for Marlowe.
   `invalid_range`, as a JSON reply, when `--start` is not before the end;
   exit 1 `config_required` without `account`, `account_not_found` when the
   account is not one of the caller's associations, and `malformed_read` for
-  an incomplete read.
+  an incomplete read (no end marker, or a Slurm client that exited nonzero),
+  a record that does not parse or a missing login record.
 - The Marlowe skill describes `shk usage`. It changed, so
   `shk install-skill --check` reports installed Marlowe copies as stale; run
   `shk --site marlowe install-skill` again, with the same `--rules`, to

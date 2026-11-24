@@ -969,8 +969,8 @@ least 60 s apart, never before the `next_check_after` of the previous reply.
   make `sreport` print no rows; only the association check tells them apart
   ([observed](validation/observed-marlowe.md#usage-accounting)).
 - Exit 1 `malformed_read`: the read is incomplete (no end marker, or a Slurm
-  client exited nonzero); as for `resources`, the hint says to retry once
-  after 60 s.
+  client exited nonzero), a record does not parse, or the login record is
+  missing; as for `resources`, the hint says to retry once after 60 s.
 
 ### Segments
 
@@ -993,8 +993,13 @@ was read are recorded in
 
 ### What it reads
 
-The one remote read runs `usage.sh` behind Marlowe's Slurm prelude. It
-prints the caller's login (`id -un`) and the output and exit code of:
+The one remote read runs `usage.sh` behind Marlowe's Slurm prelude. The
+program runs its tools with `TZ` set to the rate table's time zone
+(`America/Los_Angeles`), so `sreport` reads its dates as midnights there and
+`sacct` prints its times there, whatever `TZ` the caller's environment holds
+(one that `~/.bashrc` exports, or one that the local executor inherits on a
+login node or inside a job). It prints the caller's login (`id -un`) and the
+output and exit code of:
 
 - `sacctmgr -nP show assoc where user=LOGIN account=ACCOUNT format=account`,
   the association check;
@@ -1021,11 +1026,13 @@ prints the caller's login (`id -un`) and the output and exit code of:
   failed and requeued runs; `own` does not use it, and the two come from
   different Slurm reads, so near the end of a range that ends now, which
   sreport rolls up hourly, they can differ.
-- A segment's cost is `gpu_seconds / 3600 x gpu_hour + cpu_seconds / 3600 x cpu_hour`
-  at the prices of its period, in exact decimal arithmetic. Hours and money
-  are strings rounded half up to 0.01 (hours and dollars); seconds are
-  integers. Totals sum the unrounded values, so a total need not equal the
-  sum of the rounded segment strings.
+- A segment's cost is `(gpu_seconds x gpu_hour + cpu_seconds x cpu_hour) / 3600`
+  at the prices of its period: one division by 3600 of an exact numerator,
+  so a cost exactly on a half cent rounds up. Each cost in `total` is the
+  sum of those numerators over the segments it covers, divided once by 3600.
+  Hours and money are strings rounded half up to 0.01 (hours and dollars);
+  seconds are integers. Totals sum the unrounded values, so a total need not
+  equal the sum of the rounded segment strings.
 - A segment without a packaged rate (before the table's first period, in a
   gap between periods or after its last end) has `rate` null and every
   `cost` null. Its usage counts in the seconds and hours of `total` and in

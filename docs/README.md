@@ -28,9 +28,11 @@ guides require.
 
 [Observed Marlowe and Slurm behavior](validation/observed-marlowe.md) records
 what was seen live on Marlowe (Slurm 25.05.2), the client environment, the
-submission verdicts, queue waits and preemption and `shk`'s own commands
-there, from the workstation and inside a batch job, with the same limits:
-observations of two days, not site guarantees.
+submission verdicts, queue waits and preemption, `shk`'s own commands
+there, from the workstation and inside a batch job, and usage accounting
+(the `sreport` and `sacct` formats, the association check, the `-free`
+accounts), with the same limits: observations of three days, not site
+guarantees.
 
 Implementation plans, worker handoffs and check logs are not part of these
 guides; [the repository instructions](../AGENTS.md) say where they are kept.
