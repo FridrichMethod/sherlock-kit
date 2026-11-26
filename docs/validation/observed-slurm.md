@@ -35,6 +35,10 @@ reproduced here;
 - With 0.9.0, `shk update` ran from a workstation over the control master
   against a held 1-CPU job and a held 3-task array on `normal`, both cancelled
   while held; nothing ran.
+- On 2026-11-25, two CPU-only runs on `dev`, 1 CPU and 1 GB each and
+  authorized by the owner, ran raw `srun` from a workstation over the control
+  master, with no `shk` command; [the dev partition](#the-dev-partition)
+  records them with that day's read of the partition.
 - A job pattern that worked: `#!/bin/bash -l`, no `#SBATCH` lines,
   `module load ...`, the toolkit wheel unzipped into `$L_SCRATCH_JOB` and put
   on `PYTHONPATH`, thread variables set to 1, results written into the run
@@ -99,6 +103,81 @@ reproduced here;
 - Queue waits: `normal` CPU array tasks started within about 2 minutes, and a
   2-task CPU array on `owners` about 2 minutes after its hold was released;
   `owners` GPU jobs waited 29 and 69 minutes.
+
+## The dev partition
+
+`dev` takes no batch jobs ([submission](#submission)). Read on 2026-11-25
+over the control master without a job:
+
+- `scontrol show partition dev`: open to all groups, partition QoS `dev`,
+  default time 1 hour, maximum 2 hours, not preemptible, 4 nodes with 112
+  CPUs and 64 GPUs, `DefMemPerCPU=6400` and `MaxMemPerCPU=8000` (MB), so a
+  request without `--mem` gets 6400 MB per CPU. Two 32-core nodes carry 32 A30
+  MIG `1g.6gb` instances each (6 GB, feature `GPU_SKU:A30_MIG-1g.6gb`); two
+  24-core nodes have no GPU.
+- The site's documentation states two different per-user limits for `dev` on
+  one page: "4 cores + 2 GPUs/user" in its partition table and "2 cores and
+  8 GB" in a footnote. The limit that Slurm enforces was not read, so the cap
+  is unconfirmed.
+- `sh_dev` (also named `sdev`) is a bash script that runs `salloc` with
+  `-J sh_dev -p dev -t 01:00:00 --qos normal --mem 4GB` and adds `-c`, `-G`,
+  `-n` and `-N` only when they are given. Any positional argument prints its
+  usage and exits 2: it opens an interactive shell and accepts no command.
+- In the non-login ssh shell on a login node, `srun`, `sbatch`, `squeue`,
+  `scancel` and `sacct` resolve under `/usr/bin`.
+
+Two CPU-only runs followed the same day, from a workstation over the control
+master, 1 CPU and 1 GB each, no GPU. The first ran a script to its end:
+
+```sh
+ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain \
+  'srun --partition=dev --time=5 --cpus-per-task=1 --mem=1G --job-name=<name> bash -l -s' < check.sh
+```
+
+- No pty was requested. The script came on stdin (`bash -l -s`), and nothing
+  was staged on Sherlock.
+- The whole call took 15 s, the wait for the allocation included. `srun`
+  printed `srun: job N queued and waiting for resources` and
+  `srun: job N has been allocated resources` on stderr, so the job id is known
+  before the script prints anything.
+- The script's exit status was the call's: the script ended with `exit 7`, and
+  the local `ssh` returned 7; `srun` added
+  `srun: error: NODE: task 0: Exited with exit code 7` on stderr. stdout and
+  stderr stayed separate end to end.
+- Inside the step: no tty, a login shell in which `module` and `ml` are shell
+  functions and `sh_part` resolves; `$L_SCRATCH_JOB`, `$SCRATCH` and
+  `$GROUP_HOME` set; `TMPDIR=/tmp`; `nproc` 1, the allocation; no GPU visible.
+  The job record showed `Partition=dev`, `QOS=normal`, `BatchFlag=0`,
+  `TimeLimit=00:05:00` and `AllocTRES=cpu=1,mem=1G,node=1,billing=1`.
+- The `dev` compute node reached the package indexes: HTTP 200 from
+  `https://pypi.org/simple/pip/`, `https://github.com/` and
+  `https://conda.anaconda.org/conda-forge/noarch/current_repodata.json`;
+  `https://files.pythonhosted.org/` answered 404 for its root, so it is
+  reachable too.
+
+The second run used the same command with `--immediate=60` and a script that
+printed a line every 5 s for 3 minutes. 45 s after the start the local `ssh`
+received SIGTERM, as a harness timeout sends it, and returned 255.
+
+- `--immediate=60` was accepted: the job was allocated 14 s after the request
+  and started normally.
+- The job did not end with the local client. 75 s after the kill `squeue`
+  still showed it `RUNNING`, and the two `srun` client processes of the
+  command were still alive on the login node. The local side received nothing
+  after the kill.
+- `scancel N` with the exact job id ended it: `sacct` showed the job
+  `CANCELLED by <uid>` after 1 minute 50 seconds and its step 0 `CANCELLED`.
+  A read 24 s later found neither the job in `squeue` nor its `srun` clients
+  on the login node. Without the cancel, the job and its client would have
+  lived until the script ended or the time limit came, whichever was first
+  (inferred).
+
+Not observed: `--gpus` on `dev` (this repository never submits GPU work while
+it is developed or tested); what `--immediate` does when `dev` has no free
+resources; the per-user limits of `dev` that Slurm enforces; and a request
+above the 2-hour maximum, which by Slurm's documentation of `--time` is left
+pending, possibly indefinitely, instead of failing
+([srun reference](https://slurm.schedmd.com/srun.html#OPT_time)).
 
 ## Holds, release and submission tokens
 

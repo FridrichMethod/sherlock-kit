@@ -6,6 +6,11 @@ is this logical task already in Slurm, what is its state, and did this data
 arrive intact. Everything else (authorization, scientific validity, what a job
 script does) stays with the user, the site rules and the project.
 
+No command runs `srun` or `salloc`. A run on Sherlock's `dev` partition, which
+takes interactive jobs only, stays outside `shk`: the rules and the skill carry
+the raw `srun` command, and a run whose call was lost is ended with `scancel`
+and its exact job id, because `shk cancel` addresses only `shk` job names.
+
 Stanford's Marlowe cluster is a second packaged site, selected per command
 ([Sites](#sites)). Where this guide names Sherlock alone it describes the
 default site.

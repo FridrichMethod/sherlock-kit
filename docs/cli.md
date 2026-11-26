@@ -266,8 +266,11 @@ window; when it has one, it keeps that job's `done` or `failed` state and
   is given but empty or whitespace-only (an unset shell variable, for example)
   is refused offline, exit 1 `spec_invalid`.
 - `dev` is refused offline (exit 3 `batch_not_allowed`): Sherlock rejects every
-  batch job there and keeps it for interactive `sh_dev` or `salloc` sessions;
-  `occupancy` and `resources` still read it.
+  batch job there; `occupancy` and `resources` still read it. One command runs
+  there outside `shk` with `srun --partition=dev --time=MIN CMD`; `sh_dev`
+  opens an interactive shell and takes no command. The skill's section "Short
+  work" holds the full call from a workstation or a login node, its resources
+  and the steps after a lost call.
 - Borrowed partitions need `--courtesy-ack`; see [occupancy](#occupancy).
 
 ### GPU selection

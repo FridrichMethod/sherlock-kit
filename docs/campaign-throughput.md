@@ -199,11 +199,12 @@ Run ordinary CPU preparation and regression tests locally, in parallel where
 independent: input parsing, feature construction, manifest validation, recovery
 fault injection and static dependency checks. Stage frozen inputs, weights and
 sources before their jobs need them. Create Sherlock environments under the
-permitted persistent location: a small pure-Python environment may be created
-on a login node as job preparation, while compiling and heavy installs run
-inside an allocation, such as an `sh_dev` session. Keep necessary allocation,
-environment and provenance checks in each job, but do not put a general CPU test
-suite on every GPU job's startup path.
+permitted persistent location: a login node takes small pure-Python installs
+and checks that end in seconds, while compiling, heavy installs and tests
+beyond seconds run in one `dev` run (`srun --partition=dev --time=MIN CMD`, see
+[environments on Sherlock](install.md#environments-on-sherlock)) or in a batch
+job. Keep necessary allocation, environment and provenance checks in each job,
+but do not put a general CPU test suite on every GPU job's startup path.
 
 ### Run different revisions from one Git mirror
 
