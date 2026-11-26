@@ -92,7 +92,7 @@ def register(subparsers: Subparsers) -> None:
     )
     parser.add_argument("--time", help="a lower time limit: 2h, 90m or H:MM:SS")
     parser.add_argument(
-        "--partition", help="P or P,P of the same requeue and preemptible class as the job"
+        "--partition", help="P or P,P whose requeue default matches the job's Requeue flag"
     )
     parser.add_argument("--constraint", help="Slurm Features, sent together with --prefer")
     parser.add_argument("--prefer", help="Slurm Prefer, sent together with --constraint")
@@ -248,7 +248,7 @@ def requeue(args: argparse.Namespace, ctx: Context) -> Outcome:
     if "_" in physical or not spec.JOB_ID.fullmatch(physical):
         raise ShkError(EXIT_REFUSED, "self_only", "no physical current allocation id")
     table = partitions.profiles(ctx.site)
-    allowed = ",".join(name for name, found in table.items() if found.requeue)
+    allowed = ",".join(name for name, found in table.items() if not found.borrowed)
     return _change("requeue", physical, args, ctx, allowed)
 
 
@@ -265,7 +265,8 @@ def _request(
 ) -> tuple[str, list[str], dict[str, str]]:
     """The field, its update.sh arguments and the Slurm KEY=VALUE pairs, checked offline.
 
-    Partitions and their classes are those of the site's table.
+    Partitions are those of the site's table. A partition target sends its value, its requeue
+    default (on when a member allows requeue) and whether it allows GPUs.
     """
     given = {
         "time": args.time is not None,
@@ -293,17 +294,7 @@ def _request(
                 f"partition {profile.name} is borrowed: shk update never moves a job there",
                 hint="cancel, run shk occupancy, then resubmit with --courtesy-ack",
             )
-        same = [
-            name
-            for name, found in partitions.profiles(site).items()
-            if found.preemptible == profile.preemptible
-        ]
-        remote = [
-            args.partition,
-            _bit(profile.requeue),
-            _bit(profile.gpus_allowed),
-            ",".join(same),
-        ]
+        remote = [args.partition, _bit(profile.requeue), _bit(profile.gpus_allowed)]
         return field, remote, {"Partition": args.partition}
     if field == "features":
         requested = {}

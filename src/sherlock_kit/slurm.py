@@ -366,7 +366,7 @@ class Job:
     tasks: dict[str, Any]
     exit_codes: dict[str, int]
     max_restart: int
-    interrupted: frozenset[str]  # partitions of preempted, requeued or restarted attempts
+    interrupted: frozenset[str]  # partition texts of preempted attempts
     cost: dict[str, Any]
     partition_texts: frozenset[str]  # the partition text of every row: one name or a list
 
@@ -442,26 +442,14 @@ def _final(deciding: dict[int, Row], accounted: dict[int, Row], count: int | Non
     )
 
 
-def _interrupted(rows: list[Row], restarts: dict[int, set[int]]) -> frozenset[str]:
-    """Partitions on which an attempt was preempted, requeued or restarted.
+def _interrupted(rows: list[Row]) -> frozenset[str]:
+    """Partitions on which an attempt was preempted: the partition texts of PREEMPTED rows.
 
     sacct --duplicates keeps each superseded attempt with the partition it ran on, which for a
-    job submitted to several partitions can differ from the next attempt's. A restart whose
-    earlier attempt is not visible counts against the partition it restarted on.
+    job submitted to several partitions can differ from the next attempt's. A NODE_FAIL or
+    REQUEUED attempt and a restart whose earlier attempt is not visible do not count.
     """
-    return frozenset(
-        row.partition
-        for row in rows
-        if row.state in ("PREEMPTED", "REQUEUED")
-        or (
-            row.from_acct
-            and any(
-                row.restart < max(restarts[index])
-                or (row.restart > 0 and row.restart - 1 not in restarts[index])
-                for index in row.tasks
-            )
-        )
-    )
+    return frozenset(row.partition for row in rows if row.state == "PREEMPTED")
 
 
 def _job(rows: list[Row], known_count: int | None) -> Job:
@@ -499,7 +487,7 @@ def _job(rows: list[Row], known_count: int | None) -> Job:
         tasks=tasks,
         exit_codes=dict(sorted(exits.items())),
         max_restart=max(row.restart for row in rows),
-        interrupted=_interrupted(rows, restarts),
+        interrupted=_interrupted(rows),
         cost={
             "cpu_seconds": sum(row.cpu_seconds for row in rows),
             "gpu_seconds": sum(row.gpu_seconds for row in rows),
@@ -530,9 +518,10 @@ def _anomalies(
 ) -> list[str]:
     """invariants: shk names, where one name is one task on partitions the site's table lists.
 
-    A preemption or restart is unexpected on the packaged non-preemptible partition it happened
-    on; a list counts when all its members are (a compatible set shares one value). A partition
-    list on any row of the job is split on "," before the lookup.
+    A PREEMPTED attempt is unexpected on a packaged non-preemptible partition, or on a list whose
+    members are all such; a NODE_FAIL or REQUEUED attempt and a restart are not anomalies (they
+    show in max_restart and tasks). A partition list on any row of the job is split on ","
+    before the lookup.
     """
     profiles = partitions.profiles(site)
     found = []
@@ -714,7 +703,11 @@ def _register_submit(subparsers: Subparsers) -> None:
         help="submit with a user hold until exact release (needs --submission-token)",
     )
     requeue = parser.add_mutually_exclusive_group()
-    requeue.add_argument("--requeue", action="store_true", help="default: the partition profile")
+    requeue.add_argument(
+        "--requeue",
+        action="store_true",
+        help="default: the partition profile; a set is on when a member allows requeue",
+    )
     requeue.add_argument("--no-requeue", dest="requeue", action="store_false")
     parser.set_defaults(handler=submit, requeue=None)
 

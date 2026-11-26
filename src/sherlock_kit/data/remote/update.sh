@@ -1,7 +1,7 @@
 # shk update N NAME TOKEN FIELD ARGS...: an identity guard, then one scontrol update of one field
 # of a pending job or of a whole array (N is a job id or an ArrayJobId), then one re-read:
 #   time M                                       TimeLimit=M (whole minutes, never more)
-#   partition VALUE REQUEUE GPUS_OK SAME_CLASS   Partition=VALUE
+#   partition VALUE REQUEUE GPUS_OK              Partition=VALUE (Requeue must equal REQUEUE)
 #   features FEATURES PREFER                     Features= and/or Prefer= ("" when not given)
 #   throttle M BORROWED                          ArrayTaskThrottle=M
 # TOKEN is "" when not given. Every record of scontrol show job N is printed as SHK_BEFORE|. A
@@ -104,7 +104,7 @@ else
     [ "$count" -eq 1 ] || refuse id
 fi
 case $field in
-partition) requeue=$6 gpus_ok=$7 same_class=$8 ;;
+partition) requeue=$6 gpus_ok=$7 ;;
 features) features=$5 prefer=$6 ;;
 throttle) borrowed=$6 ;;
 time) ;;
@@ -140,7 +140,6 @@ check() {
         word Requeue "$head"
         [ "$got" = "$requeue" ] || refuse requeue
         word Partition "$head"
-        subset "$got" "$same_class" || refuse preemptible
         if ! subset "$value" "$got" || ! subset "$got" "$value"; then changed=yes; fi
         # Any GPU request word counts: free text can only add a refusal here, never hide one.
         if [ "$gpus_ok" != 1 ] && printf "%s\n" "$rest" | awk "{ for (i = 1; i <= NF; i++) if (\$i ~ /^(ReqTRES|TresPerJob|TresPerNode|TresPerSocket|TresPerTask)=/ && index(\$i, \"gres/gpu\")) found = 1 } END { exit !found }"; then

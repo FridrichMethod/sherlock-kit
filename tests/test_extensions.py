@@ -211,7 +211,7 @@ class GuardAndEvidenceFlows(Flow):
     tool = ExtensionFlows.tool
     detail_tools = ExtensionFlows.detail_tools
 
-    def test_self_requeue_requires_own_process_uid_identity_and_owners(self):
+    def test_self_requeue_requires_own_process_uid_identity_and_requeue(self):
         self.knobs(SLURM_JOB_ID="44")  # restored with the rest of the environment
         os.environ.pop("SLURM_ARRAY_JOB_ID", None)
         os.environ.pop("SLURM_ARRAY_TASK_ID", None)
@@ -229,7 +229,7 @@ class GuardAndEvidenceFlows(Flow):
         self.assertEqual(record.read_text(), "requeue\n44\n")
         original = script.read_text()
         for old, new, reason in [
-            ("Partition=owners", "Partition=normal", "partition"),
+            ("Partition=owners", "Partition=btrippe", "partition"),
             ("Requeue=1", "Requeue=0", "policy"),
             ("JobState=RUNNING", "JobState=PENDING", "state"),
             (f"({uid})", f"({uid + 1})", "uid"),
