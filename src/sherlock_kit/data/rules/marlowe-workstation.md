@@ -12,7 +12,7 @@ These rules cover Stanford's Marlowe only: Sherlock work follows the Sherlock ru
 ### Connection
 - Owner: agent sessions here may drive Marlowe over the user's open `marlowe-plain` master, as a session on Marlowe would.
 - Every Marlowe command is `shk --site marlowe ...`, plus `--project-dir DIR` when the Marlowe configuration is not the nearest; exit 1 `site_mismatch` means the nearest is another cluster's. A reply that names its `executor` without `"site": "marlowe"` came from Sherlock: stop and check.
-- Light reads may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`. That PATH has no Slurm clients: Slurm work goes through shk.
+- Light reads and checks and (owner) environment builds may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`. That PATH has no Slurm clients: use shk.
 - Exit 4 `auth_required`: ask the user to run the hint (`ssh marlowe-plain`), then retry once. `unavailable` with a `~/.ssh/config` hint: the user fixes what it names; a new login will not help. A sandbox startup failure or local socket permission denial is not a missing master: request per-command approval and retry once; never disable the sandbox. Other exit 4: run `shk --site marlowe doctor`, retry once after a minute, then stop and report.
 
 ### Jobs

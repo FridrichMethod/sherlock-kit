@@ -57,8 +57,9 @@ Each rules sentence is one of:
 - **observed**: a fact seen live on Marlowe on 2026-11-21 or 2026-11-22,
   recorded in [observed Marlowe behavior](validation/observed-marlowe.md).
 
-The rules files label site and owner statements (`Site:`, `Owner:`, or
-"(site)" after a reason) and one observed statement (`Observed:`); unlabeled
+The rules files label site and owner statements (`Site:`, `Owner:`, "(site)"
+after a reason, or "(owner)" before an owner's allowance) and one observed
+statement (`Observed:`); unlabeled
 sentences are toolkit rules or observed facts. "W" below is the workstation
 file, "C" the cluster file.
 
@@ -95,7 +96,7 @@ file, "C" the cluster file.
 | Agent sessions on the workstation may drive Marlowe over the open master, as a session on Marlowe would | W | owner | owner decision 1 below |
 | Every Marlowe command is `shk --site marlowe ...`, with `--project-dir DIR` when the Marlowe configuration is not the nearest; W: `site_mismatch` means the nearest is another cluster's | W, C | toolkit | site selection by flag, then configuration, then Sherlock; a flag that names another site than the found configuration is refused |
 | A reply that names its `executor` without `"site": "marlowe"` came from Sherlock | W, C | toolkit | replies of a non-Sherlock site carry `site` beside `executor` |
-| Light reads may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`; that PATH has no Slurm clients | W | toolkit, observed | [Slurm client environment](validation/observed-marlowe.md#slurm-client-environment) |
+| Light reads and checks and (owner) environment builds may use `ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD`; that PATH has no Slurm clients: use shk | W | site, owner, toolkit, observed | the reads and checks are login-node uses the site names: Usage Violations, "Do not degrade the shared nodes" (login nodes "are for editing, compiling, submitting jobs, and moving data. Short, light commands are fine"); environment builds on a login node and running them from a workstation session over the open master are owner decisions 4 and 1 below; the ssh form, which cannot log in, and routing Slurm work through shk are the toolkit's; the PATH is [observed](validation/observed-marlowe.md#slurm-client-environment) |
 | Exit 4 handling: `auth_required`, a `~/.ssh/config` hint, sandbox and socket denials, other exit 4 | W | toolkit | the same handling as on Sherlock, with the Marlowe master and doctor command |
 | `hostname` and `$SLURM_JOB_ID` tell a login node (`login-NN`, no job id, no GPUs) from a job (`nNN`); the names are generic vendor defaults | C | observed | [hosts](validation/observed-marlowe.md#hosts-shells-and-identity), [login nodes](validation/observed-marlowe.md#login-nodes) |
 | Agent sessions on login nodes are allowed | C | owner | owner decision 4 below |
@@ -175,6 +176,28 @@ facts (SLURM on Marlowe) and owner decision 3; its text repeats the site's
 restart and charging statements and the per-account limits. `batch` and `hero`
 are not listed: they need suffixed accounts and other QOS, which the owner's
 account does not hold.
+
+## Short work in the skill
+
+The skill's "Short work" section says where a check, a build or a test runs
+on Marlowe. The rules carry it only through the Connection sentence above and
+their billing and authorization sentences. Its statements come from:
+
+| Statement | Kind | Source |
+|---|---|---|
+| No development, debug or test partition is documented; `preempt` is the only partition in the packaged table, and the site has three | site, toolkit | SLURM on Marlowe ("There are three partitions: preempt, batch, and hero."), and no page names another; the partition table lists only `preempt` ([partition profiles](#partition-profiles)) |
+| CPU work and test suites run on the workstation or on Sherlock | owner | owner decision 2 below |
+| A login node, in a session there or over the master from a workstation session, takes short, light commands, compiling and environment builds; the site's sentence is quoted | site, owner | Usage Violations, "Do not degrade the shared nodes"; owner decision 4 below |
+| Large environments go under `/projects/PROJECT` or scratch, not the small home | site | Filesystems, Conda, FAQ |
+| The ssh PATH has no Slurm clients; a login node has no GPU | observed | [Slurm client environment](validation/observed-marlowe.md#slurm-client-environment), [login nodes](validation/observed-marlowe.md#login-nodes) |
+| `submit --dry-run` (offline) and `--preflight` create no job; the preflight's start time is not a wait prediction | toolkit, observed | `--dry-run` dials nothing; `--preflight` runs `sbatch --test-only`, which creates no job ([how the observations were made](validation/observed-marlowe.md#how-the-observations-were-made)); [test-only estimates](validation/observed-marlowe.md#test-only-estimates-and-real-starts) |
+| A GPU smoke test is one short authorized `preempt` job through shk, with every pending check bundled into its script | toolkit, owner | a login node has no GPU, so a GPU check needs a job; every job is billed (Apply for Access), so one job carries all checks; the authorization is owner decision 2 below |
+| The bound in the rules' form; each round needs its own yes, and no bound stands for later rounds | owner | owner decision 2 below: the yes covers exactly the stated bound; the owner confirmed on 2026-11-25 that this holds for every smoke-test round |
+| At the packaged rates such a job costs a few cents per attempt; `usage` prices what ran | toolkit | the packaged rates ([left out of the rules files](#left-out-of-the-rules-files)): 1 GPU and 8 CPUs for 10 minutes come to about 0.048 USD at 0.25 USD per GPU-hour and 0.005 USD per CPU-hour; the skill names no fixed price, since rates change |
+| CPU-only requests started within seconds, small GPU requests usually within hours, shorter limits tended to start sooner, and a job was not preemptible in its first 5 minutes; dated, not guaranteed | observed | [queue waits](validation/observed-marlowe.md#queue-waits); [preemption and requeue](validation/observed-marlowe.md#preemption-and-requeue) (`PreemptEligibleTime` 5 minutes after the start) |
+| A preempted test restarts from the top as another billed attempt | site, toolkit | SLURM on Marlowe; the row "Treat every attempt as billed" above |
+| No interactive allocation is offered | toolkit | `srun` and `salloc` allocations are billed jobs that need the user's authorization (the Jobs row above); the site shows interactive `srun --pty` and `salloc` on `preempt` (SLURM on Marlowe) and for debugging recommends "an interactive Slurm job on a compute node, or submit batch jobs instead" (FAQ); an agent holds no terminal over the master and its ssh PATH has no Slurm clients, so the skill takes the batch path |
+| Never GPU work while developing or testing sherlock-kit; on Marlowe dry runs, preflights and held jobs only, a job that runs only with the owner's authorization | owner | the repository's development rules (`AGENTS.md`, CONTRIBUTING.md) |
 
 ## Left out of the rules files
 
@@ -288,7 +311,9 @@ Decisions of the toolkit's owner, labeled `Owner:` in the rules:
    Sherlock.
 3. Requeue is the default on `preempt`.
 4. Agent sessions on Marlowe login nodes are allowed, and environments may be
-   built there.
+   built there. A workstation session (decision 1) may also run light checks
+   and build environments on a login node over the open master (decided
+   2026-11-25).
 5. The user may drive a workstation session remotely, also through a
    remote-control relay, and that session may still use the open master. The
    owner reads the access-path restriction as covering tools that run on
