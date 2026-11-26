@@ -45,6 +45,13 @@ serves. Neither replaces the other, and neither holds secrets.
   with the `--rules` option the project uses; adding `--check` compares the
   copies without writing and exits 1 when one is missing or stale.
 
+- **Project guide**: the project's own agent guide, such as its `AGENTS.md`,
+  points at the delivered rules and skills (for Sherlock, the skill's section
+  "Short work" in particular) and adds only what is the project's own: its
+  environment path, its check script, which tests need the cluster. It does
+  not restate where a check, a build or a test runs; the rules and that
+  section decide it, and they change with the pinned release.
+
 - **Upgrade** by reading the [changelog](../CHANGELOG.md) entries between the
   two versions, changing the tag in the pin, relocking (`uv lock`) or
   reinstalling, checking `shk --version`, and rerunning `install-skill` with
@@ -89,11 +96,25 @@ sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "
 
 On Sherlock, create the project-pinned environment under `$GROUP_HOME` (a
 small personal one may live in `$HOME`), never under scratch, with Python 3.11
-or newer. A small pure-Python environment such as the one that holds `shk` may
-be created on a login node: that is job preparation under site rule 1.
-Compiling and heavy installs run inside a Slurm allocation, for example an
-`sh_dev` session; fetch sources or build artifacts beforehand if compute nodes
-cannot reach their source. For example, using a release wheel fetched
+or newer. A login node takes checks that end in seconds and small pure-Python
+installs, such as the environment that holds `shk`: the toolkit reads that as
+job preparation under site rule 1, while the site's Python page recommends a
+compute node for creating environments. Compiling, heavy installs (Conda, CUDA
+or ML stacks) and tests that take longer than seconds run in one `dev` run or
+in a batch job through `shk submit`. From a workstation, a script that builds
+and checks the environment goes on stdin over the open master:
+
+```sh
+ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain \
+  'srun --partition=dev --time=10 --cpus-per-task=2 --mem=4G bash -l -s' < check.sh
+```
+
+The skill's section "Short work" gives the form for a login node, the
+resources and the steps after a lost call. A `dev` compute node reached PyPI,
+GitHub and conda-forge
+([observed](validation/observed-slurm.md#the-dev-partition)); fetch sources or
+build artifacts beforehand if compute nodes cannot reach their source. A small
+environment on a login node, for example from a release wheel fetched
 beforehand:
 
 ```sh
@@ -248,9 +269,17 @@ People and agent sessions may run `shk` on a Marlowe login node. The system
 `python3` there is 3.10, older than `shk` needs: create an environment with
 Python 3.11 or newer through the `uv` module (`module load uv`) or a
 micromamba or conda environment, and install the project's pinned release
-into it as in [install forms](#install-forms). Environments may be built on a
-Marlowe login node, an owner choice that the Marlowe cluster rules carry; put
-large ones under `/projects/PROJECT`, not in the small home directory.
+into it as in [install forms](#install-forms). A Marlowe login node takes
+short, light commands, compiling and environment builds: the site lists
+compiling among login-node uses, and building environments there is an owner
+choice that both Marlowe rules files carry. A workstation session may run
+them over the open master too (an owner decision), as
+`ssh -oBatchMode=yes -oProxyCommand=false marlowe-plain CMD` with
+`bash -lc '...'` around a command that needs `module`, which the
+noninteractive ssh shell lacks
+([observed](validation/observed-marlowe.md#slurm-client-environment)). Heavy
+or long-running work does not belong on a login node. Put large environments
+under `/projects/PROJECT`, not in the small home directory.
 
 With a Marlowe configuration in reach, or with `--site marlowe`, `shk` picks
 the local executor by itself there, because Marlowe's Slurm configuration file
