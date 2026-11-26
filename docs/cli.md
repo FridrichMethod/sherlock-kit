@@ -309,32 +309,56 @@ up, before the resource checks, in this order:
 2. a repeated member is exit 1 `spec_invalid`;
 3. a member without batch jobs is exit 3 `batch_not_allowed` with the usual
    message for the first such member;
-4. an incompatible set is exit 3 `partitions_incompatible`, whose hint says to
-   submit incompatible partitions separately.
+4. a borrowed member is exit 3 `partitions_incompatible` (submit a borrowed
+   partition alone): the message names every borrowed member, and the hint
+   says to submit incompatible partitions separately.
 
-A set is compatible when no member is borrowed and all members share one
-`requeue` and one `preemptible` value: the message names every borrowed
-member, or else lists every member with both values, for example
-`gpu (preemptible=no, requeue=no), owners (preemptible=yes, requeue=yes)`.
+A set is compatible when every member is listed and takes batch jobs, none is
+borrowed, and, with `--gpus` above 0, every member allows GPUs. So `owners`,
+`gpu`, `bioe` and `stat` combine, `normal`, `bigmem` and `service` combine
+too, and `btrippe` and `possu` stay alone. The combined profile is named by
+the value as given: preemptible and requeue when any member is, GPUs allowed
+only when every member allows them, not borrowed, batch, and no courtesy text
+of its own.
 
 Then the resource checks apply to the set:
 
 - `--gpus` above 0 needs every member to allow GPUs (exit 3
-  `gpus_not_allowed`, naming every member without them);
-- requeue defaults to the members' common value;
-- `--requeue` on a set that does not allow it is exit 3 `requeue_not_allowed`,
+  `gpus_not_allowed`, naming every member without them), so `normal,owners`
+  is accepted without GPUs and `owners,normal` with GPUs is refused for
+  `normal`;
+- requeue defaults to on when a member allows it (`owners`), and the argv
+  then has `--requeue --open-mode=append`; `--no-requeue` is accepted;
+- `--requeue` on a set without such a member is exit 3 `requeue_not_allowed`,
   naming the set as given.
 
-So `gpu,bioe,stat` combines, while `owners`, `btrippe` and `possu` stay alone;
-by the same profile fields `normal`, `bigmem` and `service` are in the class
-too. A set states that the job may run on any member, and every member's
-courtesy text applies wherever it starts.
+A set states that the job may run on any member, so it follows every member's
+rules and courtesy text wherever it starts. A set with `owners` is preemptible
+and requeues by default, so its script needs the same-command resume that
+`owners` needs even when the attempt starts on another member; a job that
+names `bioe` or `stat`, alone or in a set, falls under their courtesy text
+(see [occupancy](#occupancy)). A requeued job keeps its whole list and can
+start on another member and another GPU model (Slurm source,
+[not observed live](validation/observed-slurm.md#jobs-submitted-to-several-partitions)).
+The rules' "Requeue only where `requeue=yes`" is read per submitted value: a
+set with a `requeue=yes` member is submitted requeueable and stays so on every
+member, `shk requeue --self` included.
 
 What Slurm does with a partition list, and what `squeue` and `sacct` print for
 one, is source-confirmed and
 [not observed live](validation/observed-slurm.md#not-observed-live); whether
 Sherlock accepts a list depends on site settings that the source does not
-determine: try the list with `--preflight` first.
+determine, and association or QOS limits of any member can reject it:
+Sherlock refused one list for one member's policy (the `normal,bigmem` move in
+[job updates in place](validation/observed-slurm.md#job-updates-in-place)).
+The kit sets no number for `owners,gpu`; Slurm does: every pending task of a
+set that lists `gpu` counts against the submit limits of the gpu partition
+QOS, per user and per account, until it starts (Slurm source; Sherlock's
+values are not verified). Try a list with `--preflight` first, where a
+rejection is exit 3 rather than the exit 5 of a real submit. Before a real
+submit of a set that lists `gpu`, run the same request with the real
+`--array` under `--preflight`, and send work beyond what gpu admits to
+`owners` alone.
 
 The argv holds `--partition=<value as given>` in the usual position and is
 otherwise that of a single partition: the job name does not depend on the
@@ -476,9 +500,11 @@ adds one `scontrol show job` per queued base job id).
   whose seen tasks are not exactly 0 to the largest index has null
   `array.count`, `tasks.count` and `tasks.missing`, and `done` or `failed`
   describe the seen tasks only.
-- A preemption or restart is unexpected (exit 6) on the non-preemptible
-  partition of the attempt it interrupted, and on an interrupted partition list
-  whose members are all listed and none preemptible.
+- `unexpected_preemption` (exit 6): a PREEMPTED attempt on a listed
+  non-preemptible partition, or on a comma list whose members are all such. A
+  NODE_FAIL or REQUEUED attempt and a restart whose earlier attempt is not
+  visible are not anomalies; they show in `max_restart`, `tasks.by_state` and
+  `tasks.incomplete_history`.
 - `current.partition` is Slurm's partition text of the job's first row; for a
   job submitted with a partition list, `status --task` adds `current.ran_on`,
   the partitions in which it started (see
@@ -525,9 +551,9 @@ Slurm printed it, and the cost arithmetic does not depend on it.
 
 `unknown_partition` (`shk.` names only) means that some row of the job has a
 partition text, split on `,`, with a member that is not listed; the verdict
-does not depend on the row order. `unexpected_preemption` also counts an
-interrupted partition text that is a comma list when every member is listed
-and none is preemptible (a compatible set shares one value).
+does not depend on the row order. `unexpected_preemption` also counts a
+PREEMPTED row whose partition text is a comma list when every member is listed
+and none is preemptible; a list with `owners` does not count.
 
 ### Detailed status contract
 
@@ -775,6 +801,25 @@ submission reports `occupancy`, the partition's `courtesy` text,
   occupancy nor the clock, so check both first.
 - Each `--partition` must be listed in the selected site's table; Marlowe's
   has no borrowed partition.
+
+The reply's `partitions` holds, for each requested partition, its `profile`,
+`users` (per user `running_jobs`, `running_gpus` and `pending_jobs`) and
+`totals` (the same keys over all users). `bioe` and `stat` carry department
+terms that are text only: `submit` reads no occupancy for them, and shk
+counts, warns of and refuses nothing there. A set that names `bioe` or `stat`
+is sized for the department partition, not for `owners`. Read
+`shk occupancy --partition bioe --partition stat` first (the `stat` profile's
+courtesy text in the reply refers to `bioe`'s):
+
+- your own `running_gpus` per partition is what the department loses;
+- `pending_jobs` counts records, so a pending array is one record and a
+  pending set job appears in every partition it lists;
+- bound what you can run there from your own live submissions that name the
+  partition: the sum of min(tasks, `%M`) times GPUs per task;
+- raising a throttle with `shk update --throttle` or releasing a held job that
+  names `bioe` or `stat` is the same decision as a submission;
+- submit the rest to `owners,gpu` or `owners` as different work units, never
+  the same unit twice.
 
 ## `resources`
 
@@ -1146,13 +1191,17 @@ immediately before `scontrol release`.
 - actual Slurm PID membership in that physical job;
 - current UID and name, and the token only when `--expect-token` is given;
 - RUNNING state;
-- a partition whose profile allows requeue (Sherlock's `owners`, Marlowe's
-  `preempt`) and Requeue=1.
+- a listed, non-borrowed partition and Requeue=1, which `submit` sets by
+  default only for a `requeue=yes` partition alone or a set with a
+  `requeue=yes` member (Sherlock's `owners`, Marlowe's `preempt`).
 
 These are read from Slurm's record of that physical job, which also names the
 target: an array element is requeued as its `ArrayJobId_ArrayTaskId`, never the
 bare array ID, which would requeue every element; inherited `SLURM_ARRAY_*`
-variables are not trusted.
+variables are not trusted. The partition is the one the job runs in, so an
+attempt of a set with `owners` can requeue itself on every member. A job
+without Requeue is refused `policy` wherever it runs, and one on a borrowed or
+unlisted partition is refused `partition`.
 
 For both commands, a refusal is exit 3 and keeps Slurm's message when a query
 failed; a nonzero `scontrol` mutation is exit 5 with `scontrol ACTION exit RC`
@@ -1171,7 +1220,7 @@ jobs that depend on it (`--after-ok`) still wait for it.
 | Group | Options | Slurm key | Every record | What may change |
 |---|---|---|---|---|
 | time | `--time DUR` | `TimeLimit` | `PENDING` | a decrease, not below `TimeMin` |
-| partition | `--partition P[,P...]` | `Partition` | `PENDING` | a listed, non-borrowed partition or compatible set of the job's requeue and preemptible class |
+| partition | `--partition P[,P...]` | `Partition` | `PENDING` | a listed, non-borrowed partition or set whose requeue default, on when a member allows requeue, equals the job's Requeue flag |
 | features | `--constraint X`, `--prefer X` or both | `Features`, `Prefer` | `PENDING` | a new nonempty value |
 | throttle | `--throttle M` | `ArrayTaskThrottle` | any state | an array's run limit, 1 to 1000 |
 
@@ -1243,21 +1292,31 @@ time, and checks every record's TimeLimit against its MaxTime
 | `state` | time, partition, features: a record's JobState is not exactly `PENDING` |
 | `time` | TimeLimit is not `[D-]HH:MM:SS` (`UNLIMITED`, `Partition_Limit`), or the requested minutes exceed it |
 | `timemin` | the requested minutes are below TimeMin (`N/A` is 0) |
-| `requeue` | Requeue differs from the target's `requeue` value |
-| `preemptible` | a member of the current Partition is not a listed partition with the target's `preemptible` value |
+| `requeue` | Requeue differs from the target's requeue default, which is on when a member allows requeue |
 | `gpus` | the target does not allow GPUs and the job requests them (`gres/gpu` in ReqTRES or a TresPer field) |
 | `partition_query` | the `scontrol show partition` read of a target member failed |
 | `maxtime` | TimeLimit exceeds a target member's MaxTime (`UNLIMITED` passes) |
 | `array` | throttle: the job is not an array |
 | `borrowed` | throttle: a member of a record's Partition is borrowed and the throttle would rise (no throttle is no limit, so any value lowers it) |
 
-The partition checks hold a move to the rules of a submission: the job's
-requeue and preemptible class, GPUs only where the target allows them, and a
-time limit within every member's MaxTime. Slurm does not check the GPUs of a
-moved job and, unless partition limits are enforced at update time, accepts a
-time limit above MaxTime: such a job would pend instead of being refused. The
-current partition is judged by its class alone, so a job pending on a borrowed
-partition can move to a non-borrowed partition of the same class.
+The partition checks hold a move to the rules of a submission: a listed,
+non-borrowed partition or set whose requeue default, on when a member allows
+requeue, equals the job's Requeue flag, GPUs only where the target allows
+them, and a time limit within every member's MaxTime. Slurm does not check the
+GPUs of a moved job and, unless partition limits are enforced at update time,
+accepts a time limit above MaxTime: such a job would pend instead of being
+refused. On Sherlock, where `owners` is the one `requeue=yes` partition:
+
+- a requeueable job moves only to `owners` or a set with `owners`, any other
+  job only to a target without it;
+- dropping `owners` from a pending set (`owners,gpu` to `gpu`) is therefore
+  cancel and resubmit for a job submitted with the default requeue;
+- a job submitted `--no-requeue` to a set with `owners` cannot be moved to a
+  set with `owners`, its own included: it is refused `requeue`, not
+  `unchanged`, because the requeue check comes first;
+- the job's current partitions are not checked, so a job pending on a
+  borrowed or unlisted partition can move to a listed non-borrowed target
+  with its requeue value.
 
 ### Outcome and reply
 

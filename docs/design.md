@@ -357,8 +357,9 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 1. **Offline checks.** The partition is listed in `partitions.json` and takes
    batch jobs (`batch: false` for `dev`, where Sherlock rejects every sbatch
    job; `occupancy` and `resources` still read it); GPUs only
-   where the profile allows them; requeue only where the profile allows it
-   (Sherlock's `owners`, Marlowe's `preempt`), else `--no-requeue`. A
+   where the profile allows them; requeue only where the profile allows it,
+   alone or in a set (Sherlock's `owners`, Marlowe's `preempt`), else
+   `--no-requeue`. A
    `--partition` value with a comma is a partition list, Slurm's own syntax
    (`gpu,bioe,stat`), on `submit` and on `update` (for a pending job) only:
    `resources` and `occupancy` take one name per flag and refuse a comma as
@@ -370,21 +371,24 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
    (exit 3 `unknown_partition`, the usual message for the first such member);
    a repeated member (exit 1 `spec_invalid`); a member without batch jobs
    (exit 3 `batch_not_allowed`, the usual message for the first such member);
-   an incompatible set (exit 3 `partitions_incompatible`). Compatibility is
-   derived from the existing profile fields alone: no member `borrowed`, one
-   common `requeue` value and one common `preemptible` value. With a borrowed
-   member the message names every borrowed member; otherwise it lists every
-   member with both values, and the hint says to submit incompatible
-   partitions separately. The resource checks then apply to the set: `--gpus`
-   above 0 needs `gpus_allowed` on every member (`gpus_not_allowed` names
-   every member without GPUs), requeue defaults to the common profile value,
-   and `--requeue` on a set that does not allow it is `requeue_not_allowed`,
-   naming the set as given. So `gpu,bioe,stat` combines and `owners`,
-   `btrippe` and `possu` stay alone; `normal`, `bigmem` and `service` are in
-   the class too. A set states that the job may run on any member, and every
-   member's courtesy text applies wherever it starts. A list is explicit on
-   the command line only (`submit`, or `update` for a pending job), never a
-   TOML key. The other checks: the `--mem`, `--time` and `--array`
+   a borrowed member (exit 3 `partitions_incompatible`). Compatibility is
+   derived from the existing profile fields alone: no member `borrowed`. The
+   message names every borrowed member, and the hint says to submit
+   incompatible partitions separately. The combined profile is named by the
+   value as given and has `preemptible` and `requeue` when any member has
+   them, `gpus_allowed` only when every member has it, `borrowed` false,
+   `batch` true and an empty courtesy text. The resource checks then apply to
+   the set: `--gpus` above 0 needs `gpus_allowed` on every member
+   (`gpus_not_allowed` names every member without GPUs), requeue defaults to
+   on when a member allows it (`--requeue --open-mode=append`; `--no-requeue`
+   is accepted), and `--requeue` on a set without such a member is
+   `requeue_not_allowed`, naming the set as given. So `owners`, `gpu`, `bioe`
+   and `stat` combine, `normal`, `bigmem` and `service` combine too, and
+   `btrippe` and `possu` stay alone. A set states that the job may run on any
+   member, so it follows every member's rules and courtesy text wherever it
+   starts; a set with `owners` is preemptible and requeues by default. A list
+   is explicit on the command line only (`submit`, or `update` for a pending
+   job), never a TOML key. The other checks: the `--mem`, `--time` and `--array`
    grammar, at least one CPU and task; a script of at most 1 MiB whose leading
    `#SBATCH` lines do not set a directive `shk` owns (`-A`/`--account`,
    `-x`/`--exclude`, `-G`/`--gpus*`/`--gres`, `-p`/`--partition`,
@@ -509,10 +513,11 @@ separator makes `shk.<project>.` an unambiguous prefix for `status --all`.
 state, the current job (partition, array size, task counts by state, exit codes,
 restarts, CPU and GPU seconds) and the history, plus `queried_at` and
 `next_check_after` (now + 60 s). Anomalies are evaluated on the current job only:
-`unexpected_preemption` (an interrupted attempt, that is a `PREEMPTED`/`REQUEUED`
-row or an attempt replaced by a later restart, on a partition whose profile is not
-preemptible, or on a comma list whose members are all listed and none
-preemptible, since a compatible set shares one value), `duplicate_live`,
+`unexpected_preemption` (a `PREEMPTED` attempt on a listed non-preemptible
+partition, or on a comma list whose members are all such; a `NODE_FAIL` or
+`REQUEUED` attempt and a restart whose earlier attempt is not visible are not
+anomalies, and show in `max_restart`, `tasks.by_state` and
+`tasks.incomplete_history`), `duplicate_live`,
 `unknown_partition` (some row of the job has a partition text, split on `,`,
 with a member that is not listed; the verdict does not depend on the row
 order), `malformed_rows`; any of them
@@ -614,8 +619,11 @@ controller transport failure is a retryable exit 1, not a refusal), exact
 identity-verified user-hold release and local allocation-only self requeue: PID
 membership through `listpids` and `show job` both use the physical
 `SLURM_JOB_ID`, the job's own record is kept out of any sibling records, and an
-array element is requeued as that record's `ArrayJobId_ArrayTaskId` on a
-partition whose profile allows requeue. `control.py` also implements
+array element is requeued as that record's `ArrayJobId_ArrayTaskId`. The run
+partition must be a listed, non-borrowed partition of the site (else refused
+`partition`) and the record must show Requeue=1 (else refused `policy`,
+wherever the job runs), which `submit` sets by default only for a
+`requeue=yes` partition, alone or in a set. `control.py` also implements
 `update`, one field group per call (`--time`, `--partition`, `--throttle`, or
 `--constraint` and `--prefer` together): offline checks of the value, then
 `update.sh`, a fixed program beside `control.sh`, which reads every record of
