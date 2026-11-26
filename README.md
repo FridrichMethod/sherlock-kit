@@ -203,7 +203,7 @@ how `shk` finds the task in Slurm.
 | | `shk pull` | Fetch the files `SHA256SUMS` lists, verify and validate them, then create LOCAL |
 | | `shk manifest` | Write `DIR/SHA256SUMS` inside a job |
 | Inside a job | `shk allocation` | Prove that a local worker process belongs to this job, array element or step |
-| | `shk requeue --self` | Requeue the current job on a partition that allows it |
+| | `shk requeue --self` | Requeue the current job when it was submitted requeueable |
 | Setup | `shk doctor` | Read-only checks of the tools, the configuration and both SSH masters |
 | | `shk rules` | Print the packaged operating rules for agents |
 | | `shk install-skill` | Copy the agent skill, and optionally the rules, into a project |
