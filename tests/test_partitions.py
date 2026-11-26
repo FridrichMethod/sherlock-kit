@@ -41,6 +41,9 @@ class PartitionTableTests(unittest.TestCase):
         )
         self.assertIn("about 2 jobs x 2 h while others are active", p["btrippe"].courtesy)
         self.assertIn("between 00:00 and 07:00 Pacific", p["possu"].courtesy)
+        # stat's text refers to bioe's, the line directly above it in the rules block
+        self.assertIn("leave room for other department users", p["bioe"].courtesy)
+        self.assertEqual(p["stat"].courtesy, "Same terms as `bioe`.")
         self.assertEqual(p["normal"].courtesy, "")
         # Sherlock refuses every sbatch job in dev (interactive sessions only, seen 2026-10-18)
         self.assertEqual([n for n in NAMES if not p[n].batch], ["dev"])

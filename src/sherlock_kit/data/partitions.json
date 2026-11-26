@@ -55,7 +55,7 @@
       "borrowed": false,
       "gpus_allowed": true,
       "batch": true,
-      "courtesy": "Department GPU partition: respect fairshare and leave room for other department users."
+      "courtesy": "Department GPU partition: respect fairshare and leave room for other department users: after `shk occupancy`, run few GPUs here, alone or in a set."
     },
     "stat": {
       "preemptible": false,
@@ -63,7 +63,7 @@
       "borrowed": false,
       "gpus_allowed": true,
       "batch": true,
-      "courtesy": "Department GPU partition: respect fairshare and leave room for other department users."
+      "courtesy": "Same terms as `bioe`."
     },
     "btrippe": {
       "preemptible": false,
