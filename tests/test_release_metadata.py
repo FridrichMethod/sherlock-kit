@@ -302,10 +302,17 @@ class RulesFormatTests(unittest.TestCase):
         for path in (*RULES, *MARLOWE_RULES, *SKILLS.values()):
             for snippet in snippets(path.read_text(encoding="utf-8")):
                 for found in re.finditer(r"\b(?:srun|salloc)\b[^;&|]*", snippet):
-                    if "--partition" in found.group():
+                    opts: list[str] = []  # the allocation's own options, up to the command it runs
+                    for arg in found.group().split()[1:]:
+                        if not (
+                            arg.startswith("-") or re.fullmatch(r"-[A-Za-z]", (opts or ["-"])[-1])
+                        ):
+                            break
+                        opts.append(arg)
+                    if any(re.match(r"(?:--partition|-p)(?:=|$)", arg) for arg in opts):
                         checked += 1
                         with self.subTest(path=path.name, snippet=snippet):
-                            self.assertIn("--time=", found.group())
+                            self.assertTrue(any(re.match(r"(?:--time|-t)(?:=|$)", a) for a in opts))
         self.assertGreater(checked, 0)
 
     def test_sherlock_names_the_dev_run_one_way_and_salloc_runs_no_command(self):
@@ -317,13 +324,13 @@ class RulesFormatTests(unittest.TestCase):
         for name, text in texts.items():
             with self.subTest(text=name):
                 self.assertIn("srun --partition=dev --time=", text)
-                self.assertEqual(
-                    text.count("partition=dev"), text.count("srun --partition=dev --time=")
-                )
                 for snippet in [text] if name == "hint" else snippets(text):
-                    for found in re.finditer(r"\bsalloc\b(.*)", snippet):
-                        args = found.group(1).split()
-                        self.assertTrue(all(arg.startswith("-") for arg in args), snippet)
+                    for found in re.finditer(r"\b(?:srun|salloc)\b[^;&|]*", snippet):
+                        call = " ".join(found.group().split())
+                        if re.search(r"(?:--partition|-p)[=\s]dev\b", call):
+                            self.assertTrue(call.startswith("srun --partition=dev --time="), call)
+                        if call.startswith("salloc"):
+                            self.assertIn(call, ("salloc", "salloc --no-shell"), snippet)
 
     def test_skill_front_matter(self):
         for name, path in SKILLS.items():
