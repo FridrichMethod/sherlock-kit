@@ -6,11 +6,11 @@ site, Sherlock by default. A profile is preemptible, requeue, borrowed, gpus_all
 (booleans) plus a one-line courtesy text, which may be empty. batch is false where Sherlock
 rejects every sbatch job (dev, interactive sessions only); the rules bullet leaves it to the
 courtesy text. Listing is the authorization fact; there are no caps and no clock gate (the possu
-window and the btrippe budget are courtesy text only). profile(name, site) raises ShkError(3,
-"unknown_partition") for a name the site's table does not list, naming the ones it lists, where
-profiles(site).get() returns None. markdown(site) is the "### Partition profiles" block that the
-site's rules files end with, byte for byte; its introduction speaks of borrowed partitions only
-for a table that has one.
+window, the btrippe budget and the bioe and stat department terms are courtesy text only).
+profile(name, site) raises ShkError(3, "unknown_partition") for a name the site's table does not
+list, naming the ones it lists, where profiles(site).get() returns None. markdown(site) is the
+"### Partition profiles" block that the site's rules files end with, byte for byte; its
+introduction speaks of borrowed partitions only for a table that has one.
 """
 
 from __future__ import annotations

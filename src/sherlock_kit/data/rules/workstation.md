@@ -10,7 +10,7 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 - Other exit 4: run `shk doctor` (offline), retry once after a minute, then stop and report.
 
 ### Jobs
-- Submit with `shk submit`, change with `shk update`, never raw ssh sbatch/`scontrol update`. Partition, CPUs, memory and walltime are explicit (toolkit choice; site requires walltime); GPUs via `--gpus`. Compatible partitions join in one value, e.g. `gpu,bioe,stat`; owners/borrowed stay alone. No `--account`/`--exclude`; use `--constraint` and discovered features/limits.
+- Submit with `shk submit`, change with `shk update`, never raw ssh sbatch/`scontrol update`. Partition, CPUs, memory and walltime are explicit (toolkit choice; site requires walltime); GPUs via `--gpus`. Compatible partitions join in one value, e.g. `owners,gpu`, under every member's rules; borrowed stay alone. No `--account`/`--exclude`; use `--constraint` and discovered features/limits.
 - Names derive from project/campaign/task. Submit refuses live duplicates and finished tasks without `--resubmit "reason"`; diagnose failures first. Exit 5 (unknown outcome): never resubmit blind. Exit 6: stop and report.
 - After a submit, end the turn or run one bounded `shk wait --task T --timeout DUR` in the background (its exit wakes you); act on `wait.outcome`. Batch status/resources reads at least 60 s apart (`--all`), ideally 10+ min; read status only when needed (wait exited, user asks, exit 5 `next` due). No `watch`/polling loops; never detach a wait or schedule/re-prompt agent/LLM sessions. Prefer `--after-ok`. Aggregate short tasks: 10+ useful minutes per job/array task, ideally 30; never pad with sleep.
 - Cancel exact verified own jobs within an authorized task and explain why. Ask for unclear ownership/scope, unrelated/broad cancellation or material irreversible loss. Never cancel all user jobs.
@@ -39,7 +39,7 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 - `service`: preemptible=no, requeue=no, borrowed=no, gpus=no. Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation.
 - `gpu`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Public GPU partition: few GPUs, long queue, never preempted. Follow Sherlock's own per-user GPU limits.
 - `owners`: preemptible=yes, requeue=yes, borrowed=no, gpus=yes. Slurm requeues preempted jobs; scripts must checkpoint and resume. No cap.
-- `bioe`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition: respect fairshare and leave room for other department users.
-- `stat`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition: respect fairshare and leave room for other department users.
+- `bioe`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Department GPU partition: respect fairshare and leave room for other department users: after `shk occupancy`, run few GPUs here, alone or in a set.
+- `stat`: preemptible=no, requeue=no, borrowed=no, gpus=yes. Same terms as `bioe`.
 - `btrippe`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Courtesy budget about 2 jobs x 2 h while others are active; more (e.g. 4 jobs x 6 h) only when the partition is idle, typically 00:00-07:00.
 - `possu`: preemptible=no, requeue=no, borrowed=yes, gpus=yes. Stricter than btrippe. Submit only between 00:00 and 07:00 Pacific, a few short jobs; never submit outside that window, not even short jobs.
