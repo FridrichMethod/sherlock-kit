@@ -135,11 +135,11 @@ class SetChecks(Case):
             ("possu,gpu", "possu"),
             ("btrippe,possu", "btrippe, possu"),
             ("owners,btrippe", "btrippe"),
-            ("owners,gpu,possu", "possu"),  # borrowed before GPUs
+            ("owners,gpu,possu", "possu"),
         ):
             with self.subTest(value=value):
                 error = self.refused(
-                    3, "partitions_incompatible", partition=value, gpus=1, courtesy_ack=True
+                    3, "partitions_incompatible", partition=value, courtesy_ack=True
                 )
                 self.assertIn(f"include the borrowed {borrowed}:", error.message)
                 self.assertIn("submit incompatible partitions separately", error.hint)
