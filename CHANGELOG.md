@@ -3,10 +3,10 @@
 ## Unreleased
 
 Guidance for short work: a check of seconds, an environment build, a compile,
-a CPU or GPU test of a few minutes and a project's test suite. No command,
-option, reply key, exit code, remote program or `sbatch` argv changes; the
-texts that replies quote and that changed are listed under "Visible on
-Sherlock".
+a CPU or GPU test of a few minutes and a project's test suite. This guidance
+changes no command, option, reply key, exit code, remote program or `sbatch`
+argv; the texts that replies quote and that it changes are listed under
+"Visible on Sherlock".
 
 Guidance:
 
