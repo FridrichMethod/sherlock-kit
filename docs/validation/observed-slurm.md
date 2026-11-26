@@ -728,6 +728,11 @@ where a statement says so, and not observed live:
   ([`src/slurmctld/job_scheduler.c`, lines 258-279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L258)).
   Job name and array handling have no partition-list rule
   (inferred: none was found on the multi-partition paths that were read).
+- `squeue --partition P` prints a job when P equals any member of the job's
+  partition text
+  ([`src/squeue/print.c`, lines 3266-3294](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/squeue/print.c#L3266)),
+  so a pending job with a list is one pending record in the `shk occupancy`
+  reply of every member, and a started one counts only in its run partition.
 - A requeued job keeps its whole list and is queued once per member again, so
   a requeued attempt can start on another member; the requeue resets its
   begin, submit and accrue times, not the list
@@ -760,7 +765,8 @@ where a statement says so, and not observed live:
   in, not its list: it is a candidate only when that partition's tier is below
   the preemptor's and its PreemptMode is not `OFF`, and only on nodes of the
   preemptor's partition
-  ([`src/plugins/preempt/partition_prio/preempt_partition_prio.c`, lines 60-72, 95-101 and 134-150](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/preempt/partition_prio/preempt_partition_prio.c#L60)).
+  ([`src/plugins/preempt/partition_prio/preempt_partition_prio.c`, lines 60-72, 95-101 and 134-150](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/preempt/partition_prio/preempt_partition_prio.c#L60);
+  [`src/interfaces/preempt.c`, lines 179-181](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/interfaces/preempt.c#L179)).
   Under `preempt/qos` the job's QOS decides instead
   ([`src/plugins/preempt/qos/preempt_qos.c`, lines 65-79 and 133-157](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/preempt/qos/preempt_qos.c#L65);
   [`doc/html/qos.shtml`, lines 96-104](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/qos.shtml#L96)).
@@ -772,9 +778,9 @@ where a statement says so, and not observed live:
   A record pending in a higher-tier partition can therefore preempt the same
   user's jobs on the nodes the partitions share.
 - The main scheduler queues one record per job and member, sorted by whether
-  it can preempt, then reservation, PriorityTier and the partition's priority,
-  and starts the job in the first member, in that order, that can start it
-  now; there is no earliest-start comparison across members
+  it can preempt, then reservation, PriorityTier and the job's priority in that
+  partition, and starts the job in the first member, in that order, that can
+  start it now; there is no earliest-start comparison across members
   ([`src/slurmctld/job_scheduler.c`, lines 2179-2271](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L2179)
   and
   [1505-1510](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L1505);
@@ -811,7 +817,7 @@ where a statement says so, and not observed live:
   MaxSubmitJobsPerAccount
   ([`src/slurmctld/acct_policy.c`, lines 3278-3279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L3278)
   and
-  [2072-2094](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L2072)).
+  [2049-2094](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L2049)).
   While pending, the job counts as submitted in the QOS of every listed
   partition; at its start the count stays only in the run partition's
   ([lines 974-1006](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L974)

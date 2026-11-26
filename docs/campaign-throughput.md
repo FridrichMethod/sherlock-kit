@@ -380,9 +380,9 @@ from a re-read of every record. Its limits:
   flag, so never to `btrippe` or `possu`, and takes a GPU job only to
   partitions that allow GPUs. A requeueable job therefore moves only to
   `owners` or a set with `owners`, any other job only to a target without it,
-  and dropping `owners` from a pending set is a cancel and resubmit
-  ([command reference](cli.md#update)). A move can lower the job's age
-  priority for a while.
+  and dropping `owners` from a pending set is a cancel and resubmit for a job
+  submitted with the default requeue ([command reference](cli.md#update)). A
+  move can lower the job's age priority for a while.
 - Slurm checks constraint and preference names against the features of the
   whole cluster, not of the job's partitions: check them with `shk resources`
   first, or the job is accepted and never starts.
