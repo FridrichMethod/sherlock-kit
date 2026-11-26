@@ -232,8 +232,9 @@ stated elsewhere:
 - in the cluster file, that `shk push` and `shk pull` refuse to run on
   Sherlock, which `shk` enforces (exit 3) and the skill states;
 - in both files, the limits of `shk update` (one field group per call, a time
-  limit only decreased, a partition only within the job's requeue and
-  preemptible class and never a borrowed one), which `shk` enforces (exit 1
+  limit only decreased, a partition only to a listed partition or set whose
+  requeue default, on when a member allows requeue, equals the job's Requeue
+  flag and never a borrowed one), which `shk` enforces (exit 1
   or 3) and the skill and the [command reference](cli.md#update) state;
 - on `bigmem` and `service`, the reminder that Sherlock's own limits apply,
   which holds for every partition: both files say to discover limits, and the
@@ -258,8 +259,18 @@ stated elsewhere:
   uncertainty and the reading of `resources --summary` slots for the eligible
   GPU features only, which the skill and the campaign guide give;
 - the `submit --preflight` estimate and the `resources --summary` output
-  fields, and in the cluster file the compatible partition list of `submit`,
-  which the skill describes.
+  fields, and in the cluster file the compatible partition list of `submit`
+  and that a set follows every member's rules, which the skill describes;
+- in the partition block of both files, a statement of the department terms
+  for `stat`: its courtesy text is "Same terms as `bioe`.", and the `bioe`
+  line with the terms stands directly above it. The profile in a
+  `shk occupancy` reply for `stat` carries only that reference, so the skill
+  and the [command reference](cli.md#occupancy) name both partitions in that
+  read;
+- the reading of the block's introduction "Requeue only where `requeue=yes`."
+  per submitted value: a set with a `requeue=yes` member is submitted
+  requeueable and stays so on every member, `shk requeue --self` included,
+  which the skill states.
 
 ## Toolkit choices stricter than the site
 
@@ -279,19 +290,23 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   cancels, runs `shk occupancy` and resubmits with `--courtesy-ack`. Lowering
   that throttle, or moving a pending job off a borrowed partition, is not
   refused.
-- Requeue only where the profile allows it (`owners`); everything else is
-  submitted with `--no-requeue`.
+- Requeue only where the profile allows it: `owners`, or a set with `owners`
+  as a member, both requeued by default (`--no-requeue` is accepted);
+  everything else is submitted with `--no-requeue`.
 - Only `submit` and `update` (for a pending job) take a partition list;
   `resources` and `occupancy` take one name per flag. A list is one
-  comma-separated value on the command line such as
-  `--partition gpu,bioe,stat`, never a TOML key, and only for a compatible set,
-  derived from the profile fields: every member is listed and takes batch
-  jobs, none is borrowed, all share one `requeue` and one `preemptible` value,
-  and every member allows GPUs when GPUs are requested. So `gpu`, `bioe` and
-  `stat` combine, and `owners`, `btrippe` and `possu` stay alone. By the same
-  profile fields `normal`, `bigmem` and `service` are in the class too: a set
-  states that the job may run on any member, and every member's courtesy text
-  applies wherever it starts.
+  comma-separated value on the command line such as `--partition owners,gpu`,
+  never a TOML key, and only for a compatible set, derived from the profile
+  fields. A set is compatible when every member is listed and takes batch
+  jobs, none is borrowed, and, with `--gpus` above 0, every member allows GPUs.
+  So `owners`, `gpu`, `bioe` and `stat` combine, `normal`, `bigmem` and
+  `service` combine too, and `btrippe` and `possu` stay alone: a borrowed
+  member is exit 3 `partitions_incompatible` (submit a borrowed partition
+  alone). The combined profile sets `preemptible` and `requeue` when any
+  member does and `gpus_allowed` only when every member does, is never
+  borrowed and has no courtesy text of its own. A set states that the job may
+  run on any member, so it follows every member's rules and courtesy text
+  wherever it starts.
 - `#SBATCH` lines may not set the directives `shk` owns (account, exclude, GPUs,
   partition, array, dependency, begin, job name, hold, and comment when a
   submission token sets it) or start a heterogeneous job.
@@ -306,12 +321,24 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
 - Changes to a pending job, and to an array's throttle, go through
   `shk update`, never raw `scontrol update`: one field group per call, a time
   limit only decreased (Slurm accepts a pending increase up to the partition's
-  MaxTime), a partition only within the job's requeue and preemptible class
+  MaxTime), a partition only to a listed partition or set whose requeue
+  default, on when a member allows requeue, equals the job's Requeue flag
   and never a borrowed one, and an outcome settled by a re-read of every
   record rather than by the exit status of `scontrol`.
-- Jobs on `owners` must checkpoint periodically (the site accepts checkpoint or
-  requeue); live requeues gave no usable SIGTERM window
-  (docs/validation/observed-slurm.md).
+- Jobs that can start on `owners`, alone or in a set, must checkpoint
+  periodically (the site accepts checkpoint or requeue); live requeues gave no
+  usable SIGTERM window (docs/validation/observed-slurm.md).
+- `slurm.md` says three things about `owners`, as recommended practice and
+  not as a numbered rule: jobs there "can be preempted at any time", use it
+  "only if the user accepts that", and "make such jobs checkpoint or
+  requeue". The kit meets them so: `owners` is used only when the caller
+  names it, alone or in a set, and `shk` never adds it; a set with `owners`
+  requeues by default; periodic checkpointing for every job that can start on
+  `owners` is the toolkit's stricter choice. Combining `owners` with other
+  partitions and the department terms of `bioe` and `stat` (leave room for
+  other department users, read `shk occupancy` first, run few GPUs there,
+  alone or in a set) are the owner's choices (2026-11-25); `shk` counts and
+  refuses nothing there, and keeping to the terms is agent judgment.
 - Status reads are rarer than the site's 60 s floor: `shk wait` makes its
   first read 60 s after it starts, then reads every 5 minutes by default and
   backs off to 30 minutes while nothing runs or changes, and reads by hand
@@ -347,7 +374,9 @@ requirements can narrow these defaults. No GPU/partition TOML keys are added.
 `shk submit --prefer` forwards an optional Slurm soft constraint; the preference
 is selected explicitly by the caller, not silently injected. Its tier is purely
 a compute-capability ordering, so it applies across projects. `--prefer` is
-soft: Slurm tries it first, then the fallback `--constraint`. The partition table, including btrippe and possu courtesy, is unchanged.
+soft: Slurm tries it first, then the fallback `--constraint`. These preferences
+add no partition profile or courtesy term: the courtesy texts, the btrippe and
+possu budgets included, are the partition table's own.
 
 The candidate feature set comes from `sh_node_feat` and aggregate `shk resources`
 evidence checked on 2026-11-14. It includes RTX_3090 (24 GB) and TITAN_V (12 GB),

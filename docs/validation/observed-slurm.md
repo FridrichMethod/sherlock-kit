@@ -39,6 +39,11 @@ reproduced here;
   authorized by the owner, ran raw `srun` from a workstation over the control
   master, with no `shk` command; [the dev partition](#the-dev-partition)
   records them with that day's read of the partition.
+- On 2026-11-25, two `scontrol show partition` calls for `owners`, `gpu`,
+  `bioe`, `stat` and `normal`, authorized by the owner, ran from a workstation
+  over the control master and created no job;
+  [partition tiers and preemption](#partition-tiers-and-preemption) records
+  them.
 - A job pattern that worked: `#!/bin/bash -l`, no `#SBATCH` lines,
   `module load ...`, the toolkit wheel unzipped into `$L_SCRATCH_JOB` and put
   on `PYTHONPATH`, thread variables set to 1, results written into the run
@@ -277,6 +282,50 @@ and a request above the 2-hour maximum, which by Slurm's documentation of
   task 0, and `shk status` reported no anomaly on `owners` (verified live with
   the 0.5.0 fix tree).
 
+## Partition tiers and preemption
+
+Read on 2026-11-25 from a workstation over the control master, with
+`scontrol show partition` for `owners`, `gpu`, `bioe`, `stat` and `normal`; no
+job was created. `scontrol show config` and `sacctmgr show qos` were not run:
+site rule 9 says not to probe system configuration, and `slurm.md` names
+`sh_part`, `sinfo` and `scontrol show partition` as the discovery commands.
+
+| Partition | PriorityTier | PreemptMode | GraceTime | MaxTime | QoS | Nodes | GPUs | Nodes also in `owners` |
+|---|---|---|---|---|---|---|---|---|
+| `owners` | 1 | REQUEUE | 0 | 2-00:00:00 | owners | 1641 | 1032 | all |
+| `gpu` | 10 | OFF | 0 | 2-00:00:00 | gpu | 49 | 200 | 0 of 49 |
+| `bioe` | 1000 | OFF | 0 | 7-00:00:00 | owner | 5 | 20 | 5 of 5 |
+| `stat` | 1000 | OFF | 0 | 7-00:00:00 | owner | 6 | 8 | 6 of 6 |
+| `normal` | 10 | OFF | 0 | 7-00:00:00 | N/A | 267 | 0 | 0 of 267 |
+
+GPUs are the partition's GPU TRES. AllowQos is `normal,system` for `owners`
+and `gpu`, `normal,high_p,system` for `bioe` and `stat`, and
+`normal,long,system` for `normal`. TRESBillingWeights are the same on all five
+(`CPU=1,Mem=0.25G,GRES/gpu=15.0`).
+
+What follows for a partition set, with the Slurm source facts under
+[jobs submitted to several partitions](#jobs-submitted-to-several-partitions):
+
+- The members of a pending set are tried in this order: `bioe` and `stat`
+  (tier 1000), then `gpu` and `normal` (tier 10), then `owners` (tier 1).
+- Only `owners` is preemptible, and it is requeued with no grace time. A job
+  of a set that starts in `gpu`, `bioe`, `stat` or `normal` is not
+  preemptible there, under the partition-tier preemption that these values
+  describe (PreemptType was not read).
+- `gpu` and `normal` share no node with `owners`, so a record pending in `gpu`
+  or `normal` cannot preempt an `owners` job. Every `bioe` and `stat` node is
+  also an `owners` node, so a record pending in `bioe` or `stat` can preempt
+  `owners` jobs on those 5 and 6 nodes, the caller's own included: Slurm has
+  no same-user exemption (source-confirmed). Such a preemption is not
+  observed.
+- `owners` and `gpu` stop at 2 days; `bioe`, `stat` and `normal` allow 7. A
+  set that mixes them with `--time` above 2 days is rejected whole or loses
+  `owners` and `gpu`, depending on `EnforcePartLimits`, which was not read.
+- The department partitions are small: 20 GPUs in `bioe`, 8 in `stat`.
+
+Not observed: PreemptType, `EnforcePartLimits`, the QOS limits, and whether
+`sbatch` accepts a list that includes `owners`.
+
 ## Job updates in place
 
 `shk update` ran on Slurm 25.11.9 against two held jobs on `normal`: a 1-CPU,
@@ -451,7 +500,21 @@ tests:
 - an accepted `--test-only` without an estimate;
 - `shk resources --summary` on live node records, and the `CLASS:` feature
   prefix;
-- GPU types and MIG types in the `Gres` and `CfgTRES` of a live GPU node.
+- GPU types and MIG types in the `Gres` and `CfgTRES` of a live GPU node;
+- a real `sbatch` with a partition list that includes `owners`, and an
+  attempt of such a job requeued onto another member;
+- a natural preemption and the accounting state of its attempt (`PREEMPTED`
+  by the source), and a node-failure requeue (`NODE_FAIL` by the source); the
+  live `REQUEUED` attempts under
+  [requeue and preemption](#requeue-and-preemption) came from
+  `scontrol requeue`, by hand and through `shk requeue --self`;
+- a record pending in `bioe` or `stat` that preempts `owners` jobs, the
+  caller's own included.
+
+PreemptType, `EnforcePartLimits` and the limits of the partition QOS were not
+read either: the [partition read](#partition-tiers-and-preemption) ran
+`scontrol show partition` only (site rule 9), and it shows the priority tiers,
+PreemptMode, GraceTime and MaxTime of five partitions.
 
 Sherlock's `EnforcePartLimits` and `AccountingStorageEnforce` values, its
 job_submit plugin, its partition priority tiers and its associations are not
@@ -657,10 +720,76 @@ where a statement says so, and not observed live:
   The pending remainder keeps the list (inferred: the split happens before
   the started task's string is rebuilt,
   [`src/slurmctld/node_scheduler.c`, lines 2929-2935](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/node_scheduler.c#L2929)).
+  The `%M` throttle counts the running tasks on the meta record, whatever
+  member they run in
+  ([`src/slurmctld/job_mgr.c`, lines 16948-16982](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L16948);
+  [`doc/html/job_array.shtml`, lines 44-47](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/job_array.shtml#L44)).
 - `--dependency=singleton` compares user id and job name only
   ([`src/slurmctld/job_scheduler.c`, lines 258-279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L258)).
-  Requeue, job name and array handling have no partition-list rule
+  Job name and array handling have no partition-list rule
   (inferred: none was found on the multi-partition paths that were read).
+- `squeue --partition P` prints a job when P equals any member of the job's
+  partition text
+  ([`src/squeue/print.c`, lines 3266-3294](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/squeue/print.c#L3266)),
+  so a pending job with a list is one pending record in the `shk occupancy`
+  reply of every member, and a started one counts only in its run partition.
+- A requeued job keeps its whole list and is queued once per member again, so
+  a requeued attempt can start on another member; the requeue resets its
+  begin, submit and accrue times, not the list
+  ([`src/slurmctld/job_scheduler.c`, lines 5682-5686](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L5682)
+  and
+  [719-723](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L719);
+  [`src/slurmctld/job_mgr.c`, lines 16836-16866](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L16836)).
+  Requeue is the job's own flag, not a partition property: Slurm requeues a
+  job on its own only when its Requeue flag is set, except a forced requeue
+  after a launch failure (`PrologFlags=ForceRequeueOnFail`)
+  ([`src/slurmctld/job_mgr.c`, lines 17882-17890](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L17882)).
+- The accounting state of a requeued attempt names its cause. A preempted
+  requeueable attempt is `PREEMPTED`, and the job returns to pending
+  ([`src/slurmctld/job_mgr.c`, lines 17976-17981](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L17976);
+  [`src/interfaces/preempt.c`, lines 503-524](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/interfaces/preempt.c#L503));
+  a job without Requeue that is preempted under `PreemptMode=REQUEUE` is
+  killed and ends `PREEMPTED`
+  ([`src/slurmctld/job_mgr.c`, lines 5310-5311](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L5310)).
+  A node failure leaves a `NODE_FAIL` attempt, and a restart only when Requeue
+  is set
+  ([lines 3013-3039](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L3013)).
+  `scontrol requeue` leaves a `REQUEUED` attempt and is refused for a job
+  without Requeue, also for an administrator
+  ([`src/slurmctld/proc_req.c`, line 4832](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/proc_req.c#L4832);
+  [`src/slurmctld/job_mgr.c`, lines 17982-17986](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L17982)
+  and
+  [17885-17890](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L17885)).
+- Under `PreemptType=preempt/partition_prio`, whether a running job can be
+  preempted, and its PreemptMode and GraceTime, follow the partition it runs
+  in, not its list: it is a candidate only when that partition's tier is below
+  the preemptor's and its PreemptMode is not `OFF`, and only on nodes of the
+  preemptor's partition
+  ([`src/plugins/preempt/partition_prio/preempt_partition_prio.c`, lines 60-72, 95-101 and 134-150](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/preempt/partition_prio/preempt_partition_prio.c#L60);
+  [`src/interfaces/preempt.c`, lines 179-181](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/interfaces/preempt.c#L179)).
+  Under `preempt/qos` the job's QOS decides instead
+  ([`src/plugins/preempt/qos/preempt_qos.c`, lines 65-79 and 133-157](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/preempt/qos/preempt_qos.c#L65);
+  [`doc/html/qos.shtml`, lines 96-104](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/qos.shtml#L96)).
+- There is no same-user or same-group exemption from preemption: the
+  exemption test covers only whether the job is preemptable,
+  `min_exempt_priority`, an expanding job and the accounting-policy exemption
+  ([`src/interfaces/preempt.c`, lines 90-114](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/interfaces/preempt.c#L90);
+  [`doc/html/preempt.shtml`, lines 233-265](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/preempt.shtml#L233)).
+  A record pending in a higher-tier partition can therefore preempt the same
+  user's jobs on the nodes the partitions share.
+- The main scheduler queues one record per job and member, sorted by whether
+  it can preempt, then reservation, PriorityTier and the job's priority in that
+  partition, and starts the job in the first member, in that order, that can
+  start it now; there is no earliest-start comparison across members
+  ([`src/slurmctld/job_scheduler.c`, lines 2179-2271](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L2179)
+  and
+  [1505-1510](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L1505);
+  [`doc/html/priority_multifactor.shtml`, lines 36-46](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/priority_multifactor.shtml#L36)).
+  Backfill evaluates every job and member pair and by default may reserve
+  resources in each, so a pending set can hold reservations in members it
+  does not start in
+  ([`doc/man/man5/slurm.conf.5`, lines 4335-4349](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/man/man5/slurm.conf.5#L4335);
+  [`src/plugins/sched/backfill/backfill.c`, lines 3658 and 3993-4004](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/plugins/sched/backfill/backfill.c#L3658)).
 - Submission checks: one nonexistent name rejects the whole submission
   (`Invalid partition name specified`,
   [`src/slurmctld/job_mgr.c`, lines 6611-6626](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L6611)).
@@ -680,6 +809,30 @@ where a statement says so, and not observed live:
   ([`src/slurmctld/job_mgr.c`, lines 1198-1213](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L1198)),
   and association or QOS limits of any listed partition can reject it
   ([`src/slurmctld/acct_policy.c`, lines 3664-3665](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L3664)).
+- Submit limits: the association and QOS check runs for every listed
+  partition when the job is created, independent of `EnforcePartLimits`,
+  whenever `AccountingStorageEnforce` includes limits
+  ([`src/slurmctld/job_mgr.c`, lines 7491-7505](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L7491)),
+  and each array task counts as one job for MaxSubmitJobsPerUser and
+  MaxSubmitJobsPerAccount
+  ([`src/slurmctld/acct_policy.c`, lines 3278-3279](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L3278)
+  and
+  [2049-2094](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L2049)).
+  While pending, the job counts as submitted in the QOS of every listed
+  partition; at its start the count stays only in the run partition's
+  ([lines 974-1006](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L974)
+  and
+  [1025-1060](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L1025)),
+  and its running TRES count only in the job QOS and the run partition's QOS
+  ([lines 5258-5295](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/acct_policy.c#L5258)).
+  `sbatch --test-only` (`shk submit --preflight`) runs the site's job_submit
+  plugin and these checks, the array task count included, before its will-run
+  branch
+  ([`src/slurmctld/proc_req.c`, lines 2476-2485](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/proc_req.c#L2476);
+  [`src/slurmctld/job_mgr.c`, lines 4202-4205](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_mgr.c#L4202)).
+  The one live case of a list refused for one member's policy is the update
+  to `normal,bigmem` under [job updates in place](#job-updates-in-place):
+  `Job violates accounting/QOS policy`.
 
 ### Node records and GPU models
 

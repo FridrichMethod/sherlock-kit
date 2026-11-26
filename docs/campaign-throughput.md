@@ -93,22 +93,66 @@ build a complete model-by-SKU qualification matrix before submitting ready work.
 Prioritize the earliest start, and compare expected time to completion across
 authorized partitions: queue wait, startup/loading, useful computation and likely
 recovery. Department capacity, resumable owners and the public gpu partition are
-options; none has a universal priority. Borrowed btrippe/possu follow the
-existing courtesy budgets and time window unchanged. Prove same-command,
-idempotent checkpoint/resume before owners; Slurm requeue does not implement
-application recovery. Do not depend on receiving a usable preemption signal
-before saving progress.
+options, alone or together in one partition set; none has a universal priority.
+Borrowed btrippe/possu follow the existing courtesy budgets and time window
+unchanged. Prove same-command, idempotent checkpoint/resume before owners, alone
+or in a set: a set with `owners` is preemptible and requeues by default, so its
+script needs the same-command resume that `owners` needs even when the attempt
+starts on another member. Slurm requeue does not implement application
+recovery. Do not depend on receiving a usable preemption signal before saving
+progress.
+
+A set that names `bioe` or `stat` is sized for the department partition, not
+for `owners`. A job that names either, alone or in a set, falls under their
+courtesy text: respect fairshare, leave room for other department users and run
+few GPUs there (stat's courtesy text refers to bioe's). Both are small: 20 GPUs
+in `bioe` and 8 in `stat`
+([observed 2026-11-25](validation/observed-slurm.md#partition-tiers-and-preemption)).
+Read `shk occupancy --partition bioe --partition stat` first: your own
+`running_gpus` per partition is what the department loses; `pending_jobs`
+counts records, so a pending array is one record and a pending set job appears
+in every partition it lists. Bound what you can run there from your own live
+submissions that name the partition: the sum of min(tasks, `%M`) times GPUs
+per task. Raising a throttle with `shk update --throttle` or releasing a held
+job that names `bioe` or `stat` is the same decision as a submission. Submit
+the rest to `owners,gpu` or `owners` as different work units, never the same
+unit twice. These terms are text only: shk counts nothing, warns of nothing and
+refuses nothing there, and keeping to them is the agent's judgment.
 
 Three kit mechanisms help find the earliest start. Each has limits, and none
 chooses a request, lowers a floor or ranks GPU models:
 
-- A compatible partition set. `shk submit --partition gpu,bioe,stat` passes one
+- A compatible partition set. `shk submit --partition owners,gpu` passes one
   comma-separated value to Slurm, which starts the job in whichever member can
-  start it first. Only compatible sets are accepted: every member is listed and
-  takes batch jobs, none is borrowed, all share one `requeue` and one
-  `preemptible` value, and with `--gpus` above 0 every member allows GPUs.
-  `owners`, `btrippe` and `possu` stay alone; submit incompatible partitions
-  separately, for different work, never the same unit twice. A repeated `--partition` flag is not a list: the last one wins.
+  start it first. A set is compatible when every member is listed and takes
+  batch jobs, none is borrowed, and, with `--gpus` above 0, every member allows
+  GPUs. So `owners`, `gpu`, `bioe` and `stat` combine, `normal`, `bigmem` and
+  `service` combine too, and `btrippe` and `possu` stay alone: a borrowed
+  member is exit 3 `partitions_incompatible` (submit a borrowed partition
+  alone). Separate submissions carry different work units, never the same unit
+  twice. A repeated `--partition` flag is not a list: the last one wins. A set
+  states that the job may run on any member, so it follows every member's
+  rules and courtesy text wherever it starts. Requeue defaults to on when a
+  member allows it (`owners`); `--no-requeue` is accepted, and `--requeue` on a
+  set without such a member is exit 3 `requeue_not_allowed`. A requeued job
+  keeps its whole list and can start on another member and another GPU model
+  (Slurm source, not observed live). The members of a pending set are tried
+  department partitions first, then gpu, then owners. A record waiting in
+  `bioe` or `stat` can preempt `owners` jobs on that department's nodes, your
+  own included (Slurm has no same-user exemption: source-confirmed; such a
+  preemption is not observed). The tiers and nodes behind both were
+  [observed on 2026-11-25](validation/observed-slurm.md#partition-tiers-and-preemption):
+  PriorityTier 1000 for `bioe` and `stat`, 10 for `gpu`, 1 for `owners`, and
+  every `bioe` and `stat` node is also an `owners` node.
+  The kit sets no number for `owners,gpu`; Slurm does: every pending task of a
+  set that lists `gpu` counts against the submit limits of the gpu partition
+  QOS, per user and per account, until it starts (Slurm source; Sherlock's
+  values are not verified). Before a real submit of a set that lists `gpu`, run
+  the same request with the real `--array` under `--preflight`, and send work
+  beyond what gpu admits to `owners` alone. A rejection is exit 3 under
+  `--preflight` and exit 5 on a real submit. Sherlock refused an update to
+  `normal,bigmem` for one member's accounting or QOS policy
+  ([observed](validation/observed-slurm.md#job-updates-in-place)).
   `shk status --task` adds `current.ran_on` for such a job, the sorted
   partitions in which a task or attempt started. Without a spec (`--all`,
   `--name`, `--job-id`) there is no `ran_on`: `current.partition` is the first
@@ -331,9 +375,14 @@ from a re-read of every record. Its limits:
   requirement.
 - Time, partition and features change only while every record of the job is
   pending; the time limit only decreases.
-- A partition move stays within the job's requeue and preemptible class,
-  takes a GPU job only to partitions that allow GPUs and never targets
-  `btrippe` or `possu`. It can lower the job's age priority for a while.
+- A partition move goes to a listed, non-borrowed partition or set whose
+  requeue default, on when a member allows requeue, equals the job's Requeue
+  flag, so never to `btrippe` or `possu`, and takes a GPU job only to
+  partitions that allow GPUs. A requeueable job therefore moves only to
+  `owners` or a set with `owners`, any other job only to a target without it,
+  and dropping `owners` from a pending set is a cancel and resubmit for a job
+  submitted with the default requeue ([command reference](cli.md#update)). A
+  move can lower the job's age priority for a while.
 - Slurm checks constraint and preference names against the features of the
   whole cluster, not of the job's partitions: check them with `shk resources`
   first, or the job is accepted and never starts.
