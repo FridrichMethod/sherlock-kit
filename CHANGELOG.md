@@ -71,6 +71,85 @@ Documentation:
   reference, the installation guide, the campaign guide and the design guide
   follow.
 
+Partition sets with `owners`: any listed, batch, non-borrowed partitions
+share one `--partition` value, the department partitions `bioe` and `stat`
+carry courtesy terms, and a restart alone is not an anomaly.
+
+Submit:
+
+- `submit --partition P,P...` accepts every set of listed batch partitions
+  without a borrowed member: `owners,gpu`, `owners,gpu,bioe,stat` and
+  `normal,owners` are accepted, where members had to share one `requeue` and
+  one `preemptible` value. A set with a member that allows requeue (`owners`)
+  is submitted with `--requeue --open-mode=append` by default; `--no-requeue`
+  stays accepted, and `--requeue` on a set without such a member stays exit 3
+  `requeue_not_allowed`. `partitions_incompatible` (exit 3) remains for a set
+  with a borrowed member; the message that listed every member's
+  `preemptible` and `requeue` values is gone. `btrippe` and `possu` stay
+  alone.
+- A set states that the job may run on any member, so every member's rules
+  and courtesy text apply wherever it starts: a job of a set with `owners`
+  must checkpoint and resume even when an attempt starts on another member.
+
+Update, status and requeue (compatibility):
+
+- `update --partition`: the target's requeue default, on when a member allows
+  requeue, must equal the job's Requeue flag; the job's current partitions are
+  not checked. The refusal `update: SHK_REFUSED preemptible` no longer occurs.
+  A requeueable job moves only to `owners` or a set with `owners` (`owners` to
+  `owners,gpu` is accepted; `owners,gpu` to `gpu` is refused `requeue`), any
+  other job only to a target without it (`gpu,bioe,stat` to `owners,gpu` is
+  refused `requeue`). A job pending on a borrowed or unlisted partition, and a
+  job submitted `--no-requeue` on `owners`, can move to a listed non-borrowed
+  target with their requeue value. The help text of `update --partition`
+  changed.
+- `status` and `wait`: `unexpected_preemption` (exit 6) is raised only for a
+  PREEMPTED attempt on a non-preemptible partition, or on a list whose members
+  are all such. A NODE_FAIL or REQUEUED attempt followed by a restart, and a
+  restart whose earlier attempt is not visible, are no anomaly on any
+  partition, single partitions included, also for jobs submitted with an older
+  version; `shk wait` does not end on them. `max_restart`, `tasks.by_state`,
+  `tasks.incomplete_history` and `cost.final` are unchanged and still show
+  such a restart.
+- `requeue --self` is accepted on every listed non-borrowed partition when the
+  job has Requeue=1, so an attempt of a set with `owners` can requeue itself
+  on any member. A job with Requeue=0 on such a partition is refused `policy`
+  where it was refused `partition`. A job script needs this version installed
+  on the cluster to requeue itself off `owners`.
+
+Policy and guidance:
+
+- The `bioe` profile text asks to respect fairshare, to leave room for other
+  department users, to read `shk occupancy` first and to run few GPUs there,
+  alone or in a set; the `stat` text reads "Same terms as `bioe`.". Both
+  changed in the rules and in the profile that `shk occupancy` returns, so
+  read the two partitions in one call (`--partition bioe --partition stat`).
+  These are the owner's terms carried as text: `shk` counts nothing, warns of
+  nothing and refuses nothing. The kit sets no number for `owners,gpu`.
+- The Sherlock workstation rules name `owners,gpu` as the example of a set
+  and say that a set falls under every member's rules. The skill and the
+  campaign guide say how to size a submission that names `bioe` or `stat`
+  from the occupancy reply and the array throttle, that every pending task of
+  a set that lists `gpu` counts against the submit limits of the gpu partition
+  QOS (Slurm source; Sherlock's values are not verified), and that a record
+  waiting in `bioe` or `stat` is tried first and can preempt `owners` jobs on
+  that department's nodes, the caller's own included.
+- Marlowe: no file changes; it lists one partition. There too
+  `update --partition` does not check the job's current partition.
+
+Documentation:
+
+- The Sherlock observation guide gains "Partition tiers and preemption": the
+  priority tiers, PreemptMode, GraceTime, MaxTime and node overlap of
+  `owners`, `gpu`, `bioe`, `stat` and `normal` as read on 2026-11-25, and two
+  will-run tests (`--preflight`) in which Sherlock accepted `owners,gpu` and
+  `owners,gpu,bioe,stat` with `--requeue`. It adds the Slurm source facts the
+  change rests on. A real `sbatch` with a list, a natural preemption and a
+  node-failure requeue are not observed live. The Sherlock policy guide
+  records that combining `owners` with other partitions and the department
+  terms are owner choices, beside what the site says about `owners`. The
+  command reference, the design guide and the campaign guide follow.
+
 ## 0.12.0
 
 This release adds `shk usage`, an estimate of a Marlowe project account's

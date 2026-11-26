@@ -113,8 +113,9 @@ Read `shk occupancy --partition bioe --partition stat` first: your own
 counts records, so a pending array is one record and a pending set job appears
 in every partition it lists. Bound what you can run there from your own live
 submissions that name the partition: the sum of min(tasks, `%M`) times GPUs
-per task. Raising a throttle with `shk update --throttle` or releasing a held
-job that names `bioe` or `stat` is the same decision as a submission. Submit
+per task. Raising a throttle with `shk update --throttle`, releasing a held
+job that names `bioe` or `stat`, or moving a job onto them with
+`shk update --partition` is the same decision as a submission. Submit
 the rest to `owners,gpu` or `owners` as different work units, never the same
 unit twice. These terms are text only: shk counts nothing, warns of nothing and
 refuses nothing there, and keeping to them is the agent's judgment.

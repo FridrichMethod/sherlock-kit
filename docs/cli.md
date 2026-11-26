@@ -350,7 +350,9 @@ one, is source-confirmed and
 Sherlock accepts a list depends on site settings that the source does not
 determine, and association or QOS limits of any member can reject it:
 Sherlock refused one list for one member's policy (the `normal,bigmem` move in
-[job updates in place](validation/observed-slurm.md#job-updates-in-place)).
+[job updates in place](validation/observed-slurm.md#job-updates-in-place)),
+and its will-run test accepted `owners,gpu` and `owners,gpu,bioe,stat`
+([partition tiers and preemption](validation/observed-slurm.md#partition-tiers-and-preemption)).
 The kit sets no number for `owners,gpu`; Slurm does: every pending task of a
 set that lists `gpu` counts against the submit limits of the gpu partition
 QOS, per user and per account, until it starts (Slurm source; Sherlock's
@@ -816,8 +818,9 @@ courtesy text in the reply refers to `bioe`'s):
   pending set job appears in every partition it lists;
 - bound what you can run there from your own live submissions that name the
   partition: the sum of min(tasks, `%M`) times GPUs per task;
-- raising a throttle with `shk update --throttle` or releasing a held job that
-  names `bioe` or `stat` is the same decision as a submission;
+- raising a throttle with `shk update --throttle`, releasing a held job that
+  names `bioe` or `stat`, or moving a job onto them with
+  `shk update --partition` is the same decision as a submission;
 - submit the rest to `owners,gpu` or `owners` as different work units, never
   the same unit twice.
 
@@ -1199,9 +1202,9 @@ These are read from Slurm's record of that physical job, which also names the
 target: an array element is requeued as its `ArrayJobId_ArrayTaskId`, never the
 bare array ID, which would requeue every element; inherited `SLURM_ARRAY_*`
 variables are not trusted. The partition is the one the job runs in, so an
-attempt of a set with `owners` can requeue itself on every member. A job
-without Requeue is refused `policy` wherever it runs, and one on a borrowed or
-unlisted partition is refused `partition`.
+attempt of a set with `owners` can requeue itself on every member. On a
+listed, non-borrowed partition a job without Requeue is refused `policy`; a
+job on a borrowed or unlisted partition is refused `partition`.
 
 For both commands, a refusal is exit 3 and keeps Slurm's message when a query
 failed; a nonzero `scontrol` mutation is exit 5 with `scontrol ACTION exit RC`

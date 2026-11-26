@@ -40,8 +40,9 @@ reproduced here;
   master, with no `shk` command; [the dev partition](#the-dev-partition)
   records them with that day's read of the partition.
 - On 2026-11-25, two `scontrol show partition` calls for `owners`, `gpu`,
-  `bioe`, `stat` and `normal`, authorized by the owner, ran from a workstation
-  over the control master and created no job;
+  `bioe`, `stat` and `normal` and two `shk submit --preflight` will-run tests
+  of partition sets with `owners`, authorized by the owner, ran from a
+  workstation over the control master and created no job;
   [partition tiers and preemption](#partition-tiers-and-preemption) records
   them.
 - A job pattern that worked: `#!/bin/bash -l`, no `#SBATCH` lines,
@@ -323,8 +324,25 @@ What follows for a partition set, with the Slurm source facts under
   `owners` and `gpu`, depending on `EnforcePartLimits`, which was not read.
 - The department partitions are small: 20 GPUs in `bioe`, 8 in `stat`.
 
-Not observed: PreemptType, `EnforcePartLimits`, the QOS limits, and whether
-`sbatch` accepts a list that includes `owners`.
+Two will-run tests followed on the same day: `shk submit --preflight`
+(`sbatch --test-only`) with `--cpus 1 --mem 2G --time 20m --gpus 1`. Neither
+created a job. Both carried `--requeue --open-mode=append`, the default of a
+set with `owners`, and both returned 0:
+
+| `--partition` | Estimate line on stderr |
+|---|---|
+| `owners,gpu` | `sbatch: Job N to start at 2026-11-26T17:49:54 a using 1 processors on nodes sh04-01n12 in partition gpu` |
+| `owners,gpu,bioe,stat` | `sbatch: Job N to start at 2026-11-30T15:34:54 a using 1 processors on nodes sh03-16n12 in partition bioe`, then `sbatch:   Preempts: N` |
+
+So Sherlock's creation-time checks accept a list that includes `owners`, with
+`--requeue` and a GPU request. The estimate names the member of the highest
+tier, `gpu` before `owners` and `bioe` before the rest, not the member with
+the earliest start: the set with `bioe` got the later estimate. The will-run
+test of that set names one job that the request would preempt on a `bioe`
+node; whose job it is was not read.
+
+Not observed: PreemptType, `EnforcePartLimits`, the QOS limits, and a real
+`sbatch` with a list that includes `owners`.
 
 ## Job updates in place
 
@@ -489,14 +507,12 @@ the `env`-prefixed `sbatch` of the CPU thread budget
 Also not observed live, and resting on the Slurm source below and on offline
 tests:
 
-- the will-run test (`shk submit --preflight`) of a comma-separated partition
-  list on Sherlock;
 - a real `sbatch` with a partition list, and the usability of each member;
 - what `squeue` and `sacct` print as the partition of a multi-partition job
   while pending, running, finished, requeued and cancelled while pending,
   their row order for an array whose tasks run in different partitions and
   for the attempts of a requeued job, and AllocCPUS 0 before a start;
-- the estimate line for a partition list or with a cluster clause;
+- the estimate line with a cluster clause;
 - an accepted `--test-only` without an estimate;
 - `shk resources --summary` on live node records, and the `CLASS:` feature
   prefix;
@@ -519,7 +535,8 @@ PreemptMode, GraceTime and MaxTime of five partitions.
 Sherlock's `EnforcePartLimits` and `AccountingStorageEnforce` values, its
 job_submit plugin, its partition priority tiers and its associations are not
 determinable from the source. The will-run test of a partition list is
-therefore an attended, read-only check:
+therefore an attended, read-only check, and
+[partition tiers and preemption](#partition-tiers-and-preemption) records two:
 
 ```sh
 shk submit --task multi-partition-probe --script job.sh --partition gpu,bioe,stat --cpus 1 --mem 2G --time 20m --gpus 1 --preflight
@@ -583,7 +600,8 @@ The following are confirmed in the official Slurm source at tag
 `shk submit --preflight` reads its `estimate` from the line that
 `sbatch --test-only` prints. Confirmed in the source at the same tag, or
 inferred from it where a statement says so, and not observed live apart from
-the one line recorded under [Submission](#submission):
+the lines recorded under [Submission](#submission) and
+[partition tiers and preemption](#partition-tiers-and-preemption):
 
 - One `info()` call prints it, with the format
   `"Job %u to start at %s%s%s a using %u processors on nodes %s in partition %s"`
@@ -781,7 +799,7 @@ where a statement says so, and not observed live:
   it can preempt, then reservation, PriorityTier and the job's priority in that
   partition, and starts the job in the first member, in that order, that can
   start it now; there is no earliest-start comparison across members
-  ([`src/slurmctld/job_scheduler.c`, lines 2179-2271](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L2179)
+  ([`src/slurmctld/job_scheduler.c`, lines 2179-2320](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L2179)
   and
   [1505-1510](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/slurmctld/job_scheduler.c#L1505);
   [`doc/html/priority_multifactor.shtml`, lines 36-46](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/doc/html/priority_multifactor.shtml#L36)).
