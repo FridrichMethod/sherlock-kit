@@ -57,6 +57,18 @@ shk --site marlowe pull /scratch/m000000/USER/demo/runs/NAME/out results/NAME
 - `shk --site marlowe cancel --task train-a` cancels only the live jobs of that name. `shk --site marlowe update --job-id N --expect-name NAME --time DUR` lowers a pending job's walltime, and `--throttle M` changes an array's throttle; never cancel and resubmit to adjust a queued job.
 - `shk --site marlowe usage --start YYYY-MM-DD [--end YYYY-MM-DD]` estimates the GPU-hours, CPU-hours and cost of the configured `account` per month and rate period, for the whole account, for the user and for the other members as one sum (dates are Marlowe's, `America/Los_Angeles`; `--end` is exclusive and defaults to now). It is an estimate from Slurm accounting and the packaged rates, not the bill: report its `warnings` and `assumptions` together with the numbers, and say when a cost is provisional or `total.cost_complete` is false (part of the range has no packaged rate, so the total costs are a lower bound; `unpriced_gpu_hours` and `unpriced_cpu_hours` show how much usage that is, possibly none). It is read-only and free; do not repeat it within 60 s (`next_check_after`). Exit 1 `account_not_found` means that the configured account is not one of the user's associations.
 
+## Short work
+
+No development, debug or test partition is documented on Marlowe, and `preempt` is the only partition in the packaged table (the site has three). Run a check, build or test on the first of these that can hold it:
+
+- CPU work and test suites: on the workstation or on Sherlock (owner).
+- A Marlowe login node, in a session there or (owner) over `marlowe-plain` from a workstation session: short, light commands, compiling and (owner) environment builds. Site: login nodes "are for editing, compiling, submitting jobs, and moving data. Short, light commands are fine; heavy or long-running work is not." Large environments go under `/projects/PROJECT` or scratch, not the small home. That ssh PATH has no Slurm clients, and a login node has no GPU.
+- Checks that create no job: `shk --site marlowe submit ... --dry-run` (offline) and `--preflight` (Slurm's verdict; its start time is not a wait prediction).
+- A GPU smoke test: one short authorized `preempt` job through `shk --site marlowe submit`, with every pending check bundled into its script. Ask for its bound first, tasks x GPUs and CPUs x walltime x (1 + retries), for example 1 x (1 GPU and 8 CPUs) x 10 min x (1 + 1); each round needs its own yes, and no bound stands for later rounds. At the packaged rates such a job costs a few cents per attempt; `shk --site marlowe usage` prices what ran from the packaged rate table.
+- Observed on Marlowe in the 30 days to 2026-11-21 (sherlock-kit's `docs/validation/observed-marlowe.md`), not guaranteed: CPU-only requests started within seconds, small GPU requests usually within hours, shorter limits tended to start sooner, and a job was not preemptible in its first 5 minutes. Keep the walltime short: a preempted test restarts from the top as another billed attempt.
+- No interactive allocation is offered: `srun` and `salloc` create billed `preempt` jobs that need the same authorization, an agent has no terminal to hold one, and the workstation's ssh PATH has no Slurm clients.
+- Never submit GPU work while developing or testing sherlock-kit itself. Develop and test it on Marlowe with `--dry-run`, `--preflight` and held jobs, never a job that runs unless the owner authorizes it.
+
 ## Exit codes
 
 | Code | Meaning | Do |
