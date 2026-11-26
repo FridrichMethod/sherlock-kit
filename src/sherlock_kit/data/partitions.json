@@ -15,7 +15,7 @@
       "borrowed": false,
       "gpus_allowed": false,
       "batch": true,
-      "courtesy": "Public high-memory partition: only for jobs needing more memory than normal provides. Sherlock's own limits apply."
+      "courtesy": "Public high-memory partition: only for jobs needing more memory than normal provides."
     },
     "dev": {
       "preemptible": false,
@@ -23,7 +23,7 @@
       "borrowed": false,
       "gpus_allowed": true,
       "batch": false,
-      "courtesy": "Interactive only (`sh_dev`, `srun`): Sherlock rejects batch jobs, so `shk submit` refuses it. Quick tests and builds, never production runs."
+      "courtesy": "Interactive only, so `shk submit` refuses it. Quick tests and builds in one `srun --partition=dev --time=MIN CMD` (`sh_dev` takes no command), never production runs."
     },
     "service": {
       "preemptible": false,
@@ -31,7 +31,7 @@
       "borrowed": false,
       "gpus_allowed": false,
       "batch": true,
-      "courtesy": "Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation. Sherlock's own limits apply."
+      "courtesy": "Public service partition: lightweight recurring administrative tasks such as transfers or backups, never computation."
     },
     "gpu": {
       "preemptible": false,

@@ -44,6 +44,7 @@ class PartitionTableTests(unittest.TestCase):
         self.assertEqual(p["normal"].courtesy, "")
         # Sherlock refuses every sbatch job in dev (interactive sessions only, seen 2026-10-18)
         self.assertEqual([n for n in NAMES if not p[n].batch], ["dev"])
+        self.assertIn("srun --partition=dev --time=", p["dev"].courtesy)
         self.assertIn("`sh_dev`", p["dev"].courtesy)
 
     def test_profile_lookup(self):

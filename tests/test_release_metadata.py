@@ -21,7 +21,8 @@ from fakes import ROOT, SRC, in_git, install_fake_ssh
 
 sys.path.insert(0, str(SRC))
 import sherlock_kit
-from sherlock_kit import cli, partitions
+from sherlock_kit import cli, partitions, spec
+from sherlock_kit.errors import ShkError
 
 CONTRACT = {
     "C1": "src/sherlock_kit/data/rules/workstation.md",
@@ -294,6 +295,35 @@ class RulesFormatTests(unittest.TestCase):
                     self.assertIn("-oBatchMode=yes", tokens[: hosts[0]])
                     self.assertIn("-oProxyCommand=false", tokens[: hosts[0]])
         self.assertGreater(checked, 0)
+
+    def test_srun_and_salloc_with_a_partition_carry_a_time(self):
+        """Site rule 2: every job requests a time limit, an allocation on a named partition too."""
+        checked = 0
+        for path in (*RULES, *MARLOWE_RULES, *SKILLS.values()):
+            for snippet in snippets(path.read_text(encoding="utf-8")):
+                for found in re.finditer(r"\b(?:srun|salloc)\b[^;&|]*", snippet):
+                    if "--partition" in found.group():
+                        checked += 1
+                        with self.subTest(path=path.name, snippet=snippet):
+                            self.assertIn("--time=", found.group())
+        self.assertGreater(checked, 0)
+
+    def test_sherlock_names_the_dev_run_one_way_and_salloc_runs_no_command(self):
+        with self.assertRaises(ShkError) as caught:
+            spec.partition_request("dev")
+        texts = {path.name: path.read_text(encoding="utf-8") for path in RULES}
+        texts["SKILL.md"] = SKILLS["sherlock-kit"].read_text(encoding="utf-8")
+        texts["hint"] = caught.exception.hint
+        for name, text in texts.items():
+            with self.subTest(text=name):
+                self.assertIn("srun --partition=dev --time=", text)
+                self.assertEqual(
+                    text.count("partition=dev"), text.count("srun --partition=dev --time=")
+                )
+                for snippet in [text] if name == "hint" else snippets(text):
+                    for found in re.finditer(r"\bsalloc\b(.*)", snippet):
+                        args = found.group(1).split()
+                        self.assertTrue(all(arg.startswith("-") for arg in args), snippet)
 
     def test_skill_front_matter(self):
         for name, path in SKILLS.items():
