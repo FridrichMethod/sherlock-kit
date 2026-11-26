@@ -46,8 +46,8 @@ serves. Neither replaces the other, and neither holds secrets.
   copies without writing and exits 1 when one is missing or stale.
 
 - **Project guide**: the project's own agent guide, such as its `AGENTS.md`,
-  points at the delivered rules and skills (for Sherlock, the skill's section
-  "Short work" in particular) and adds only what is the project's own: its
+  points at the delivered rules and skills (each skill's section "Short work"
+  in particular) and adds only what is the project's own: its
   environment path, its check script, which tests need the cluster. It does
   not restate where a check, a build or a test runs; the rules and that
   section decide it, and they change with the pinned release.

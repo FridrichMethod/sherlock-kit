@@ -1,5 +1,75 @@
 # Changelog
 
+## Unreleased
+
+Guidance for short work: a check of seconds, an environment build, a compile,
+a CPU or GPU test of a few minutes and a project's test suite. No command,
+option, reply key, exit code, remote program or `sbatch` argv changes; the
+texts that replies quote and that changed are listed under "Visible on
+Sherlock".
+
+Guidance:
+
+- Both skills gain a section "Short work" that says where such work runs.
+  On Sherlock: the workstation for CPU test suites, a login node for checks
+  of seconds and small pure-Python installs, one run on the interactive `dev`
+  partition for compiling, heavy installs, tests beyond seconds and a GPU
+  smoke test, and a short batch job for what exceeds `dev`. The `dev` run is
+  one blocking `srun --partition=dev --time=MIN CMD`, from a workstation over
+  the open master with the script on stdin. The section gives the command for
+  both callers, the request, what a 6 GB GPU slice of `dev` proves, and the
+  steps after a lost call: the job keeps running, so read it once and end it
+  with `scancel` and its exact id. `sh_dev` takes no command and a command
+  given to `salloc` runs on the login node, so neither is named as a way to
+  run a command. On Marlowe, which documents no development, debug or test
+  partition: the workstation or Sherlock for CPU work, a login node for
+  compiling and environment builds, `--dry-run` and `--preflight` as the
+  checks that create no job, and one short authorized `preempt` job for a GPU
+  smoke test.
+- The Sherlock rules files name the boundary: checks of seconds and small
+  pure-Python installs on a login node; compiling, heavy installs and tests
+  beyond seconds in jobs, quick ones as one attended `dev` run. They word the
+  ten-minute line as the site does: aggregate short tasks so that a job holds
+  at least 10 useful minutes. One bundled `dev` run for a task's checks may
+  take less; a planned series of short runs, a retry loop and padding are
+  what the clause forbids. That is the toolkit's reading, recorded in the
+  Sherlock policy guide. To stay within the 7 KiB cap the workstation file
+  leaves the field groups of `shk update` to the skill and the command
+  reference, both files drop "Sherlock's own limits apply." from the `bigmem`
+  and `service` profiles, and the cluster file drops the pointer to
+  `scontrol show job`.
+- The Marlowe workstation rules allow light checks and environment builds on
+  a login node over the open master, an owner decision, as the Marlowe
+  cluster rules do for a session on a login node.
+- The rules files of both sites carry `Reviewed 2026-11-25`, after a re-read
+  of Sherlock's five site files and of every page in the Marlowe policy
+  guide's source table, none of which had changed.
+- The rules files and both skills changed, so `shk install-skill --check`
+  reports installed copies as stale; run `shk install-skill` again, with the
+  same `--rules` (and `--site marlowe` for the Marlowe copies), to refresh
+  them.
+
+Visible on Sherlock:
+
+- `submit --partition dev` is refused as before, exit 3 `batch_not_allowed`;
+  its hint names `srun --partition=dev --time=MIN CMD` instead of `sh_dev`
+  or `salloc`. The profile texts of `dev`, `bigmem` and `service` changed
+  with the rules, in that message and in the profile that `shk occupancy`
+  returns.
+
+Documentation:
+
+- The Sherlock policy guide records the readings behind the new text (the
+  login-node allowance, the noninteractive `dev` run, the ten-minute clause,
+  the lost call) with their basis in the site files. The Marlowe policy guide
+  records the sources of the changed rules sentence and of the skill section.
+  The Sherlock observation guide gains "The dev partition": its limits and
+  GPU instances as read on 2026-11-25, what `sh_dev` runs, and two CPU-only
+  runs that showed the noninteractive form, the exit status, network reach
+  from a compute node and that a job outlives a lost call. The command
+  reference, the installation guide, the campaign guide and the design guide
+  follow.
+
 ## 0.12.0
 
 This release adds `shk usage`, an estimate of a Marlowe project account's

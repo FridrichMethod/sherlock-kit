@@ -15,7 +15,7 @@ stands alone; the Sherlock rules and their provenance
 ## Source
 
 The rules follow these pages of <https://marlowe-research.stanford.edu> and
-one University IT page, all retrieved 2026-11-22. The documentation carries no
+one University IT page, all retrieved 2026-11-25. The documentation carries no
 version or modification date of its own, so the retrieval date is the only
 version mark.
 
@@ -40,7 +40,7 @@ plugin's account error still names, now points to the pages above; its
 archived copies carry other partition limits and are not used.
 
 Both rules files carry
-`Reviewed 2026-11-22 against https://marlowe-research.stanford.edu/documentation/ .`,
+`Reviewed 2026-11-25 against https://marlowe-research.stanford.edu/documentation/ .`,
 the date of their last comparison with these pages. Before a rules change that
 touches site policy, re-read every page in the table, compare it with both
 rules files and the skill, then set the `Reviewed` date to the date of that

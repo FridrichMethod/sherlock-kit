@@ -1,6 +1,6 @@
 ## Sherlock: agent running on Sherlock
 
-At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant `storage.md`, `slurm.md`, `software.md`, `policy.md` beside it. They take precedence; only numbered rules are mandatory. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-22.
+At session start and after compaction, read `/etc/agents/AGENTS.md` and relevant `storage.md`, `slurm.md`, `software.md`, `policy.md` beside it. They take precedence; only numbered rules are mandatory. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-25.
 
 ### Where you are
 - `hostname`/`$SLURM_JOB_ID`: login names contain `-ln`, no job id. Use allocations fully; prefer agents there.

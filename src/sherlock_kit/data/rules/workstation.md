@@ -1,6 +1,6 @@
 ## Sherlock from this workstation
 
-Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are requirements. At session start and after compaction, run `shk doctor`, then read it and the task's topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md`) over the master: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md`. Never authenticate. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-22.
+Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are requirements. At session start and after compaction, run `shk doctor`, then read it and the task's topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md`) over the master: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md`. Never authenticate. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-25.
 
 ### Connection
 - Use `shk` or bounded noninteractive OpenSSH over the user's masters: `sherlock-plain` for light commands, small pure-Python installs and checks of seconds, `sherlock-dtn` for transfers. Heavy work, compiling, heavy installs and tests beyond seconds run in jobs: quick ones as one attended `dev` run, never detached or looped, else `shk submit`.

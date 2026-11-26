@@ -423,7 +423,7 @@ live with the 0.5.0 fix tree).
 
 ## Not observed live
 
-Lost ssh replies, duplicate submissions racing each other, natural preemption
+Lost replies of `shk`'s own ssh calls, duplicate submissions racing each other, natural preemption
 by a node owner, an unexpected preemption on a non-preemptible partition, and
 jobs on `possu`. Also not observed: `sbatch --prefer` (`shk submit --prefer`),
 OR feature expressions in the `--constraint` or `--prefer` of `sbatch`, and
