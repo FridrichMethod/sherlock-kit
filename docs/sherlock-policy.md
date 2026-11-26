@@ -97,17 +97,66 @@ How the rules files carry particular site rules:
   inspection and job preparation on login nodes; `software.md` (recommended
   practice) runs compiling and heavy package installs inside a job (`sh_dev`
   for an interactive session, or `sbatch`), never on a login node. Login nodes
-  have no GPUs. The rules files therefore allow light installs on a login node
-  (the workstation file's "light commands/installs" over `sherlock-plain`, the
-  cluster file's login-node list) and send heavy work to jobs, the cluster
-  file naming compiling and heavy installs. The skill draws the boundary:
-  small installs and checks that end in seconds may run on a login node;
-  compiling, heavy installs and tests that need GPUs, many cores, much memory
-  or more than about a minute run in an allocation, quickest through the
-  interactive `dev` partition (`sh_dev`, or `srun --partition=dev` with an
-  explicit `--time`), not a batch job. The installation and campaign guides
-  apply it to environments, and the `dev` profile says the same: interactive
-  only, quick tests and builds, never production runs.
+  have no GPUs. The rules files therefore allow light work on a login node
+  (the workstation file's light commands, small pure-Python installs and
+  checks of seconds over `sherlock-plain`, the cluster file's login-node list)
+  and send heavy work, compiling, heavy installs and tests beyond seconds to
+  jobs. The boundary is "seconds". The small-install allowance is the
+  toolkit's reading of rule 1's "job preparation": the site's human Python
+  page (recommended practice) treats it more strictly and says that building
+  virtual environments "should be done on a compute node", so the allowance
+  stops at pure-Python installs, with no compiling and no Conda, CUDA or ML
+  stacks. The skill's "Short work" section holds the ladder from the
+  workstation to the production job; the installation and campaign guides
+  apply it to environments.
+- Quick work in a job is one `dev` run, `srun --partition=dev --time=MIN CMD`,
+  named that way in the `dev` profile, the `batch_not_allowed` hint and the
+  skill. A noninteractive `srun` on `dev` is not a documented site example;
+  it is the toolkit's reading. It rests on the site's own rejection message
+  for batch jobs on `dev`, "reserved for interactive sessions
+  (salloc/srun/sdev and OnDemand)"
+  ([observed](validation/observed-slurm.md#submission)), on the GPU page's
+  one-shot `srun -p gpu -G 1 nvidia-smi`, on `software.md`'s "inside a job
+  (`sh_dev` for an interactive session, or `sbatch`)" and on `slurm.md`'s
+  preference for a blocking `sbatch --wait` over a polling loop, all
+  recommended practice except the observed message. Rule 2 asks for the
+  explicit time limit. `sh_dev` takes no command and opens an interactive
+  shell, and a command given to `salloc` runs on the login node where
+  `salloc` was invoked, so neither is the agent's path. The form was
+  [observed on CPU only](validation/observed-slurm.md#the-dev-partition);
+  GPUs on `dev`, the refusal path of `--immediate` and the per-user caps are
+  not observed.
+- Rule 1 forbids a login-node process "that outlives your interactive
+  session" and arranging for work "to survive your disconnection". A `dev`
+  run's `srun` client is a light process on the login node that belongs to
+  one blocking, attended call, never detached (`nohup`, a plain `&`, `tmux`,
+  `screen`, `salloc --no-shell`). When the local call is lost or killed, the
+  job keeps running and its `srun` client stays on the login node until the
+  script ends or the time limit
+  ([observed](validation/observed-slurm.md#the-dev-partition)). The toolkit
+  reads the clause as asking that such a client be ended, not left behind:
+  keep `--time` tight, give the tool call a timeout above `--time` plus a
+  start allowance, and after a lost call wait 60 s, read the job once with
+  `shk status --job-id N` and end it with `scancel N`, the exact id (rule 6
+  stops jobs with `scancel`; `shk cancel` addresses only shk job names).
+  Work that does not fit a bounded call moves to a batch job.
+- Rule 10 says to "aggregate short tasks so that the work inside a job lasts
+  at least 10 minutes, ideally 30". Both rules files repeat it with that verb
+  for every job (the workstation file adds array tasks). The toolkit's
+  reading, approved by the owner on 2026-11-25: one bundled `dev` run for a
+  task's checks may take less than 10 minutes; a planned series of short
+  runs, a retry loop and padding are what the clause forbids, and a rerun
+  after a diagnosed failure is fine. Batch jobs and array tasks keep the
+  10-minute line. The basis is the clause's verb, "aggregate"; the site's
+  sentence "Refuse only what these rules explicitly prohibit" (Conditions of
+  use); and the site's own seconds-long one-shot `srun` examples on the GPU
+  page and its "small representative test" before scaling up (Before
+  significant work), both recommended practice. Neither the rules files nor
+  the skill state the reading as an exemption. The skill's operating text:
+  one run per task with every pending check in one script, never a planned
+  series of short runs, a retry loop or padding, and one rerun once the cause
+  of a failure is found; work that exceeds `dev` goes to a short batch job
+  through `shk submit`, aggregated to 10 useful minutes or more.
 - Rule 5 forbids any SSH server on any node, login or compute, under any name
   or port, bound to localhost, inside a job or a container, or attended; a tool
   that starts one is disabled or not used, and running one can lead to
@@ -150,7 +199,8 @@ How the rules files carry particular site rules:
 - No agent module is named: the site files name none, and agents find modules
   with `ml spider`.
 
-The rules files also say that `dev` takes no batch jobs. This comes from
+The rules files also say that `dev` is interactive only, so `shk submit`
+refuses it. That `dev` takes no batch jobs comes from
 [observed Slurm behavior](validation/observed-slurm.md#submission), not from
 the site files: Sherlock rejects them, so `shk submit` refuses them offline.
 
@@ -181,10 +231,17 @@ stated elsewhere:
   the `owners` profile requires scripts to checkpoint and resume instead;
 - in the cluster file, that `shk push` and `shk pull` refuse to run on
   Sherlock, which `shk` enforces (exit 3) and the skill states;
-- in the cluster file, the limits of `shk update` (one field group per call, a
-  time limit only decreased, a partition only within the job's requeue and
+- in both files, the limits of `shk update` (one field group per call, a time
+  limit only decreased, a partition only within the job's requeue and
   preemptible class and never a borrowed one), which `shk` enforces (exit 1
-  or 3) and the skill states;
+  or 3) and the skill and the [command reference](cli.md#update) state;
+- on `bigmem` and `service`, the reminder that Sherlock's own limits apply,
+  which holds for every partition: both files say to discover limits, and the
+  site's own discovery commands (`sh_part`, `scontrol show partition`) show
+  them;
+- in the cluster file, `scontrol show job $SLURM_JOB_ID` for an allocation's
+  limits and elapsed time, one of the site's own discovery commands, which
+  `AGENTS.md` names under "First, find out where you are";
 - in the workstation file, that `submit --dry-run` needs no socket, which the
   skill's setup check and the [installation guide](install.md) state;
 - in the GPU scheduling defaults, the comparison of authorized partitions by
@@ -193,10 +250,10 @@ stated elsewhere:
   [campaign guide](campaign-throughput.md) carry beside the earliest-start
   priority. That section also does not repeat four statements that each file
   makes elsewhere: the borrowed budgets, which the partition profiles give; the
-  ban on padding and on jobs of less than 10 useful minutes, the discovery of
-  partition limits and features, and the 60 s cadence for status and resources
-  checks, which the workstation file's Jobs and the cluster file's Slurm
-  section give;
+  aggregation of short tasks into 10 useful minutes per job and the ban on
+  padding, the discovery of partition limits and features, and the 60 s cadence
+  for status and resources checks, which the workstation file's Jobs and the
+  cluster file's Slurm section give;
 - in the GPU scheduling defaults, the check of a real compatibility
   uncertainty and the reading of `resources --summary` slots for the eligible
   GPU features only, which the skill and the campaign guide give;
@@ -242,8 +299,10 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   `--resubmit REASON`.
 - `shk cancel` is scoped to one job name and the current UID. Routine cancellation of exact verified own jobs in an authorized task may proceed; tell the user why, since `shk cancel` records no reason. Ask for unclear ownership/scope, unrelated work, broad cancellation, or material irreversible loss of important progress/results. Never cancel all of the user's jobs (`scancel -u $USER`), although the site does not forbid it.
 - Remote work goes only through `shk` or bounded OpenSSH over the user's
-  control masters, and jobs only through `shk submit`, never raw `sbatch` over
-  ssh.
+  control masters, and batch jobs only through `shk submit`, never raw
+  `sbatch` over ssh. The one job outside `shk` is a bounded `dev` run,
+  `srun --partition=dev --time=MIN CMD`, since `dev` takes no batch jobs (see
+  the rule 1 bullets under "Where each site rule lands").
 - Changes to a pending job, and to an array's throttle, go through
   `shk update`, never raw `scontrol update`: one field group per call, a time
   limit only decreased (Slurm accepts a pending increase up to the partition's
