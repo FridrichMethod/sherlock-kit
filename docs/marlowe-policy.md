@@ -180,8 +180,10 @@ account does not hold.
 ## Short work in the skill
 
 The skill's "Short work" section says where a check, a build or a test runs
-on Marlowe. The rules carry it only through the Connection sentence above and
-their billing and authorization sentences. Its statements come from:
+on Marlowe. The rules carry parts of it: the site's login-node sentence, the
+workstation file's Connection sentence above, the cluster file's login-node
+sentences, the CPU-only owner sentence, and their billing, authorization,
+waiting and preemption sentences. Its statements come from:
 
 | Statement | Kind | Source |
 |---|---|---|
@@ -189,12 +191,13 @@ their billing and authorization sentences. Its statements come from:
 | CPU work and test suites run on the workstation or on Sherlock | owner | owner decision 2 below |
 | A login node, in a session there or over the master from a workstation session, takes short, light commands, compiling and environment builds; the site's sentence is quoted | site, owner | Usage Violations, "Do not degrade the shared nodes"; owner decision 4 below |
 | Large environments go under `/projects/PROJECT` or scratch, not the small home | site | Filesystems, Conda, FAQ |
-| The ssh PATH has no Slurm clients; a login node has no GPU | observed | [Slurm client environment](validation/observed-marlowe.md#slurm-client-environment), [login nodes](validation/observed-marlowe.md#login-nodes) |
+| The ssh shell has no Slurm clients and no `module`, which a login shell (`bash -lc`) provides; a login node has no GPU | observed | [Slurm client environment](validation/observed-marlowe.md#slurm-client-environment), [hosts, shells and identity](validation/observed-marlowe.md#hosts-shells-and-identity) (Lmod in login shells), [login nodes](validation/observed-marlowe.md#login-nodes) |
+| From a workstation, each build or check is one blocking, attended call, never detached; after a lost call, check on that login node that it has ended before starting it again | site, toolkit | Usage Violations ("heavy or long-running work is not" fine on login nodes); the cluster file's "Nothing unattended or outliving the session", applied to the workstation caller; that a remote command outlives its killed local ssh client is [observed on Sherlock](validation/observed-slurm.md#the-dev-partition) and inferred for Marlowe |
 | `submit --dry-run` (offline) and `--preflight` create no job; the preflight's start time is not a wait prediction | toolkit, observed | `--dry-run` dials nothing; `--preflight` runs `sbatch --test-only`, which creates no job ([how the observations were made](validation/observed-marlowe.md#how-the-observations-were-made)); [test-only estimates](validation/observed-marlowe.md#test-only-estimates-and-real-starts) |
 | A GPU smoke test is one short authorized `preempt` job through shk, with every pending check bundled into its script | toolkit, owner | a login node has no GPU, so a GPU check needs a job; every job is billed (Apply for Access), so one job carries all checks; the authorization is owner decision 2 below |
 | The bound in the rules' form; each round needs its own yes, and no bound stands for later rounds | owner | owner decision 2 below: the yes covers exactly the stated bound; the owner confirmed on 2026-11-25 that this holds for every smoke-test round |
 | At the packaged rates such a job costs a few cents per attempt; `usage` prices what ran | toolkit | the packaged rates ([left out of the rules files](#left-out-of-the-rules-files)): 1 GPU and 8 CPUs for 10 minutes come to about 0.048 USD at 0.25 USD per GPU-hour and 0.005 USD per CPU-hour; the skill names no fixed price, since rates change |
-| CPU-only requests started within seconds, small GPU requests usually within hours, shorter limits tended to start sooner, and a job was not preemptible in its first 5 minutes; dated, not guaranteed | observed | [queue waits](validation/observed-marlowe.md#queue-waits); [preemption and requeue](validation/observed-marlowe.md#preemption-and-requeue) (`PreemptEligibleTime` 5 minutes after the start) |
+| Small GPU requests usually started within hours, shorter limits tended to start sooner, and a job was not preemptible in its first 5 minutes; dated, not guaranteed | observed | [queue waits](validation/observed-marlowe.md#queue-waits); [preemption and requeue](validation/observed-marlowe.md#preemption-and-requeue) (`PreemptEligibleTime` 5 minutes after the start) |
 | A preempted test restarts from the top as another billed attempt | site, toolkit | SLURM on Marlowe; the row "Treat every attempt as billed" above |
 | No interactive allocation is offered | toolkit | `srun` and `salloc` allocations are billed jobs that need the user's authorization (the Jobs row above); the site shows interactive `srun --pty` and `salloc` on `preempt` (SLURM on Marlowe) and for debugging recommends "an interactive Slurm job on a compute node, or submit batch jobs instead" (FAQ); an agent holds no terminal over the master and its ssh PATH has no Slurm clients, so the skill takes the batch path |
 | Never GPU work while developing or testing sherlock-kit; on Marlowe dry runs, preflights and held jobs only, a job that runs only with the owner's authorization | owner | the repository's development rules (`AGENTS.md`, CONTRIBUTING.md) |
@@ -299,7 +302,7 @@ These are `shk` decisions, not site requirements:
 
 ## Owner choices
 
-Decisions of the toolkit's owner, labeled `Owner:` in the rules:
+Decisions of the toolkit's owner, labeled `Owner:` or "(owner)" in the rules:
 
 1. Agent sessions on the workstation may drive Marlowe over the user's open
    master, the same as an agent running on Marlowe; the site's restriction on
