@@ -174,10 +174,16 @@ received SIGTERM, as a harness timeout sends it, and returned 255.
 
 Not observed: `--gpus` on `dev` (this repository never submits GPU work while
 it is developed or tested); what `--immediate` does when `dev` has no free
-resources; the per-user limits of `dev` that Slurm enforces; and a request
-above the 2-hour maximum, which by Slurm's documentation of `--time` is left
-pending, possibly indefinitely, instead of failing
-([srun reference](https://slurm.schedmd.com/srun.html#OPT_time)).
+resources; the per-user limits of `dev` that Slurm enforces; what `srun`
+prints when the allocation is granted at once (by Slurm's source, no line with
+the job id at default verbosity: the `queued and waiting` and
+`has been allocated` lines are only in `_wait_for_allocation_response` in
+[`src/api/allocate.c`](https://github.com/SchedMD/slurm/blob/slurm-25-11-9-1/src/api/allocate.c#L1491));
+and a request above the 2-hour maximum, which by Slurm's documentation of
+`--time` is left pending, possibly indefinitely, instead of failing
+([srun reference](https://slurm.schedmd.com/srun.html#OPT_time)), unless
+`EnforcePartLimits` is `ALL` or `ANY`, which rejects it at submission
+(Sherlock's value is [not determinable](#not-observed-live)).
 
 ## Holds, release and submission tokens
 

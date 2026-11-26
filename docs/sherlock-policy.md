@@ -131,15 +131,15 @@ How the rules files carry particular site rules:
   run's `srun` client is a light process on the login node that belongs to
   one blocking, attended call, never detached (`nohup`, a plain `&`, `tmux`,
   `screen`, `salloc --no-shell`). When the local call is lost or killed, the
-  job keeps running and its `srun` client stays on the login node until the
-  script ends or the time limit
-  ([observed](validation/observed-slurm.md#the-dev-partition)). The toolkit
-  reads the clause as asking that such a client be ended, not left behind:
-  keep `--time` tight, give the tool call a timeout above `--time` plus a
-  start allowance, and after a lost call wait 60 s, read the job once with
-  `shk status --job-id N` and end it with `scancel N`, the exact id (rule 6
-  stops jobs with `scancel`; `shk cancel` addresses only shk job names).
-  Work that does not fit a bounded call moves to a batch job.
+  job keeps running and its `srun` client stays on the login node
+  ([observed](validation/observed-slurm.md#the-dev-partition) 75 s after the
+  kill); unless cancelled, both would last until the script ends or the time
+  limit (inferred). The toolkit reads the clause as asking that such a client
+  be ended, not left behind: keep `--time` tight, give the tool call a timeout
+  above `--time` plus a start allowance, and after a lost call wait 60 s, read
+  the job once with `shk status --job-id N` and end it with `scancel N`, the
+  exact id (rule 6 stops jobs with `scancel`; `shk cancel` addresses only shk
+  job names). Work that does not fit a bounded call moves to a batch job.
 - Rule 10 says to "aggregate short tasks so that the work inside a job lasts
   at least 10 minutes, ideally 30". Both rules files repeat it with that verb
   for every job (the workstation file adds array tasks). The toolkit's
@@ -359,7 +359,8 @@ Pascal-era P100/P40/TITAN_Xp are outside the owner's default production choices.
 
 Site rule 8 permits explicitly requested scratch environments with a purge warning;
 the cluster summary honors that choice and does not impose an additional ban.
-Site rule 10 sets a polling floor and minimum useful job duration, not a maximum
-bundle length. Longer jobs and periodic capacity checks still obey partition limits,
-borrowed courtesy, at least 60 seconds between checks and the ban on polling loops;
-one bounded `shk wait` at a time keeps both by construction.
+Site rule 10 sets a polling floor and asks to aggregate short tasks into 10 useful
+minutes or more per job; it sets no maximum bundle length. Longer jobs and periodic
+capacity checks still obey partition limits, borrowed courtesy, at least 60 seconds
+between checks and the ban on polling loops; one bounded `shk wait` at a time keeps
+both by construction.
