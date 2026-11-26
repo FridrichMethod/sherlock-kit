@@ -41,7 +41,6 @@ sys.stderr.write(reply.get("err", ""))
 sys.exit(reply.get("rc", 0))
 """
 GPU_TRES = "cpu=1,mem=2G,node=1,billing=1,gres/gpu=1"
-SAME_CLASS = "normal,bigmem,dev,service,gpu,bioe,stat,btrippe,possu"  # not preemptible
 
 
 def record(job="44", *, array=None, task=None, throttle=None, **changes):
@@ -291,6 +290,38 @@ class UpdateCases:
         self.assertEqual((code, report["action"]), (0, "updated"), report)
         self.assertEqual(self.dispatches(), [["update", "JobId=44", "Partition=gpu"]])
 
+    def test_a_move_needs_only_the_requeue_flag_of_the_job_to_match_the_target(self):
+        # The current partitions are not checked: hns is not listed.
+        cases = (
+            ("owners", "1", "owners,gpu"),
+            ("owners,gpu", "1", "owners"),
+            ("owners,gpu", "1", "owners,gpu,bioe"),
+            ("owners", "0", "gpu"),
+            ("hns", "0", "normal"),
+        )
+        for now, requeue, target in cases:
+            with self.subTest(now=now, requeue=requeue, target=target):
+                self.fresh()
+                members = target.split(",")
+                self.scontrol({
+                    show(): [
+                        {"out": lines(record(Partition=now, Requeue=requeue))},
+                        {"out": lines(record(Partition=target, Requeue=requeue))},
+                    ],
+                    **{
+                        f"show partition {name} --oneliner": {"out": partition(name)}
+                        for name in members
+                    },
+                    f"update JobId=44 Partition={target}": {},
+                })
+                code, report = self.update("--partition", target)
+                self.assertEqual((code, report["action"]), (0, "updated"), report)
+                self.assertEqual(
+                    self.calls()[1:-2],
+                    [["show", "partition", name, "--oneliner"] for name in members],
+                )
+                self.assertEqual(self.dispatches(), [["update", "JobId=44", f"Partition={target}"]])
+
     def test_constraint_and_prefer_go_together_and_each_alone(self):
         allowed, preferred = (
             "(CPU_GEN:SKX|CPU_GEN:CLX)&IB:HDR",
@@ -434,14 +465,22 @@ class UpdateCases:
                 ("--throttle", "2"),
                 {"ArrayTaskThrottle": "2"},
             ),
+            (
+                "44",
+                record(Partition="gpu,owners", Requeue="1"),
+                ("--partition", "owners,gpu"),
+                {"Partition": "owners,gpu"},
+            ),
         )
         for job, found, argv, requested in cases:
             with self.subTest(argv=argv):
                 self.fresh()
                 self.scontrol({
                     show(job): {"out": lines(found)},
-                    "show partition gpu --oneliner": {"out": partition("gpu")},
-                    "show partition bioe --oneliner": {"out": partition("bioe")},
+                    **{
+                        f"show partition {name} --oneliner": {"out": partition(name)}
+                        for name in ("gpu", "bioe", "owners")
+                    },
                 })
                 code, report = self.update(*argv, job=job)
                 self.assertEqual((code, report["action"]), (0, "unchanged"), report)
@@ -457,6 +496,7 @@ class UpdateCases:
         failed = {"err": "slurm_load_jobs error: Invalid job id specified\n", "rc": 1}
         hetjob = record().replace("JobId=44 ", "JobId=44 HetJobId=44 HetJobOffset=0 ", 1)
         owners = {"Partition": "owners", "Requeue": "1"}
+        owners_gpu = {"Partition": "owners,gpu", "Requeue": "1"}
         cases = (
             ("ambiguous", {"out": ""}, ("--time", "1h")),
             ("ambiguous", {"out": "", "err": "scontrol: warning: a note\n"}, ("--time", "1h")),
@@ -496,8 +536,18 @@ class UpdateCases:
             ("time", {"out": lines(record())}, ("--time", "3h")),
             ("timemin", {"out": lines(record(TimeMin="01:30:00"))}, ("--time", "1h")),
             ("requeue", {"out": lines(record(**owners))}, ("--partition", "normal")),
-            ("preemptible", {"out": lines(record(Partition="owners"))}, ("--partition", "normal")),
-            ("preemptible", {"out": lines(record(Partition="hns"))}, ("--partition", "normal")),
+            ("requeue", {"out": lines(record(**owners_gpu))}, ("--partition", "gpu")),
+            ("requeue", {"out": lines(record(**owners_gpu))}, ("--partition", "gpu,bioe")),
+            (
+                "requeue",
+                {"out": lines(record(Partition="gpu,bioe"))},
+                ("--partition", "owners,gpu"),
+            ),
+            (  # refused, not unchanged: a --no-requeue job never returns to owners
+                "requeue",
+                {"out": lines(record(Partition="owners,gpu"))},
+                ("--partition", "owners,gpu"),
+            ),
             (
                 "gpus",
                 {"out": lines(record(Partition="gpu", ReqTRES=GPU_TRES))},
@@ -507,6 +557,11 @@ class UpdateCases:
                 "gpus",
                 {"out": lines(record(Partition="gpu", TresPerJob="gres/gpu:1"))},
                 ("--partition", "bigmem"),
+            ),
+            (
+                "gpus",
+                {"out": lines(record(**owners_gpu, ReqTRES=GPU_TRES))},
+                ("--partition", "normal,owners"),
             ),
             ("array", {"out": lines(record())}, ("--throttle", "2")),
         )
@@ -811,7 +866,7 @@ class UpdateOffline(UpdateFlow):
             (("--time", "1d"), 1, "spec_invalid"),
             (("--partition", "mystery"), 3, "unknown_partition"),
             (("--partition", "dev"), 3, "batch_not_allowed"),
-            (("--partition", "normal,owners"), 3, "partitions_incompatible"),
+            (("--partition", "owners,gpu,btrippe"), 3, "partitions_incompatible"),
             (("--partition", "normal,btrippe"), 3, "partitions_incompatible"),
             (("--partition", "normal,normal"), 1, "spec_invalid"),
             (("--partition", "btrippe"), 3, "borrowed_not_allowed"),
@@ -878,9 +933,11 @@ class UpdateReplies(UpdateFlow):
         borrowed = "btrippe,possu"
         cases = (
             (("--time", "90m"), ["time", "90"]),
-            (("--partition", "gpu,bioe"), ["partition", "gpu,bioe", "0", "1", SAME_CLASS]),
-            (("--partition", "owners"), ["partition", "owners", "1", "1", "owners"]),
-            (("--partition", "bigmem"), ["partition", "bigmem", "0", "0", SAME_CLASS]),
+            (("--partition", "gpu,bioe"), ["partition", "gpu,bioe", "0", "1"]),
+            (("--partition", "owners"), ["partition", "owners", "1", "1"]),
+            (("--partition", "bigmem"), ["partition", "bigmem", "0", "0"]),
+            (("--partition", "owners,gpu"), ["partition", "owners,gpu", "1", "1"]),
+            (("--partition", "normal,owners"), ["partition", "normal,owners", "1", "0"]),
             (("--constraint", "a|b"), ["features", "a|b", ""]),
             (("--prefer", "c&d", "--constraint", "a"), ["features", "a", "c&d"]),
             (("--throttle", "1000"), ["throttle", "1000", borrowed]),

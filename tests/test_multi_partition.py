@@ -134,31 +134,54 @@ class SetChecks(Case):
             ("gpu,btrippe", "btrippe"),
             ("possu,gpu", "possu"),
             ("btrippe,possu", "btrippe, possu"),
-            ("owners,btrippe", "btrippe"),  # borrowed before the flags
+            ("owners,btrippe", "btrippe"),
+            ("owners,gpu,possu", "possu"),
         ):
             with self.subTest(value=value):
                 error = self.refused(
                     3, "partitions_incompatible", partition=value, courtesy_ack=True
                 )
                 self.assertIn(f"include the borrowed {borrowed}:", error.message)
-                self.assertNotIn("preemptible=", error.message)
                 self.assertIn("submit incompatible partitions separately", error.hint)
 
-    def test_differing_preemptible_or_requeue_lists_every_member_with_both_values(self):
-        error = self.refused(3, "partitions_incompatible", partition="gpu,owners", gpus=1)
-        self.assertTrue(
-            error.message.endswith(
-                "gpu (preemptible=no, requeue=no), owners (preemptible=yes, requeue=yes)"
-            ),
-            error.message,
-        )
-        self.assertIn("submit incompatible partitions separately", error.hint)
-        error = self.refused(3, "partitions_incompatible", partition="owners,normal,bioe")
-        self.assertIn(
-            "owners (preemptible=yes, requeue=yes), normal (preemptible=no, requeue=no), "
-            "bioe (preemptible=no, requeue=no)",
-            error.message,
-        )
+    def test_a_set_with_owners_is_accepted_and_requeues_by_default(self):
+        for value in ("owners,gpu", "gpu,owners", "owners,gpu,bioe,stat"):
+            with self.subTest(value=value):
+                built = self.build(partition=value, gpus=1)
+                self.assertEqual(
+                    built.argv,
+                    [
+                        *HEAD,
+                        f"--partition={value}",
+                        "--cpus-per-task=2",
+                        "--requeue",
+                        "--open-mode=append",
+                        *TAIL,
+                        *SINGLE_LOGS,
+                        "-G",
+                        "1",
+                        EXPORT,
+                        "--dependency=singleton",
+                    ],
+                )
+                profile = built.profile
+                self.assertEqual(
+                    (
+                        profile.preemptible,
+                        profile.requeue,
+                        profile.borrowed,
+                        profile.gpus_allowed,
+                        profile.courtesy,
+                    ),
+                    (True, True, False, True, ""),
+                )
+                self.assertTrue(built.document["resources"]["requeue"])
+        kept = self.build(partition="owners,gpu", gpus=1, requeue=False).argv
+        self.assertIn("--no-requeue", kept)
+        self.assertNotIn("--open-mode=append", kept)
+        self.assertIn("--requeue", self.build(partition="normal,owners").argv)
+        error = self.refused(3, "gpus_not_allowed", partition="owners,normal", gpus=1)
+        self.assertEqual(error.message, "partition normal does not allow GPUs")
 
     def test_gpus_need_every_member_and_requeue_names_the_set(self):
         error = self.refused(3, "gpus_not_allowed", partition="normal,gpu", gpus=1)
@@ -458,6 +481,39 @@ class StatusByTask(Flow):
             (1, {"cpu_seconds": 30, "gpu_seconds": 0, "final": False}),
         )
 
+    def test_a_set_with_owners_that_runs_on_gpu_and_completes_has_no_anomaly(self):
+        job = self.submit_set(partition="owners,gpu")
+        self.assertIn("--requeue", self.slurm.calls("sbatch")[0]["argv"])
+        self.slurm.set(job, "RUNNING", partition="gpu")
+        current = self.current()
+        self.assertEqual(
+            (current["partition"], current["ran_on"], current["anomalies"]), ("gpu", ["gpu"], [])
+        )
+        self.slurm.set(job, "COMPLETED")
+        entry = self.entry()
+        self.assertEqual(entry["state"], "done")
+        self.assertEqual((entry["current"]["ran_on"], entry["current"]["anomalies"]), (["gpu"], []))
+
+    def test_preempted_on_owners_then_running_on_gpu_is_routine(self):
+        job = self.submit_set(partition="owners,gpu")
+        self.slurm.set(job, "RUNNING", partition="owners")
+        self.slurm.requeue(job)
+        self.slurm.set(job, "RUNNING", partition="gpu")
+        current = self.current()
+        self.assertEqual(
+            (current["ran_on"], current["anomalies"], current["max_restart"]),
+            (["gpu", "owners"], [], 1),
+        )
+
+    def test_a_preemption_on_gpu_of_a_set_with_owners_is_unexpected(self):
+        job = self.submit_set(partition="owners,gpu")
+        self.slurm.set(job, "RUNNING", partition="gpu")
+        self.slurm.requeue(job)
+        current = self.current(code=6)
+        self.assertEqual(
+            (current["anomalies"], current["ran_on"]), (["unexpected_preemption"], ["gpu"])
+        )
+
 
 class StatusWithoutSpec(Flow):
     """--all and --name read no spec: no ran_on, and a list of listed members is no anomaly."""
@@ -536,7 +592,7 @@ class DetailedStatus(DetailsFlow):
 
     def test_a_pending_restart_of_a_list_whose_earlier_attempt_is_not_visible(self):
         for partition, anomalies in (
-            ("gpu,bioe", ["unexpected_preemption"]),
+            ("gpu,bioe", []),
             ("owners,gpu", []),
             ("gpu,mystery", ["unknown_partition"]),
         ):
@@ -579,7 +635,7 @@ class Resolution(unittest.TestCase):
             self.assertEqual(current["ran_on"], ["bioe", "gpu"])
         self.assertEqual((forward["partition"], backward["partition"]), ("gpu", "gpu,mystery"))
 
-    def test_an_interrupted_list_counts_when_every_member_is_listed_and_not_preemptible(self):
+    def test_a_preempted_list_counts_when_every_member_is_listed_and_not_preemptible(self):
         for text, invariants, anomalies in (
             ("gpu,bioe", True, ["unexpected_preemption"]),
             ("normal,bigmem,service", True, ["unexpected_preemption"]),
@@ -588,10 +644,38 @@ class Resolution(unittest.TestCase):
             ("gpu,mystery", False, []),
         ):
             with self.subTest(text=text, invariants=invariants):
-                restart = a("500", "PENDING", restart=1, elapsed=0, cpus=0, tres="", partition=text)
-                current = self.current(acct=[restart], invariants=invariants)
+                preempted = a("500", "PREEMPTED", elapsed=30, partition=text)
+                current = self.current(acct=[preempted], invariants=invariants)
                 self.assertEqual(current["anomalies"], anomalies)
-                self.assertEqual(current["cost"]["cpu_seconds"], 0)
+                self.assertEqual(current["cost"]["cpu_seconds"], 60)
+        restart = a("500", "PENDING", restart=1, elapsed=0, cpus=0, tres="", partition="gpu,bioe")
+        self.assertEqual(self.current(acct=[restart])["anomalies"], [])
+
+    def test_only_a_preempted_attempt_on_a_non_preemptible_member_is_an_anomaly(self):
+        pending = a("500", "PENDING", 1, 0, 0, "", partition="owners,gpu")
+        node_fail = a("500", "NODE_FAIL", elapsed=30, partition="gpu")
+        lone = [a("500", "RUNNING", restart=1, partition="gpu")]
+        requeued = a("500", "REQUEUED", elapsed=30, partition="gpu")
+        for label, acct, anomalies in (
+            ("node failure", [node_fail, a("500", "RUNNING", 1, partition="owners")], []),
+            ("node failure, pending", [node_fail, pending], []),
+            ("requeued", [requeued, a("500", restart=1, partition="gpu")], []),
+            (
+                "preempted",
+                [a("500", "PREEMPTED", elapsed=30, partition="gpu"), pending],
+                ["unexpected_preemption"],
+            ),
+            ("lone restart", lone, []),
+        ):
+            for newest in (slurm.SpecFile(500, 1, ("owners", "gpu")), None):
+                with self.subTest(label, spec=newest is not None):
+                    current = self.current(acct=acct, newest=newest)
+                    self.assertEqual((current["anomalies"], current["max_restart"]), (anomalies, 1))
+        current = self.current(acct=lone, newest=slurm.SpecFile(500, 1, ("owners", "gpu")))
+        self.assertEqual(
+            (current["tasks"]["incomplete_history"], current["cost"]["final"], current["ran_on"]),
+            ([0], False, ["gpu"]),
+        )
 
     def test_a_preemption_is_judged_on_the_member_it_happened_on(self):
         for member, anomalies in (("bioe", ["unexpected_preemption"]), ("owners", [])):

@@ -2,14 +2,15 @@
 
 Nothing here touches the network. build() looks partitions up in the table of the site it gets
 (Sherlock by default), and raises ShkError with exit 3 for an unlisted
-partition or one without batch jobs (dev), an incompatible partition set
+partition or one without batch jobs (dev), a partition set with a borrowed member
 (partitions_incompatible), GPUs or requeue its profile forbids, a denylisted
 option (--comment only with a token) or a hetjob separator in the leading #SBATCH block, or a
 borrowed partition without --courtesy-ack; exit 1 (spec_invalid, script_unreadable) for bad
 memory, time, array, --after-ok or --submission-token grammar, a partition named twice in a set,
 --hold without a token, an unreadable script or one over 1 MiB, an empty --task or --campaign,
 or an empty or whitespace-only --constraint, --prefer or --signal (the usual cause is an unset
-shell variable). --partition P,P is a set of compatible partitions, passed to sbatch as given.
+shell variable). --partition P,P is a set of compatible partitions (listed, taking batch jobs,
+none borrowed), passed to sbatch as given; it requeues by default when a member allows requeue.
 A given --constraint, --prefer or --signal goes to sbatch unchanged (Slurm checks it); an omitted
 one adds nothing to the argv. Each --after-ok value must be one job id, since shk joins them into
 its own --dependency string, where a ',' or '?' would add clauses.
@@ -282,10 +283,6 @@ def _incompatible(message: str) -> ShkError:
     )
 
 
-def _yes(flag: bool) -> str:
-    return "yes" if flag else "no"
-
-
 def partition_request(
     value: str, site: sites.Site = sites.SHERLOCK
 ) -> tuple[partitions.Profile, tuple[partitions.Profile, ...] | None]:
@@ -294,9 +291,9 @@ def partition_request(
     Partitions are looked up in the site's table. A value without a comma is one listed
     partition that accepts batch jobs. A set is checked in this order: every member listed (the
     empty one included), none repeated, each accepting batch jobs, then compatible: no borrowed
-    member and one common preemptible and requeue value. Its combined profile is named by the
-    value as given, has those common values, gpus_allowed only when every member allows GPUs,
-    and no courtesy text.
+    member. Its combined profile is named by the value as given, is preemptible and allows
+    requeue when any member does, allows GPUs only when every member does, and has no courtesy
+    text.
     """
     if "," not in value:
         return _batch(partitions.profile(value, site)), None
@@ -313,17 +310,10 @@ def partition_request(
             f"partitions {value} include the borrowed {', '.join(borrowed)}: a borrowed "
             "partition is submitted alone, after shk occupancy and with --courtesy-ack"
         )
-    if len({(member.preemptible, member.requeue) for member in members}) > 1:
-        flags = ", ".join(
-            f"{member.name} (preemptible={_yes(member.preemptible)}, "
-            f"requeue={_yes(member.requeue)})"
-            for member in members
-        )
-        raise _incompatible(f"partitions {value} differ in preemptible or requeue: {flags}")
     combined = partitions.Profile(
         name=value,
-        preemptible=members[0].preemptible,
-        requeue=members[0].requeue,
+        preemptible=any(member.preemptible for member in members),
+        requeue=any(member.requeue for member in members),
         borrowed=False,
         gpus_allowed=all(member.gpus_allowed for member in members),
         batch=True,

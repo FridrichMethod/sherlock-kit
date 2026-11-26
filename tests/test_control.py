@@ -222,16 +222,22 @@ class SelfRequeue(ControlFlow):
 
     def test_free_text_comments_never_satisfy_the_policy_checks(self):
         self.allocation("80")
-        record = job_record(
-            "80", partition="normal", Requeue="0", token="note Partition=owners Requeue=1"
-        )
-        self.scontrol({
-            "listpids 80": {"out": listpids("80")},
-            "show job 80 --oneliner": {"out": record + "\n"},
-        })
-        code, report = self.requeue()
-        self.assertEqual((code, report["message"]), (3, "control: SHK_REFUSED partition"))
-        self.assertEqual(len(self.calls()), 2)
+        for partition, requeue, why in (("btrippe", "1", "partition"), ("normal", "0", "policy")):
+            with self.subTest(why=why):
+                start = len(self.calls())
+                record = job_record(
+                    "80",
+                    partition=partition,
+                    Requeue=requeue,
+                    token="note Partition=owners Requeue=1",
+                )
+                self.scontrol({
+                    "listpids 80": {"out": listpids("80")},
+                    "show job 80 --oneliner": {"out": record + "\n"},
+                })
+                code, report = self.requeue()
+                self.assertEqual((code, report["message"]), (3, f"control: SHK_REFUSED {why}"))
+                self.assertEqual(len(self.calls()) - start, 2)
 
     def test_record_must_be_this_physical_allocation(self):
         # Only the record whose JobId is the PID-verified physical id is ever acted on.
@@ -327,9 +333,33 @@ class SelfRequeue(ControlFlow):
                 self.assertEqual((code, report["error"]), (3, "self_only"))
         self.assertEqual(self.calls(), [])
 
-    def test_requeue_follows_the_profile_requeue_flag(self):
+    def test_requeue_works_on_every_listed_partition_that_is_not_borrowed(self):
+        self.allocation("44")
+        replies = {"listpids 44": {"out": listpids("44")}, "requeue 44": {}}
+
+        def on(partition, requeue="1"):
+            found = job_record("44", partition=partition, Requeue=requeue)
+            self.scontrol({**replies, "show job 44 --oneliner": {"out": found + "\n"}})
+            return self.requeue()
+
+        code, report = on("gpu")
+        self.assertEqual((code, report["action"]), (0, "requeued"))
+        self.assertEqual(self.calls()[-1], ["requeue", "44"])
+        for partition, requeue, why in (
+            ("gpu", "0", "policy"),
+            ("btrippe", "1", "partition"),
+            ("possu", "1", "partition"),
+            ("hns", "1", "partition"),
+        ):
+            with self.subTest(partition=partition, requeue=requeue):
+                start = len(self.calls())
+                code, report = on(partition, requeue)
+                self.assertEqual((code, report["message"]), (3, f"control: SHK_REFUSED {why}"))
+                self.assertEqual(len(self.calls()) - start, 2)
+
+    def test_requeue_follows_the_profile_borrowed_flag(self):
         table = {
-            name: partitions.Profile(name, False, name == "normal", False, False, True, "")
+            name: partitions.Profile(name, False, False, name == "owners", False, True, "")
             for name in ("normal", "owners")
         }
         self.allocation("44")

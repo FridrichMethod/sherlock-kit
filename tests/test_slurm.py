@@ -387,7 +387,7 @@ class ResolveTests(unittest.TestCase):
 
 
 class InterruptedPartitionTests(unittest.TestCase):
-    """A preemption or restart is judged on the partition of the attempt it interrupted."""
+    """A PREEMPTED attempt is judged on the partition it ran on; another restart is no anomaly."""
 
     def test_preemption_on_owners_before_a_restart_on_normal_is_routine(self):
         moved = current(
@@ -396,15 +396,20 @@ class InterruptedPartitionTests(unittest.TestCase):
         )
         self.assertEqual((moved["max_restart"], moved["anomalies"]), (1, []))
 
-    def test_restarts_on_a_non_preemptible_partition_stay_unexpected(self):
-        node_fail = current(acct=[a("500", "NODE_FAIL", elapsed=30), a("500", restart=1)])
-        self.assertEqual(node_fail["anomalies"], ["unexpected_preemption"])
-        aged_out = current(acct=[a("500", restart=1)])
-        self.assertEqual(aged_out["anomalies"], ["unexpected_preemption"])
-        back = current(
-            acct=[a("500", "PREEMPTED", elapsed=30), a("500", restart=1, partition="owners")]
-        )
-        self.assertEqual(back["anomalies"], ["unexpected_preemption"])
+    def test_only_a_preemption_on_a_non_preemptible_partition_is_unexpected(self):
+        for label, acct, anomalies in (
+            ("node failure", [a("500", "NODE_FAIL", elapsed=30), a("500", restart=1)], []),
+            ("requeued", [a("500", "REQUEUED", elapsed=30), a("500", restart=1)], []),
+            ("aged out", [a("500", restart=1)], []),
+            (
+                "preempted",
+                [a("500", "PREEMPTED", elapsed=30), a("500", restart=1, partition="owners")],
+                ["unexpected_preemption"],
+            ),
+        ):
+            with self.subTest(label):
+                found = current(acct=acct)
+                self.assertEqual((found["max_restart"], found["anomalies"]), (1, anomalies))
 
 
 class FinalHistoryTests(unittest.TestCase):
