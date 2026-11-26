@@ -266,7 +266,8 @@ def _batch(profile: partitions.Profile) -> partitions.Profile:
             EXIT_REFUSED,
             "batch_not_allowed",
             f"partition {profile.name} does not accept batch jobs: {profile.courtesy}",
-            hint="use sh_dev or salloc there, or submit to a batch partition such as normal",
+            hint="run one command there with srun --partition=dev --time=MIN CMD "
+            "(sh_dev opens an interactive shell), or use a batch partition such as normal",
         )
     return profile
 
