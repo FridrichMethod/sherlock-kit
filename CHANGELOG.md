@@ -26,18 +26,19 @@ Guidance:
   compiling and environment builds, `--dry-run` and `--preflight` as the
   checks that create no job, and one short authorized `preempt` job for a GPU
   smoke test.
-- The Sherlock rules files name the boundary: checks of seconds and small
-  pure-Python installs on a login node; compiling, heavy installs and tests
-  beyond seconds in jobs, quick ones as one attended `dev` run. They word the
-  ten-minute line as the site does: aggregate short tasks so that a job holds
-  at least 10 useful minutes. One bundled `dev` run for a task's checks may
-  take less; a planned series of short runs, a retry loop and padding are
-  what the clause forbids. That is the toolkit's reading, recorded in the
-  Sherlock policy guide. To stay within the 7 KiB cap the workstation file
-  leaves the field groups of `shk update` to the skill and the command
-  reference, both files drop "Sherlock's own limits apply." from the `bigmem`
-  and `service` profiles, and the cluster file drops the pointer to
-  `scontrol show job`.
+- The Sherlock workstation rules allow checks of seconds and small
+  pure-Python installs on a login node over `sherlock-plain`. Both Sherlock
+  rules files send compiling, heavy installs and tests beyond seconds to jobs,
+  quick ones as one `dev` run (attended, in the workstation file's words).
+  They word the ten-minute line as the site does: aggregate short tasks so
+  that a job holds at least 10 useful minutes. One bundled `dev` run for a
+  task's checks may take less; a planned series of short runs, a retry loop
+  and padding are what the clause forbids. That is the toolkit's reading,
+  recorded in the Sherlock policy guide. To stay within the 7 KiB cap the
+  workstation file leaves the field groups of `shk update` to the skill and
+  the command reference, both files drop "Sherlock's own limits apply." from
+  the `bigmem` and `service` profiles, and the cluster file drops the pointer
+  to `scontrol show job`.
 - The Marlowe workstation rules allow light checks and environment builds on
   a login node over the open master, an owner decision, as the Marlowe
   cluster rules do for a session on a login node.
