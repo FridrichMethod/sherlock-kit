@@ -12,7 +12,7 @@ recommended practice.
 
 The rules follow Sherlock's agent instructions, `/etc/agents/AGENTS.md` and the
 four topic files beside it, as last modified on the dates below. Both rules
-files carry `Reviewed 2026-11-25`, the date of their last comparison with those
+files carry `Reviewed 2026-11-27`, the date of their last comparison with those
 files; `tests/test_release_metadata.py` pins that date.
 
 | File | Last modified | Topics |
@@ -42,7 +42,7 @@ update the table above and the sections below.
 | 2 Job requests | Jobs | Slurm |
 | 3 Storage defaults | Data | Filesystems |
 | 4 Purge | Data | Filesystems |
-| 5 Access controls | Connection | Where you are |
+| 5 Access controls | Connection, Jobs | Where you are, Slurm |
 | 6 Authorized access only | Data, Jobs | Filesystems, Slurm |
 | 7 Data risk | Data | Filesystems |
 | 8 Software installs | n/a | Login nodes and software |
@@ -163,6 +163,33 @@ How the rules files carry particular site rules:
   suspension. `policy.md` repeats it under "Sanctions" and "Processes and
   cleanup". Both rules files carry the ban and forbid sharing credentials or
   sessions.
+- Rule 5 also names the way to a compute node: "To reach a compute node,
+  `ssh` to it from a login node while you have a job running there." Both
+  rules files carry it for the node of an own running job, the workstation
+  file as an item under Jobs and the cluster file in the cancellation item
+  under Slurm, with limits taken from other numbered rules. Rule 6 allows
+  inspecting only one's own processes and stops jobs with `scancel`, "never
+  by killing processes on compute nodes". Rule 10 forbids a `watch` or a
+  shell loop "polling the scheduler, a filesystem or a log file". Rule 1
+  forbids a login-node process that outlives the session, which the `ssh`
+  client of a session left open on a node would be. Hence "bounded", "no
+  loops" and, in the workstation file, "never kill there"; the cluster file
+  forbids killing compute processes in the same item. From a workstation the
+  call has two hops: bounded noninteractive OpenSSH over the control master
+  to a login node, which the Connection section allows, and `ssh` from
+  there, as the rule words it. `slurm.md` says that work beyond the
+  login-node list "runs on compute nodes, reached through Slurm only"; that
+  sentence is recommended practice about where work runs, and the numbered
+  rule names `ssh` for a node that already runs the user's job. "Light"
+  rests on the site's human documentation (recommended practice): the session
+  "will be attached to your running job", what it uses counts "towards your
+  job's resource limits", and a process that takes much memory there may hit
+  the job's memory limit, "which will trigger its termination".
+  [Observed](validation/observed-slurm.md#a-node-with-a-running-job): a login
+  node reaches the node without a prompt, and the session runs in the job's
+  cgroups and ends with the job. The skill's section "Inspecting a running
+  job" holds the command for both callers, what the session's shell provides
+  and what is not observed.
 - The site's numbered ownership rule permits stopping only one's own processes
   and uses scheduler cancellation for jobs; it imposes no per-job user consent.
   Routine exact cancellation inside an authorized task therefore retains the
@@ -220,9 +247,17 @@ stated elsewhere:
 - a statement that everything but the numbered rules is recommended practice,
   which "only numbered rules are requirements" implies;
 - the `sacct` field list, which the site's `slurm.md` gives;
-- in the cluster file, `shk doctor --remote`, the note that `shk doctor` is
-  read-only and the `[tool.sherlock-kit]` configuration line that the
-  workstation file has; the skill covers all three;
+- the names of the four topic files, which `AGENTS.md` lists under "Read
+  first, by situation"; both files say to read the relevant topic files
+  beside it;
+- in the cluster file, `shk doctor --remote` and the note that `shk doctor`
+  is read-only, and in both files where the configuration is read from
+  (`[tool.sherlock-kit]` in `pyproject.toml`, `sherlock-kit.toml`,
+  `--project-dir`); the skill covers all three, and the hint of a
+  `config_required` refusal names the table and the option;
+- in the cluster file, the site's examples of scheduling an agent session
+  (`scrontab`, `--begin`, a job that resubmits itself), which rule 10 lists
+  and the waiting item under "Where each site rule lands" quotes;
 - in the workstation file, a separate item saying that `owners` jobs must
   checkpoint periodically, which the `owners` profile and the skill state, and
   the "UID/name-scoped" qualifier for `shk cancel`, which has no other scope;
@@ -344,6 +379,10 @@ These are `shk` decisions, labeled as such in the rules, not site requirements:
   backs off to 30 minutes while nothing runs or changes, and reads by hand
   outside a wait are rare, ideally 10 minutes or more apart. These are
   owner-approved defaults.
+- A session on the node of a running job is for bounded, light inspection
+  and debugging only. The site's human documentation also allows running
+  "additional processes" there, inside the job's limits; the toolkit leaves
+  work to the job script.
 - `shk` never logs in (master-only preflight) and never retries a mutation.
 - `push` and `pull` are refused on Sherlock: transfers start outside.
 - No GPU work while developing or testing sherlock-kit itself.

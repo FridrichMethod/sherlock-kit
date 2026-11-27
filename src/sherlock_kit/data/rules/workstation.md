@@ -1,6 +1,6 @@
 ## Sherlock from this workstation
 
-Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are requirements. At session start and after compaction, run `shk doctor`, then read it and the task's topic files (`storage.md`, `slurm.md`, `software.md`, `policy.md`) over the master: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md`. Never authenticate. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-25.
+Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are requirements. At session start and after compaction, run `shk doctor`, then read it and the task's topic files beside it over the master: `ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain cat /etc/agents/AGENTS.md`. Never authenticate. Keep this in handoffs; memory is no substitute; never filter reminders. Reviewed 2026-11-27.
 
 ### Connection
 - Use `shk` or bounded noninteractive OpenSSH over the user's masters: `sherlock-plain` for light commands, small pure-Python installs and checks of seconds, `sherlock-dtn` for transfers. Heavy work, compiling, heavy installs and tests beyond seconds run in jobs: quick ones as one attended `dev` run, never detached or looped, else `shk submit`.
@@ -14,8 +14,8 @@ Sherlock's `/etc/agents/AGENTS.md` takes precedence; only its numbered rules are
 - Names derive from project/campaign/task. Submit refuses live duplicates and finished tasks without `--resubmit "reason"`; diagnose failures first. Exit 5 (unknown outcome): never resubmit blind. Exit 6: stop and report.
 - After a submit, end the turn or run one bounded `shk wait --task T --timeout DUR` in the background (its exit wakes you); act on `wait.outcome`. Batch status/resources reads at least 60 s apart (`--all`), ideally 10+ min; read status only when needed (wait exited, user asks, exit 5 `next` due). No `watch`/polling loops; never detach a wait or schedule/re-prompt agent/LLM sessions. Prefer `--after-ok`. Aggregate short tasks: 10+ useful minutes per job/array task, ideally 30; never pad with sleep.
 - Cancel exact verified own jobs within an authorized task and explain why. Ask for unclear ownership/scope, unrelated/broad cancellation or material irreversible loss. Never cancel all user jobs.
+- Own running job: bounded light `ssh` to its node from a login node to inspect/debug own processes; no loops, never kill there.
 - Bounded deterministic controllers may submit/poll inside allocations with `shk --executor local`. Never submit GPU work while developing/testing sherlock-kit.
-- Config: nearest `pyproject.toml` `[tool.sherlock-kit]` or `sherlock-kit.toml`, else `--project-dir DIR`.
 
 ### Data
 - `shk push`/`shk pull` use the DTN (Globus for large/cross-site data); never run commands there. Pull verifies `SHA256SUMS`, runs `--validate NAME`, then promotes. Push keeps mtimes: old inputs may already be purge-eligible, so stage just before use.

@@ -45,6 +45,11 @@ reproduced here;
   workstation over the control master and created no job;
   [partition tiers and preemption](#partition-tiers-and-preemption) records
   them.
+- On 2026-11-27, one CPU-only run on `dev`, authorized by the owner, held
+  1 CPU and 1 GB on one node for three minutes while two `ssh` calls from a
+  workstation reached that node through a login node, over the control
+  master; [a node with a running job](#a-node-with-a-running-job) records
+  them.
 - A job pattern that worked: `#!/bin/bash -l`, no `#SBATCH` lines,
   `module load ...`, the toolkit wheel unzipped into `$L_SCRATCH_JOB` and put
   on `PYTHONPATH`, thread variables set to 1, results written into the run
@@ -190,6 +195,68 @@ and a request above the 2-hour maximum, which by Slurm's documentation of
 ([srun reference](https://slurm.schedmd.com/srun.html#OPT_time)), unless
 `EnforcePartLimits` is `ALL` or `ANY`, which rejects it at submission
 (Sherlock's value is [not determinable](#not-observed-live)).
+
+## A node with a running job
+
+Site rule 5 names the way to a compute node: `ssh` to it from a login node
+while a job of the user runs there. On 2026-11-27 one CPU-only run on `dev`
+(1 CPU, 1 GB, `--time=5`, the `srun` form of
+[the dev partition](#the-dev-partition)) printed its job id, its node and
+`$L_SCRATCH_JOB`, wrote a marker file into that directory and slept 170 s.
+While it ran, two calls from a workstation reached its node through the login
+node of the control master, each with a local script on stdin:
+
+```sh
+ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain \
+  'ssh -oBatchMode=yes -oConnectTimeout=20 NODE bash -s -- ARG' < look.sh
+```
+
+The first call printed facts about its session and ended with `exit 3`:
+
+- The login node reached the node without a password or a prompt, with
+  BatchMode on both hops. The whole call took 0.5 s, and stderr held only the
+  site's banner line for automated tools.
+- The local `ssh` returned 3, the script's exit status.
+- The session had no tty and ran a non-login, non-interactive `bash`.
+  `SLURM_JOB_ID` was set to the job's id and was the only `SLURM_` variable.
+  `module` and `ml` were not defined, and `$SCRATCH`, `$GROUP_HOME`,
+  `$L_SCRATCH`, `$L_SCRATCH_JOB` and `TMPDIR` were unset; `squeue` resolved
+  under `/usr/bin`. `bash -lc` inside the session made `module` a function and
+  set `$SCRATCH`; it kept `SLURM_JOB_ID` and left `$L_SCRATCH_JOB` unset.
+- The session's processes were in the job's cgroups, under
+  `/slurm/uid_<uid>/job_N/step_extern` for the freezer, memory, devices,
+  cpuset and cpu controllers, while the job's own step was under
+  `/slurm/uid_<uid>/job_N/step_0`. `nproc` printed 1, and the allowed CPU list
+  was the job's one CPU: what a session runs shares the job's allocation.
+- `ps -u <uid>` listed the job's own processes, the step's shell and its
+  children, beside those of the session.
+- The node-local job directory was listed and its marker file read by the
+  path that the job had printed for `$L_SCRATCH_JOB`.
+- The node, a CPU node of `dev`, has no `nvidia-smi`.
+
+The second call asked to sleep until 20 s after the end of the job's script:
+
+- The job's script ended at 11:20:42 UTC, and accounting gives 11:20:43 as
+  the job's end. The session was closed with it: the local `ssh` returned at
+  11:20:43 with 255 and `Connection to NODE closed by remote host.` on
+  stderr, and the line after the sleep was never printed. A session does not
+  outlive its job.
+- `shk status --job-id N --details`, read once 21 s later, showed the job
+  `COMPLETED` with exit code `0:0` after 178 s; the two sessions changed
+  neither its state nor its exit code.
+
+Not observed: a node without a job of the user, which by the site's
+documentation refuses the connection with
+`Access denied by pam_slurm_adopt: you have no active jobs on this node`; a
+node that runs two jobs of the user (by
+[Slurm's `pam_slurm_adopt` documentation](https://slurm.schedmd.com/pam_slurm_adopt.html)
+a connection from a login node, whose source job the module cannot locate,
+falls under `action_unknown`, and its default `newest` picks the newest job
+on the node; Sherlock's setting was not read); a batch job instead of an
+`srun` allocation; a multi-node job; GPUs in a session, since this repository
+never submits GPU work while it is developed or tested; a session that
+exceeds the job's memory; `ssh` from one compute node to another; and
+`srun --jobid` as another way into a running job.
 
 ## Holds, release and submission tokens
 
