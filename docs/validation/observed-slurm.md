@@ -45,8 +45,8 @@ reproduced here;
   workstation over the control master and created no job;
   [partition tiers and preemption](#partition-tiers-and-preemption) records
   them.
-- On 2026-11-27, one CPU-only run on `dev`, 1 CPU and 1 GB and authorized by
-  the owner, held a node for three minutes while two `ssh` calls from a
+- On 2026-11-27, one CPU-only run on `dev`, authorized by the owner, held
+  1 CPU and 1 GB on one node for three minutes while two `ssh` calls from a
   workstation reached that node through a login node, over the control
   master; [a node with a running job](#a-node-with-a-running-job) records
   them.
