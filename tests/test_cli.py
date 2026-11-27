@@ -25,7 +25,7 @@ from sherlock_kit.errors import Outcome, ShkError
 
 CHECK = ["-O", "check", "-oBatchMode=yes"]
 VERSION = (
-    r"sherlock-kit 0\.12\.0 \((git [0-9a-f]+|editable .+|submodule .+|source .+|unknown)\)\n\Z"
+    r"sherlock-kit 0\.13\.0 \((git [0-9a-f]+|editable .+|submodule .+|source .+|unknown)\)\n\Z"
 )
 
 
