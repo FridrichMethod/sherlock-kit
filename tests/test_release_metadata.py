@@ -234,7 +234,7 @@ class RulesFormatTests(unittest.TestCase):
                     self.assertNotIn("<!--", text)
                     self.assertNotIn("@", text)
                     self.assertNotRegex(text, r"\]\((?!https://)", "no relative links")
-                    reviewed = "2026-11-25"
+                    reviewed = {"Sherlock": "2026-11-27", "Marlowe": "2026-11-25"}[display]
                     self.assertIn(f"Reviewed {reviewed}", text)
 
     def test_rules_headings(self):

@@ -186,6 +186,26 @@ Run it from an agent so that it costs no turns and still ends by itself:
 - Never detach a wait so that it outlives the session (`nohup`, a plain `&`, `setsid`, `disown`, a `tmux` or `screen` session left running, cron), never use it to restart or re-prompt an agent, and never schedule a later agent session. On a Sherlock login node run it only in the attended session; inside an allocation a bounded deterministic controller may run `shk --executor local wait`.
 - Between stages prefer `--after-ok` dependencies to waiting.
 
+## Inspecting a running job
+
+Site rule 5 allows it: "To reach a compute node, `ssh` to it from a login node while you have a job running there." Use it for what the logs in the run directory and `shk status` cannot show: GPU load and memory, a process that hangs, files in the node-local job directory. The node is the `nodes` field of the job's record under `details.queue` (or `details.accounting`) in `shk status --task T --details` (for a multi-node job a host list expression).
+
+From a workstation the look goes over the master with the local script on stdin (first line); on a login node run the second line.
+
+```sh
+ssh -oBatchMode=yes -oProxyCommand=false sherlock-plain \
+  'ssh -oBatchMode=yes -oConnectTimeout=20 NODE bash -s' < look.sh
+ssh -oBatchMode=yes -oConnectTimeout=20 NODE bash -s < look.sh
+```
+
+- One bounded call per look, with every check in the one script and a tool-call timeout: `nvidia-smi`, `ps -u "$(id -u)" -o pid,etime,pcpu,rss,args`, a stack dump of your own process, `ls` or `tail` in the node-local job directory. Never `watch`, a loop, a session left open, `tmux` or `screen` (site rules 1 and 10). Look again only when something needs it, never on a schedule.
+- Light work only. The session's processes run inside the job's own allocation (observed: the job's cgroups, and `nproc` 1 for a 1-CPU job), and by the site's documentation what they use counts toward the job's limits, so a memory-heavy command there can end the job. That documentation also allows running additional processes there; the toolkit keeps the session to inspection and debugging, and work belongs in the job script.
+- Inspect only your own processes and never kill one there (site rule 6): end a job with `shk cancel`.
+- The session is a non-login shell without a tty (observed). `SLURM_JOB_ID` is set, to the job the session joined, and is its only `SLURM_` variable; `module`, `ml`, `$SCRATCH`, `$GROUP_HOME`, `$L_SCRATCH_JOB` and `TMPDIR` are not set. `bash -l` there adds `module` and `$SCRATCH`, not `$L_SCRATCH_JOB`: have the job script print `$L_SCRATCH_JOB` and address that directory by its path, which the session can list and read.
+- The login node reached the node without a password or a prompt, and the script's exit status is the call's (observed).
+- The session ends with the job: one that was still open when the job ended was closed within about a second, and the local call returned 255 with `Connection to NODE closed by remote host.` (observed). A 255 during a look may therefore mean that the job ended: read `shk status` once, at the usual cadence, before anything else.
+- Not observed: GPUs in a session (the kit never submits GPU work while it is developed; the session sits in the job's device cgroup, so `nvidia-smi` should list only that job's GPUs), a multi-node job, and a node that runs two of your jobs. For the last, by Slurm's `pam_slurm_adopt` documentation a session from a login node joins the newest job on the node unless the site configures otherwise; `SLURM_JOB_ID` in the session says which job it joined. Without a job on the node the site refuses the connection (`Access denied by pam_slurm_adopt: you have no active jobs on this node`, site documentation): never try a node that the job's record does not name.
+
 ## Controller evidence and exact mutations
 
 - `shk resources --partition owners` (repeatable partition) reads node state, features and configured minus allocated CPU/memory/GPU capacity per node. Count free capacity only on nodes with `schedulable: true`: DOWN, DRAIN, NOT_RESPONDING and similar states make it false, and null means unknown. Missing facts are null and `complete: false`; a failed read is exit 1 `malformed_read` (retry once after 60 s); OS FreeMem never substitutes. It is a snapshot, not a reservation. Large partitions (`owners`: about 1700 nodes) return megabytes of JSON: filter it rather than reading it whole.
@@ -240,6 +260,7 @@ On a login node or inside an allocation `shk` uses the local executor (no ssh); 
 - Authenticate for the user, retry a login in a loop, or store passwords or MFA secrets.
 - Run raw `sbatch`, `scancel` or `squeue` loops over ssh when `shk` covers the task, or `scancel -u $USER`.
 - Poll with `watch` or a `shk status` loop, detach `shk wait` so that it outlives the session, or use a wait to re-prompt an agent.
+- Kill a process on a compute node, or loop or keep open an `ssh` session to one.
 - Change a job with raw `scontrol update`, over ssh or on Sherlock, instead of `shk update`.
 - Resubmit after exit 5 or a failure without checking `shk status` and finding the cause.
 - Wrap `shk` in an outer timeout shorter than its own: if `shk` itself is killed, a mutation in flight is outcome unknown and a transfer may still be running.
