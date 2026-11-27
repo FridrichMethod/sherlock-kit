@@ -42,9 +42,10 @@ Guidance:
 - The Marlowe workstation rules allow light checks and environment builds on
   a login node over the open master, an owner decision, as the Marlowe
   cluster rules do for a session on a login node.
-- The rules files of both sites carry `Reviewed 2026-11-25`, after a re-read
-  of Sherlock's five site files and of every page in the Marlowe policy
-  guide's source table, none of which had changed.
+- The Sherlock rules files carry `Reviewed 2026-11-27` and the Marlowe rules
+  files `Reviewed 2026-11-25`, each after a re-read of its site's sources
+  (Sherlock's five site files; every page in the Marlowe policy guide's
+  source table), none of which had changed.
 - The rules files and both skills changed, so `shk install-skill --check`
   reports installed copies as stale; run `shk install-skill` again, with the
   same `--rules` (and `--site marlowe` for the Marlowe copies), to refresh
@@ -149,6 +150,47 @@ Documentation:
   records that combining `owners` with other partitions and the department
   terms are owner choices, beside what the site says about `owners`. The
   command reference, the design guide and the campaign guide follow.
+
+Inspecting a running job: site rule 5 lets a tool reach a compute node by
+`ssh` from a login node while a job of the user runs there. This guidance
+changes no command, option, reply key, exit code, hint, profile text or
+remote program.
+
+Guidance:
+
+- The Sherlock skill gains a section "Inspecting a running job": the command
+  for a workstation (two hops: over the open master to a login node, and
+  `ssh` from there, with a local script on stdin) and for a login node, what
+  one look may run (own processes, the node-local job directory), what the
+  session's shell provides and what is not observed. The session shares the
+  job's allocation and ends with the job, so a look stays light, and an exit
+  status 255 during a look may mean that the job ended. The skill's "Never"
+  list adds killing a process on a compute node and a looped or open-ended
+  `ssh` session to one.
+- Both Sherlock rules files allow a bounded, light `ssh` from a login node to
+  the node of an own running job, with no loops. The workstation file names
+  the purpose, to inspect or debug own processes, and forbids killing
+  processes there, as the cluster file already did. Keeping the session to
+  inspection and debugging is the toolkit's choice: the site's documentation
+  also allows running additional processes there.
+- To stay within the 7 KiB cap, both files name the topic files only as
+  "topic files beside it" (`AGENTS.md` lists the four), the workstation file
+  drops the line on where the configuration is read from (the skill's
+  "Configuration" section and the hint of a `config_required` refusal give
+  it), and the cluster file drops the examples of scheduling an agent session
+  (scrontab, begin, self-resubmission), which site rule 10 lists.
+- Marlowe: no file changes; this guidance is Sherlock's.
+
+Documentation:
+
+- The Sherlock observation guide gains "A node with a running job": one
+  CPU-only `dev` run on 2026-11-27 during which a login node reached the
+  job's node without a prompt, the session ran in the job's cgroups on the
+  job's one CPU, a script's exit status came back through both hops, and a
+  session still open at the job's end was closed with it. The Sherlock policy
+  guide records where the second half of rule 5 lands, the limits taken from
+  rules 1, 6 and 10, the phrases left out for the cap and the toolkit's
+  choice.
 
 ## 0.12.0
 
