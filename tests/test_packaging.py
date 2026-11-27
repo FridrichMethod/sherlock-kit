@@ -34,7 +34,7 @@ CONTENT = (
     "rules/marlowe-cluster.md",
     "skills/sherlock-kit-marlowe/SKILL.md",
 )
-VERSION = "sherlock-kit 0.12.0 "
+VERSION = "sherlock-kit 0.13.0 "
 
 
 class HeadCase(unittest.TestCase):
@@ -280,7 +280,7 @@ class BuildTests(HeadCase):
         self.assertFalse([
             n
             for n in names
-            if not n.startswith(("sherlock_kit/", "sherlock_kit-0.12.0.dist-info/"))
+            if not n.startswith(("sherlock_kit/", "sherlock_kit-0.13.0.dist-info/"))
         ])
         with tarfile.open(sdist) as bundle:
             members = {m.name.split("/", 1)[1]: m for m in bundle.getmembers() if "/" in m.name}

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
-__version__ = "0.12.0"
+__version__ = "0.13.0"
 DIST = "sherlock-kit"
 
 

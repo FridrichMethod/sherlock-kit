@@ -19,7 +19,7 @@ serves. Neither replaces the other, and neither holds secrets.
   ```toml
   [project]
   dependencies = [
-      "sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.12.0",
+      "sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.13.0",
   ]
   ```
 
@@ -74,11 +74,11 @@ serves. Neither replaces the other, and neither holds secrets.
 Install from a release tag, as below; `main` can be ahead of the latest release.
 Older installs should follow their own `shk <command> --help`.
 
-`shk --version` prints `sherlock-kit 0.12.0 (FORM)`, where FORM names the install:
+`shk --version` prints `sherlock-kit 0.13.0 (FORM)`, where FORM names the install:
 
 | Form | How | FORM |
 |---|---|---|
-| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.12.0'`, or a uv source with `tag = "v0.12.0"` | `git <commit>` |
+| Project environment (recommended) | `pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.13.0'`, or a uv source with `tag = "v0.13.0"` | `git <commit>` |
 | Submodule | a consumer checks out this repository as a Git submodule and invokes its stdlib-only `bin/shk` entry point | `submodule <path>` |
 | Editable | `pip install -e <path>` into an environment you choose; it follows that tree | `editable <path>` |
 
@@ -89,7 +89,7 @@ Installation and updates belong to the project; no global launcher is required.
 
 ```toml
 [tool.uv.sources]
-sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.12.0" }
+sherlock-kit = { git = "https://github.com/FridrichMethod/sherlock-kit", tag = "v0.13.0" }
 ```
 
 ## Environments on Sherlock
@@ -119,7 +119,7 @@ beforehand:
 
 ```sh
 python3 -m venv "$GROUP_HOME/demo/.venv-shk"
-"$GROUP_HOME/demo/.venv-shk/bin/python" -m pip install --no-index --no-deps /path/to/sherlock_kit-0.12.0-py3-none-any.whl
+"$GROUP_HOME/demo/.venv-shk/bin/python" -m pip install --no-index --no-deps /path/to/sherlock_kit-0.13.0-py3-none-any.whl
 "$GROUP_HOME/demo/.venv-shk/bin/shk" --version
 ```
 

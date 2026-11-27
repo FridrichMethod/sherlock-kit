@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.13.0
+
+This release lets `owners` share a `--partition` set with other partitions
+and adds guidance for short work and for inspecting a running job. No
+command, option or reply key is added or removed, and the `sbatch` argv of
+every request that 0.12.0 accepted is that of 0.12.0. What `submit`,
+`update`, `status`, `wait` and `requeue --self` accept, refuse or report
+differently is listed under "Submit" and "Update, status and requeue
+(compatibility)"; the texts that replies quote and that changed are listed
+under "Visible on Sherlock" and "Policy and guidance". All four rules files
+and both skills changed. The Marlowe surface stays provisional and may change
+in a later release.
 
 Guidance for short work: a check of seconds, an environment build, a compile,
 a CPU or GPU test of a few minutes and a project's test suite. This guidance

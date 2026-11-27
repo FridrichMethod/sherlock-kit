@@ -62,7 +62,7 @@ class VersionTests(TempCase):
             check=True,
         ).stdout
         self.assertRegex(out, VERSION)
-        self.assertEqual(sherlock_kit.__version__, "0.12.0")
+        self.assertEqual(sherlock_kit.__version__, "0.13.0")
 
     def test_provenance_forms(self):
         tree = self.tmp / "tree"
@@ -111,7 +111,7 @@ class VersionTests(TempCase):
             text=True,
             check=True,
         ).stdout
-        self.assertEqual(out, f"sherlock-kit 0.12.0 (source {repo})\n")
+        self.assertEqual(out, f"sherlock-kit 0.13.0 (source {repo})\n")
         self.assertEqual(list(repo.rglob("__pycache__")), [])
 
     def test_bin_shk_refuses_old_python(self):

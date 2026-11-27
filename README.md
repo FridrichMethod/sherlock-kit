@@ -79,17 +79,17 @@ or newer; `main` can be ahead of the latest release):
 ```toml
 [project]
 dependencies = [
-    "sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.12.0",
+    "sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.13.0",
 ]
 ```
 
 or install it into the project environment directly:
 
 ```sh
-pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.12.0'
+pip install 'sherlock-kit @ git+https://github.com/FridrichMethod/sherlock-kit@v0.13.0'
 ```
 
-`shk --version` then prints `sherlock-kit 0.12.0 (git <commit>)`. The pin
+`shk --version` then prints `sherlock-kit 0.13.0 (git <commit>)`. The pin
 decides which `shk` runs; `[tool.sherlock-kit]` (step 2 below) describes the
 project. `shk` releases often: name the version in that one tag and the lock
 file, not in the project's code, tests, job scripts or guides, so that an
